@@ -6,92 +6,60 @@ pub use linear::*;
 pub use page::*;
 pub use unpooled::*;
 
-use std::{
-    any::type_name, collections::HashMap, convert::Infallible, fmt::Debug, marker::PhantomData,
-};
+use std::{collections::HashMap, convert::Infallible, fmt::Debug, marker::PhantomData};
 
 use ash::vk;
 use type_kit::{
-    Create, CreateResult, Destroy, DestroyResult, DropGuardError, FromGuard, GenIndexRaw,
-    GuardCollection, GuardIndex, ScopedEntry, ScopedEntryResult, ScopedInnerMut, ScopedInnerRef,
-    TypeGuard, TypeGuardCollection, TypedIndex, Valid,
+    Create, CreateResult, Destroy, DestroyResult, DropGuardError, FromGuard, GenIndex, GenIndexRaw,
+    GuardCollection, GuardIndex, ScopedEntryResult, ScopedInnerMut, TypeGuard, TypeGuardCollection,
+    TypedIndex, Valid,
 };
 
 use crate::context::{
     device::{
-        memory::{DeviceLocal, HostCoherent, HostVisible, MemoryProperties},
+        memory::{DeviceLocal, HostCoherent, HostVisible, MemoryProperties, MemoryTypeInfo},
         resources::buffer::ByteRange,
     },
     error::{AllocatorError, AllocatorResult, ResourceResult},
     Context,
 };
 
-use super::resources::{
-    memory::{Memory, MemoryRaw},
-    ResourceIndex,
-};
-
-pub struct Allocation<M: MemoryProperties> {
-    range: ByteRange,
-    memory: ResourceIndex<Memory<M>>,
-    _phantom: PhantomData<M>,
-}
-
-impl<M: MemoryProperties> Debug for Allocation<M> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Allocation")
-            .field("range", &self.range)
-            .field("memory", &self.memory)
-            .field("memory_type", &type_name::<M>())
-            .finish()
-    }
-}
-
-impl<M: MemoryProperties> Allocation<M> {
-    #[inline]
-    pub fn new(memory: ResourceIndex<Memory<M>>, range: ByteRange) -> Self {
-        Self {
-            range,
-            memory,
-            _phantom: PhantomData,
-        }
-    }
-}
+use super::resources::{memory::Memory, ResourceIndex};
 
 #[derive(Debug, Clone, Copy)]
-pub struct AllocationRaw {
+pub struct Allocation {
     range: ByteRange,
-    memory: TypeGuard<GenIndexRaw>,
+    memory: ResourceIndex<Memory>,
 }
 
-impl<M: MemoryProperties> From<Valid<Allocation<M>>> for Allocation<M> {
-    fn from(value: Valid<Allocation<M>>) -> Self {
-        let AllocationRaw { range, memory } = value.into_inner();
-        let memory: Valid<ResourceIndex<Memory<M>>> = memory.try_into().unwrap();
-        let memory = memory.into();
-        Self {
-            range,
-            memory,
-            _phantom: PhantomData,
-        }
+impl Allocation {
+    #[inline]
+    pub fn new(memory: ResourceIndex<Memory>, range: ByteRange) -> Self {
+        Self { range, memory }
     }
 }
 
-impl<M: MemoryProperties> FromGuard for Allocation<M> {
-    type Inner = AllocationRaw;
+impl From<Valid<Allocation>> for Allocation {
+    #[inline]
+    fn from(value: Valid<Allocation>) -> Self {
+        let allocation: Allocation = value.into_inner();
+        allocation
+    }
+}
 
+impl FromGuard for Allocation {
+    type Inner = Allocation;
+
+    #[inline]
     fn into_inner(self) -> Self::Inner {
-        AllocationRaw {
-            range: self.range,
-            memory: self.memory.into_guard(),
-        }
+        self
     }
 }
 
 #[derive(Debug, Default)]
 struct MemoryMap {
     usage: HashMap<TypeGuard<GenIndexRaw>, usize>,
-    memory: GuardCollection<MemoryRaw>,
+    memory: GuardCollection<Memory>,
 }
 
 impl MemoryMap {
@@ -104,16 +72,13 @@ impl MemoryMap {
     }
 
     #[inline]
-    fn register<M: MemoryProperties>(&mut self, allocation: &Allocation<M>) {
+    fn register(&mut self, allocation: &Allocation) {
         let memory = allocation.memory.clone().into_guard();
         *self.usage.entry(memory).or_default() += 1;
     }
 
     #[inline]
-    fn pop<M: MemoryProperties>(
-        &mut self,
-        allocation: Allocation<M>,
-    ) -> AllocatorResult<Option<ResourceIndex<Memory<M>>>> {
+    fn pop(&mut self, allocation: Allocation) -> AllocatorResult<Option<ResourceIndex<Memory>>> {
         let memory = allocation.memory.clone().into_guard();
         let count = self
             .usage
@@ -128,12 +93,12 @@ impl MemoryMap {
         }
     }
 
-    fn drain<M: MemoryProperties>(&mut self) -> Vec<ResourceIndex<Memory<M>>> {
+    fn drain(&mut self) -> Vec<ResourceIndex<Memory>> {
         let (valid, rest): (Vec<_>, Vec<_>) = self
             .usage
             .drain()
             .map(|(memory, count)| {
-                ResourceIndex::<Memory<M>>::try_from_guard(memory)
+                ResourceIndex::<Memory>::try_from_guard(memory)
                     .map_err(|(memory, _)| (memory, count))
             })
             .partition(Result::is_ok);
@@ -142,8 +107,8 @@ impl MemoryMap {
     }
 
     #[inline]
-    fn free_memory_type<M: MemoryProperties>(&mut self, context: &Context) {
-        for memory in self.drain::<M>().into_iter() {
+    fn free_memory(&mut self, context: &Context) {
+        for memory in self.drain().into_iter() {
             context.destroy_resource(memory).unwrap();
         }
     }
@@ -189,7 +154,7 @@ pub trait State: Into<AllocatorState> {
 
 #[derive(Debug)]
 pub struct AllocatorInner {
-    allocations: TypeGuardCollection<AllocationRaw>,
+    allocations: TypeGuardCollection<Allocation>,
     memory_map: MemoryMap,
     state: AllocatorState,
 }
@@ -210,9 +175,7 @@ impl Destroy for AllocatorInner {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.memory_map.free_memory_type::<DeviceLocal>(context);
-        self.memory_map.free_memory_type::<HostVisible>(context);
-        self.memory_map.free_memory_type::<HostCoherent>(context);
+        self.memory_map.free_memory(context);
         Ok(())
     }
 }
@@ -234,17 +197,17 @@ impl<S: Strategy> FromGuard for Allocator<S> {
     }
 }
 
-pub struct AllocationRequest<M: MemoryProperties> {
+pub struct AllocationRequest {
     requirements: vk::MemoryRequirements,
-    _phantom: PhantomData<M>,
+    pub memory_type_info: MemoryTypeInfo,
 }
 
-impl<M: MemoryProperties> AllocationRequest<M> {
+impl AllocationRequest {
     #[inline]
-    pub fn new(requirements: vk::MemoryRequirements) -> Self {
+    pub fn new(memory_type_info: MemoryTypeInfo, requirements: vk::MemoryRequirements) -> Self {
         Self {
             requirements,
-            _phantom: PhantomData,
+            memory_type_info,
         }
     }
 }
@@ -253,16 +216,18 @@ pub trait Strategy: 'static + Sized {
     type State: State;
     type CreateConfig<'a>: Into<Self::State>;
 
-    fn allocate<'a, M: MemoryProperties>(
-        allocator: ScopedInnerMut<'a, Allocator<Self>>,
-        context: &Context,
-        req: AllocationRequest<M>,
-    ) -> ResourceResult<AllocationIndex<M>>;
+    fn wrap_index(index: GuardIndex<Allocator<Self>>) -> AllocatorIndex;
 
-    fn free<'a, M: MemoryProperties>(
+    fn allocate<'a>(
         allocator: ScopedInnerMut<'a, Allocator<Self>>,
         context: &Context,
-        allocation: AllocationIndex<M>,
+        req: AllocationRequest,
+    ) -> ResourceResult<AllocationIndex>;
+
+    fn free<'a>(
+        allocator: ScopedInnerMut<'a, Allocator<Self>>,
+        context: &Context,
+        allocation: AllocationIndex,
     ) -> ResourceResult<()>;
 }
 
@@ -278,11 +243,11 @@ impl<S: Strategy> Allocator<S> {
     #[inline]
     pub fn access<'a, M: MemoryProperties>(
         &'a self,
-        index: AllocationIndex<M>,
-    ) -> ScopedEntryResult<'a, Allocation<M>> {
+        index: AllocationIndex,
+    ) -> ScopedEntryResult<'a, Allocation> {
         self.inner
             .allocations
-            .entry(TypedIndex::<Allocation<M>>::new(index))
+            .entry(TypedIndex::<Allocation>::new(index.into_inner()))
     }
 }
 
@@ -327,12 +292,9 @@ impl From<vk::Buffer> for BindResource {
 }
 
 impl Context {
-    pub fn get_memory_type_index<M: MemoryProperties>(
-        &self,
-        req: &AllocationRequest<M>,
-    ) -> AllocatorResult<u32> {
+    pub fn get_memory_type_index(&self, req: &AllocationRequest) -> AllocatorResult<u32> {
         let memory_type_bits = req.requirements.memory_type_bits;
-        let memory_properties = M::properties();
+        let memory_properties = req.memory_type_info.properties;
 
         self.physical_device
             .properties
@@ -351,81 +313,48 @@ impl Context {
             })
             .ok_or(AllocatorError::UnsupportedMemoryType)
     }
-
-    // pub fn bind_resource_memory<R: Into<BindResource>, S: Strategy, M: MemoryProperties>(
-    //     &self,
-    //     resource: R,
-    //     allocation: AllocationEntry<S, M>,
-    // ) -> ResourceResult<()> {
-    //     let AllocationEntry { allocation, allocator } = allocation;
-    //     let allocator = self.
-    //     let resource = resource.into();
-    //     let memory = self
-    //         .resources
-    //         .memory
-    //         .inner(allocation.allocation.memory)
-    //         .unwrap();
-    //     match resource {
-    //         BindResource::Image(image) => unsafe {
-    //             self.device
-    //                 .bind_image_memory(image, memory.memory, memory.range.start)?;
-    //         },
-    //         BindResource::Buffer(buffer) => unsafe {
-    //             self.device
-    //                 .bind_buffer_memory(buffer, memory.memory, memory.range.start)?;
-    //         },
-    //     }
-    //     Ok(())
-    // }
-}
-
-pub type AllocatorIndex<T> = GuardIndex<Allocator<T>>;
-pub type AllocationIndex<T> = GuardIndex<Allocation<T>>;
-
-#[derive(Debug)]
-pub struct AllocationEntry<S: Strategy, M: MemoryProperties> {
-    allocator: AllocatorIndex<S>,
-    allocation: AllocationIndex<M>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct AllocationEntryRaw {
-    allocator: TypeGuard<GenIndexRaw>,
-    allocation: TypeGuard<GenIndexRaw>,
+pub enum AllocatorIndex {
+    Linear(GuardIndex<Allocator<Linear>>),
+    Page(GuardIndex<Allocator<Page>>),
+    Unpooled(GuardIndex<Allocator<Unpooled>>),
 }
 
-impl<S: Strategy, M: MemoryProperties> From<Valid<AllocationEntry<S, M>>>
-    for AllocationEntry<S, M>
-{
+impl AllocatorIndex {
     #[inline]
-    fn from(value: Valid<AllocationEntry<S, M>>) -> Self {
-        let AllocationEntryRaw {
-            allocator,
-            allocation,
-        } = value.into_inner();
-        Self {
-            allocator: {
-                let allocator: Valid<AllocatorIndex<S>> = allocator.try_into().unwrap();
-                allocator.into()
-            },
-            allocation: {
-                let allocation: Valid<AllocationIndex<M>> = allocation.try_into().unwrap();
-                allocation.into()
-            },
+    pub fn into_inner(self) -> GenIndex<TypeGuard<AllocatorInner>> {
+        match self {
+            AllocatorIndex::Linear(index) => index,
+            AllocatorIndex::Page(index) => index,
+            AllocatorIndex::Unpooled(index) => index,
         }
     }
 }
 
-impl<S: Strategy, M: MemoryProperties> FromGuard for AllocationEntry<S, M> {
-    type Inner = AllocationEntryRaw;
+#[derive(Debug, Clone, Copy)]
+pub enum AllocationIndex {
+    HostCoherent(GuardIndex<Allocation>),
+    HostVisible(GuardIndex<Allocation>),
+    DeviceLocal(GuardIndex<Allocation>),
+}
 
+impl AllocationIndex {
     #[inline]
-    fn into_inner(self) -> Self::Inner {
-        AllocationEntryRaw {
-            allocator: self.allocator.into_guard(),
-            allocation: self.allocation.into_guard(),
+    pub fn into_inner(self) -> GuardIndex<Allocation> {
+        match self {
+            AllocationIndex::HostCoherent(index) => index,
+            AllocationIndex::HostVisible(index) => index,
+            AllocationIndex::DeviceLocal(index) => index,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AllocationEntry {
+    allocator: AllocatorIndex,
+    allocation: AllocationIndex,
 }
 
 pub struct AllocatorStorage {
@@ -445,31 +374,40 @@ impl AllocatorStorage {
         &mut self,
         context: &'a Context,
         config: S::CreateConfig<'b>,
-    ) -> ResourceResult<AllocatorIndex<S>> {
+    ) -> ResourceResult<AllocatorIndex> {
         let allocator = Allocator::<S>::create(config, context)?;
         let index = self.allocators.push(allocator.into_guard())?;
-        Ok(index)
+        Ok(S::wrap_index(index))
     }
 
     #[inline]
-    pub fn destroy_allocator<S: Strategy>(
+    pub fn destroy_allocator(
         &mut self,
         context: &Context,
-        index: AllocatorIndex<S>,
+        index: AllocatorIndex,
     ) -> ResourceResult<()> {
-        let _ = self.allocators.pop(index)?.destroy(context);
+        let _ = self.allocators.pop(index.into_inner())?.destroy(context);
         Ok(())
     }
 
     #[inline]
-    pub fn allocate<M: MemoryProperties, S: Strategy>(
+    pub fn allocate(
         &mut self,
         context: &Context,
-        index: AllocatorIndex<S>,
-        req: AllocationRequest<M>,
-    ) -> ResourceResult<AllocationEntry<S, M>> {
-        let allocator = self.allocators.inner_mut(index.clone())?;
-        let allocation = S::allocate(allocator, context, req)?;
+        index: AllocatorIndex,
+        req: AllocationRequest,
+    ) -> ResourceResult<AllocationEntry> {
+        let allocation = match index {
+            AllocatorIndex::Linear(_) => {
+                Linear::allocate(self.allocators.inner_mut(index.into_inner())?, context, req)
+            }
+            AllocatorIndex::Page(_) => {
+                Page::allocate(self.allocators.inner_mut(index.into_inner())?, context, req)
+            }
+            AllocatorIndex::Unpooled(_) => {
+                Unpooled::allocate(self.allocators.inner_mut(index.into_inner())?, context, req)
+            }
+        }?;
         let entry = AllocationEntry {
             allocator: index,
             allocation,
@@ -478,24 +416,24 @@ impl AllocatorStorage {
     }
 
     #[inline]
-    pub fn free<M: MemoryProperties, S: Strategy>(
-        &mut self,
-        context: &Context,
-        index: AllocationEntry<S, M>,
-    ) -> ResourceResult<()> {
-        let allocator = self.allocators.inner_mut(index.allocator)?;
-        S::free::<M>(allocator, context, index.allocation)?;
+    pub fn free(&mut self, context: &Context, index: AllocationEntry) -> ResourceResult<()> {
+        let AllocationEntry {
+            allocator,
+            allocation,
+        } = index;
+        match allocator {
+            AllocatorIndex::Linear(index) => {
+                Linear::free(self.allocators.inner_mut(index)?, context, allocation)
+            }
+            AllocatorIndex::Page(index) => {
+                Page::free(self.allocators.inner_mut(index)?, context, allocation)
+            }
+            AllocatorIndex::Unpooled(index) => {
+                Unpooled::free(self.allocators.inner_mut(index)?, context, allocation)
+            }
+        }?;
         Ok(())
     }
-
-    // #[inline]
-    // pub fn access<'a, S: Strategy, M: MemoryProperties>(
-    //     &'a self,
-    //     index: AllocationEntry<S, M>,
-    // ) -> ScopedEntryResult<'a, Allocation<M>> {
-    //     let allocator: ScopedInnerRef<Allocator<S>> = self.allocators.inner_ref(index.allocator)?;
-    //     allocator.allocations.entry(index.allocation)
-    // }
 }
 
 impl Destroy for AllocatorStorage {

@@ -1,35 +1,27 @@
-use std::{
-    any::type_name,
-    convert::Infallible,
-    ffi::c_void,
-    fmt::{Debug, Formatter},
-    marker::PhantomData,
-};
+use std::{convert::Infallible, ffi::c_void, fmt::Debug};
 
 use ash::vk;
 use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardUnlocked};
 
-use crate::context::{device::memory::MemoryProperties, error::ResourceError, Context};
+use crate::context::{error::ResourceError, Context};
 
 use super::Resource;
 
 #[derive(Debug, Clone, Copy)]
-pub struct MemoryAllocateInfo<M: MemoryProperties> {
+pub struct MemoryAllocateInfo {
     info: vk::MemoryAllocateInfo,
-    _phantom: PhantomData<M>,
 }
 
-impl<M: MemoryProperties> Default for MemoryAllocateInfo<M> {
+impl Default for MemoryAllocateInfo {
     #[inline]
     fn default() -> Self {
         Self {
             info: vk::MemoryAllocateInfo::default(),
-            _phantom: PhantomData,
         }
     }
 }
 
-impl<M: MemoryProperties> MemoryAllocateInfo<M> {
+impl MemoryAllocateInfo {
     #[inline]
     pub fn new() -> Self {
         Self::default()
@@ -49,46 +41,15 @@ impl<M: MemoryProperties> MemoryAllocateInfo<M> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct MemoryRaw {
+pub struct Memory {
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
     type_index: u32,
     ptr: Option<*mut c_void>,
 }
 
-pub struct Memory<M: MemoryProperties> {
-    memory: vk::DeviceMemory,
-    size: vk::DeviceSize,
-    type_index: u32,
-    ptr: Option<*mut c_void>,
-    _phantom: PhantomData<M>,
-}
-
-impl<M: MemoryProperties> Clone for Memory<M> {
-    fn clone(&self) -> Self {
-        Self {
-            memory: self.memory,
-            size: self.size,
-            type_index: self.type_index,
-            ptr: self.ptr,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<M: MemoryProperties> Debug for Memory<M> {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("Memory")
-            .field("memory", &self.memory)
-            .field("size", &self.size)
-            .field("ptr", &self.ptr)
-            .field("memory_type", &type_name::<M>())
-            .finish()
-    }
-}
-
-impl<M: MemoryProperties> Create for Memory<M> {
-    type Config<'a> = MemoryAllocateInfo<M>;
+impl Create for Memory {
+    type Config<'a> = MemoryAllocateInfo;
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(
@@ -101,13 +62,12 @@ impl<M: MemoryProperties> Create for Memory<M> {
             size: info.allocation_size,
             type_index: info.memory_type_index,
             ptr: None,
-            _phantom: PhantomData,
         };
         Ok(memory)
     }
 }
 
-impl Destroy for MemoryRaw {
+impl Destroy for Memory {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
@@ -119,49 +79,22 @@ impl Destroy for MemoryRaw {
     }
 }
 
-impl<M: MemoryProperties> Destroy for Memory<M> {
-    type Context<'a> = &'a Context;
-    type DestroyError = Infallible;
-
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        unsafe {
-            context.free_memory(self.memory, None);
-        }
-        Ok(())
+impl From<TypeGuardUnlocked<Memory, Memory>> for Memory {
+    #[inline]
+    fn from(guard: TypeGuardUnlocked<Memory, Memory>) -> Self {
+        guard.into_inner()
     }
 }
 
-impl<M: MemoryProperties> From<TypeGuardUnlocked<MemoryRaw, Memory<M>>> for Memory<M> {
-    fn from(value: TypeGuardUnlocked<MemoryRaw, Memory<M>>) -> Self {
-        let MemoryRaw {
-            memory,
-            size,
-            type_index,
-            ptr,
-        } = value.into_inner();
-        Self {
-            memory,
-            size,
-            type_index,
-            ptr,
-            _phantom: PhantomData,
-        }
-    }
-}
+impl FromGuard for Memory {
+    type Inner = Memory;
 
-impl<M: MemoryProperties> FromGuard for Memory<M> {
-    type Inner = MemoryRaw;
-
+    #[inline]
     fn into_inner(self) -> Self::Inner {
-        MemoryRaw {
-            memory: self.memory,
-            size: self.size,
-            type_index: self.type_index,
-            ptr: self.ptr,
-        }
+        self
     }
 }
 
-impl<M: MemoryProperties> Resource for Memory<M> {
-    type RawType = MemoryRaw;
+impl Resource for Memory {
+    type RawType = Self;
 }

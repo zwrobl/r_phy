@@ -1,13 +1,13 @@
 use std::convert::Infallible;
 
-use type_kit::{
-    Create, Destroy, DestroyResult, FromGuard, GenCollection, GenIndexRaw, TypeGuard, Valid,
-};
+use type_kit::{Create, Destroy, DestroyResult, FromGuard, GenCollection, Valid};
 
 use crate::context::{
     device::{
-        memory::MemoryProperties,
-        raw::resources::{memory::Memory, ResourceIndex},
+        raw::{
+            allocator::{AllocationRequest, Allocator, AllocatorIndex},
+            resources::{memory::Memory, ResourceIndex},
+        },
         resources::buffer::ByteRange,
     },
     error::{AllocatorError, ResourceResult},
@@ -16,35 +16,25 @@ use crate::context::{
 
 use super::{AllocationIndex, AllocatorState, State, Strategy};
 
-pub struct LinearBuffer<M: MemoryProperties> {
-    memory: ResourceIndex<Memory<M>>,
+pub struct LinearBuffer {
+    memory: ResourceIndex<Memory>,
     range: ByteRange,
 }
 
-pub struct LinearBufferRaw {
-    memory: TypeGuard<GenIndexRaw>,
-    range: ByteRange,
-}
-
-impl<M: MemoryProperties> From<Valid<LinearBuffer<M>>> for LinearBuffer<M> {
+impl From<Valid<LinearBuffer>> for LinearBuffer {
     #[inline]
-    fn from(value: Valid<LinearBuffer<M>>) -> Self {
-        let LinearBufferRaw { memory, range } = value.into_inner();
-        let memory: Valid<ResourceIndex<Memory<M>>> = memory.try_into().unwrap();
-        let memory = memory.into();
-        Self { memory, range }
+    fn from(value: Valid<LinearBuffer>) -> Self {
+        let buffer = value.into_inner();
+        buffer
     }
 }
 
-impl<M: MemoryProperties> FromGuard for LinearBuffer<M> {
-    type Inner = LinearBufferRaw;
+impl FromGuard for LinearBuffer {
+    type Inner = LinearBuffer;
 
     #[inline]
     fn into_inner(self) -> Self::Inner {
-        LinearBufferRaw {
-            memory: self.memory.into_guard(),
-            range: self.range,
-        }
+        self
     }
 }
 
@@ -78,7 +68,7 @@ impl State for LinearState {
 }
 
 pub struct Linear {
-    buffers: GenCollection<LinearBufferRaw>,
+    buffers: GenCollection<LinearBuffer>,
 }
 
 impl Linear {
@@ -117,18 +107,23 @@ impl Strategy for Linear {
     type State = LinearState;
     type CreateConfig<'a> = LinearConfig;
 
-    fn allocate<'a, M: MemoryProperties>(
-        allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
+    #[inline]
+    fn wrap_index(index: type_kit::GuardIndex<Allocator<Self>>) -> AllocatorIndex {
+        AllocatorIndex::Linear(index)
+    }
+
+    fn allocate<'a>(
+        allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
         context: &crate::Context,
-        req: super::AllocationRequest<M>,
-    ) -> ResourceResult<AllocationIndex<M>> {
+        req: AllocationRequest,
+    ) -> ResourceResult<AllocationIndex> {
         todo!()
     }
 
-    fn free<'a, M: MemoryProperties>(
-        allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
+    fn free<'a>(
+        allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
         context: &crate::Context,
-        allocation: super::AllocationIndex<M>,
+        allocation: AllocationIndex,
     ) -> ResourceResult<()> {
         todo!()
     }

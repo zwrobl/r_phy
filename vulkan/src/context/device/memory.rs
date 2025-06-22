@@ -9,13 +9,32 @@ use std::{
 };
 
 use ash::{self, vk};
+use type_kit::{GenIndex, GuardIndex, TypeGuard};
+
+use crate::context::device::raw::allocator::{Allocation, AllocationIndex};
 
 use super::{resources::buffer::ByteRange, Device};
 
 pub use allocator::*;
 
-pub trait MemoryProperties: 'static {
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryTypeInfo {
+    pub properties: vk::MemoryPropertyFlags,
+    pub wrap_index: fn(GenIndex<TypeGuard<Allocation>>) -> AllocationIndex,
+}
+
+pub trait MemoryProperties: 'static + Sized {
     fn properties() -> vk::MemoryPropertyFlags;
+
+    fn wrap_index(index: GuardIndex<Allocation>) -> AllocationIndex;
+
+    #[inline]
+    fn get_memory_type_info() -> MemoryTypeInfo {
+        MemoryTypeInfo {
+            properties: Self::properties(),
+            wrap_index: Self::wrap_index,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -24,6 +43,11 @@ pub struct HostVisible;
 impl MemoryProperties for HostVisible {
     fn properties() -> vk::MemoryPropertyFlags {
         vk::MemoryPropertyFlags::HOST_VISIBLE
+    }
+
+    #[inline]
+    fn wrap_index(index: GuardIndex<Allocation>) -> AllocationIndex {
+        AllocationIndex::HostVisible(index)
     }
 }
 
@@ -34,6 +58,11 @@ impl MemoryProperties for HostCoherent {
     fn properties() -> vk::MemoryPropertyFlags {
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT
     }
+
+    #[inline]
+    fn wrap_index(index: GuardIndex<Allocation>) -> AllocationIndex {
+        AllocationIndex::HostCoherent(index)
+    }
 }
 
 #[derive(Debug)]
@@ -42,6 +71,11 @@ pub struct DeviceLocal;
 impl MemoryProperties for DeviceLocal {
     fn properties() -> vk::MemoryPropertyFlags {
         vk::MemoryPropertyFlags::DEVICE_LOCAL
+    }
+
+    #[inline]
+    fn wrap_index(index: GuardIndex<Allocation>) -> AllocationIndex {
+        AllocationIndex::DeviceLocal(index)
     }
 }
 
@@ -161,29 +195,3 @@ impl<M: MemoryProperties> Memory for MemoryChunk<M> {
         }
     }
 }
-
-// // pub type DeviceAllocatorContext<'a, A> = (&'a Device, &'a RefCell<&'a mut A>);
-
-// #[derive(Debug)]
-// pub struct DeviceAllocatorContext<'a, A> {
-//     device: &'a Device,
-//     allocator: RefCell<&'a mut A>,
-// }
-
-// // impl<'a, A> DeviceAllocatorContext<'a, A> {
-// //     pub fn get_context(&self) -> (&Device, &RefCell<&mut A>) {
-// //         (self.device, &self.allocator)
-// //     }
-// // }
-
-// impl Device {
-//     pub fn device_allocatr_context<'a, A>(
-//         &'a self,
-//         allocator: &'a mut A,
-//     ) -> DeviceAllocatorContext<'a, A> {
-//         DeviceAllocatorContext {
-//             device: self,
-//             allocator: RefCell::new(allocator),
-//         }
-//     }
-// }

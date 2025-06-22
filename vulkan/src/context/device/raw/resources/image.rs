@@ -7,10 +7,8 @@ use type_kit::{
 
 use crate::context::{
     device::{
-        memory::MemoryProperties,
-        raw::allocator::{
-            AllocationEntry, AllocationEntryRaw, AllocationRequest, AllocatorIndex, Strategy,
-        },
+        memory::{MemoryProperties, MemoryTypeInfo},
+        raw::allocator::{AllocationEntry, AllocationRequest, AllocatorIndex},
     },
     error::ResourceError,
     Context,
@@ -91,15 +89,16 @@ impl Default for ArrayInfo {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ImageCreateInfo<S: Strategy, M: MemoryProperties, V: ImageType> {
-    allocator: AllocatorIndex<S>,
+pub struct ImageCreateInfo<V: ImageType> {
+    allocator: AllocatorIndex,
+    memory_type_info: MemoryTypeInfo,
     image_info: ImageInfo,
     mip_info: Option<MipInfo>,
     array_info: Option<ArrayInfo>,
-    _phantom: PhantomData<(M, V)>,
+    _phantom: PhantomData<V>,
 }
 
-impl<S: Strategy, M: MemoryProperties, V: ImageType> ImageCreateInfo<S, M, V> {
+impl<V: ImageType> ImageCreateInfo<V> {
     pub fn with_mip_enabled(mut self) -> Self {
         let max_mip_levels = MipInfo::get_max_for_extent(self.image_info.extent);
         self.mip_info = Some(MipInfo {
@@ -177,31 +176,32 @@ impl<S: Strategy, M: MemoryProperties, V: ImageType> ImageCreateInfo<S, M, V> {
         }
     }
 
-    fn get_allocation_request(&self, context: &Context, image: vk::Image) -> AllocationRequest<M> {
+    fn get_allocation_request(&self, context: &Context, image: vk::Image) -> AllocationRequest {
         let requirements = unsafe { context.get_image_memory_requirements(image) };
-        AllocationRequest::new(requirements)
+        AllocationRequest::new(self.memory_type_info, requirements)
     }
 }
 
 #[derive(Debug)]
-pub struct Image<S: Strategy, M: MemoryProperties, V: ImageType> {
+pub struct Image<V: ImageType> {
     handle: vk::Image,
     extent: vk::Extent3D,
     format: vk::Format,
     layout: vk::ImageLayout,
     usage: vk::ImageUsageFlags,
     view: ResourceIndex<ImageView<V>>,
-    memory: AllocationEntry<S, M>,
+    memory: AllocationEntry,
 }
 
-impl<S: Strategy, M: MemoryProperties, V: ImageType> Image<S, M, V> {
+impl<V: ImageType> Image<V> {
     #[inline]
-    pub fn create_info(
-        allocator: AllocatorIndex<S>,
+    pub fn create_info<M: MemoryProperties>(
+        allocator: AllocatorIndex,
         image_info: ImageInfo,
-    ) -> ImageCreateInfo<S, M, V> {
+    ) -> ImageCreateInfo<V> {
         ImageCreateInfo {
             allocator,
+            memory_type_info: M::get_memory_type_info(),
             image_info,
             mip_info: None,
             array_info: None,
@@ -218,14 +218,12 @@ pub struct ImageRaw {
     layout: vk::ImageLayout,
     usage: vk::ImageUsageFlags,
     view: TypeGuard<GenIndexRaw>,
-    memory: TypeGuard<AllocationEntryRaw>,
+    memory: AllocationEntry,
 }
 
-impl<S: Strategy, M: MemoryProperties, V: ImageType> From<Valid<Image<S, M, V>>>
-    for Image<S, M, V>
-{
+impl<V: ImageType> From<Valid<Image<V>>> for Image<V> {
     #[inline]
-    fn from(guard: Valid<Image<S, M, V>>) -> Self {
+    fn from(guard: Valid<Image<V>>) -> Self {
         let inner = guard.into_inner();
         Self {
             handle: inner.handle,
@@ -233,10 +231,7 @@ impl<S: Strategy, M: MemoryProperties, V: ImageType> From<Valid<Image<S, M, V>>>
             format: inner.format,
             layout: inner.layout,
             usage: inner.usage,
-            memory: {
-                let memory: Valid<AllocationEntry<S, M>> = inner.memory.try_into().unwrap();
-                memory.into()
-            },
+            memory: inner.memory,
             view: {
                 let view: Valid<ResourceIndex<ImageView<V>>> = inner.view.try_into().unwrap();
                 view.into()
@@ -245,7 +240,7 @@ impl<S: Strategy, M: MemoryProperties, V: ImageType> From<Valid<Image<S, M, V>>>
     }
 }
 
-impl<S: Strategy, M: MemoryProperties, V: ImageType> FromGuard for Image<S, M, V> {
+impl<V: ImageType> FromGuard for Image<V> {
     type Inner = ImageRaw;
 
     #[inline]
@@ -256,18 +251,18 @@ impl<S: Strategy, M: MemoryProperties, V: ImageType> FromGuard for Image<S, M, V
             format: self.format,
             layout: self.layout,
             usage: self.usage,
-            memory: self.memory.into_guard(),
+            memory: self.memory,
             view: self.view.into_guard(),
         }
     }
 }
 
-impl<S: Strategy, M: MemoryProperties, V: ImageType> Resource for Image<S, M, V> {
+impl<V: ImageType> Resource for Image<V> {
     type RawType = ImageRaw;
 }
 
-impl<S: Strategy, M: MemoryProperties, V: ImageType> Create for Image<S, M, V> {
-    type Config<'a> = ImageCreateInfo<S, M, V>;
+impl<V: ImageType> Create for Image<V> {
+    type Config<'a> = ImageCreateInfo<V>;
     type CreateError = ResourceError;
 
     #[inline]
@@ -292,7 +287,7 @@ impl<S: Strategy, M: MemoryProperties, V: ImageType> Create for Image<S, M, V> {
     }
 }
 
-impl<S: Strategy, M: MemoryProperties, V: ImageType> Destroy for Image<S, M, V> {
+impl<V: ImageType> Destroy for Image<V> {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 

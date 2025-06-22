@@ -270,35 +270,35 @@ impl Context {
     pub fn create_allocator<'a, S: Strategy>(
         &self,
         config: S::CreateConfig<'a>,
-    ) -> ResourceResult<AllocatorIndex<S>> {
+    ) -> ResourceResult<AllocatorIndex> {
         self.allocators
             .borrow_mut()
             .create_allocator::<S>(self, config)
     }
 
     #[inline]
-    pub fn destroy_allocator<'a, S: Strategy>(
+    pub fn destroy_allocator(
         &self,
-        index: AllocatorIndex<S>,
+        index: AllocatorIndex,
     ) -> ResourceResult<()> {
         self.allocators
             .borrow_mut()
-            .destroy_allocator::<S>(self, index)
+            .destroy_allocator(self, index)
     }
 
     #[inline]
-    pub fn allocate<P: MemoryProperties, S: Strategy>(
+    pub fn allocate(
         &self,
-        index: AllocatorIndex<S>,
-        req: AllocationRequest<P>,
-    ) -> ResourceResult<AllocationEntry<S, P>> {
+        index: AllocatorIndex,
+        req: AllocationRequest,
+    ) -> ResourceResult<AllocationEntry> {
         self.allocators.borrow_mut().allocate(self, index, req)
     }
 
     #[inline]
-    pub fn free<P: MemoryProperties, S: Strategy>(
+    pub fn free(
         &self,
-        index: AllocationEntry<S, P>,
+        index: AllocationEntry,
     ) -> ResourceResult<()> {
         self.allocators.borrow_mut().free(self, index)
     }

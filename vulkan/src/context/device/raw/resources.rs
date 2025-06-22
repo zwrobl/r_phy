@@ -6,7 +6,6 @@ use std::convert::Infallible;
 
 use buffer::BufferRaw;
 use image::{ImageRaw, ImageViewRaw};
-use memory::MemoryRaw;
 use type_kit::{
     list_type, BorrowList, Cons, Contains, Conv, Create, Destroy, DestroyResult, DropGuardError,
     FromGuard, GenCollectionResult, GenIndexRaw, GuardIndex, IndexList, Marked, Marker, Nil,
@@ -14,6 +13,7 @@ use type_kit::{
 };
 
 use crate::context::{
+    device::raw::resources::memory::Memory,
     error::{ResourceError, ResourceResult},
     Context,
 };
@@ -53,7 +53,7 @@ impl<R: Resource> From<Valid<ResourceIndex<R>>> for ResourceIndex<R> {
 
 pub type RawCollection<R> = TypeGuardCollection<<R as Resource>::RawType>;
 pub type ResourceStorageList = list_type![
-    TypeGuardCollection<MemoryRaw>,
+    TypeGuardCollection<Memory>,
     TypeGuardCollection<BufferRaw>,
     TypeGuardCollection<ImageRaw>,
     TypeGuardCollection<ImageViewRaw>,
@@ -109,7 +109,7 @@ impl ResourceStorage {
     pub fn entry<'a, R: Resource, M: Marker>(
         &'a self,
         index: ResourceIndex<R>,
-    ) -> ScopedEntryResult<R>
+    ) -> ScopedEntryResult<'a, R>
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
@@ -188,7 +188,7 @@ impl Destroy for ResourceStorage {
         self.destroy_resource_storage::<ImageViewRaw, _>(context)?;
         self.destroy_resource_storage::<ImageRaw, _>(context)?;
         self.destroy_resource_storage::<BufferRaw, _>(context)?;
-        self.destroy_resource_storage::<MemoryRaw, _>(context)?;
+        self.destroy_resource_storage::<Memory, _>(context)?;
         Ok(())
     }
 }

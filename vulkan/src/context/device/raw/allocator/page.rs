@@ -3,7 +3,10 @@ use std::convert::Infallible;
 use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::context::{
-    device::memory::MemoryProperties,
+    device::{
+        memory::MemoryProperties,
+        raw::allocator::{AllocationRequest, Allocator, AllocatorIndex},
+    },
     error::{AllocatorError, ResourceResult},
     Context,
 };
@@ -87,19 +90,24 @@ impl Strategy for Page {
     type CreateConfig<'a> = PageConfig;
 
     #[inline]
-    fn allocate<'a, M: MemoryProperties>(
-        allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
+    fn wrap_index(index: type_kit::GuardIndex<Allocator<Self>>) -> AllocatorIndex {
+        AllocatorIndex::Page(index)
+    }
+
+    #[inline]
+    fn allocate<'a>(
+        allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
         context: &crate::Context,
-        req: super::AllocationRequest<M>,
-    ) -> ResourceResult<AllocationIndex<M>> {
+        req: AllocationRequest,
+    ) -> ResourceResult<AllocationIndex> {
         todo!()
     }
 
     #[inline]
-    fn free<'a, M: MemoryProperties>(
-        allocator: type_kit::ScopedInnerMut<'a, super::Allocator<Self>>,
+    fn free<'a>(
+        allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
         context: &crate::Context,
-        allocation: super::AllocationIndex<M>,
+        allocation: AllocationIndex,
     ) -> ResourceResult<()> {
         todo!()
     }

@@ -4,10 +4,12 @@ use type_kit::{Create, Destroy, DestroyResult, FromGuard, ScopedInnerMut};
 
 use crate::context::{
     device::{
-        memory::MemoryProperties,
-        raw::resources::{
-            memory::{Memory, MemoryAllocateInfo},
-            ResourceIndex,
+        raw::{
+            allocator::AllocatorIndex,
+            resources::{
+                memory::{Memory, MemoryAllocateInfo},
+                ResourceIndex,
+            },
         },
         resources::buffer::ByteRange,
     },
@@ -41,29 +43,35 @@ impl Strategy for Unpooled {
     type State = ();
     type CreateConfig<'a> = ();
 
-    fn allocate<'a, M: MemoryProperties>(
+    #[inline]
+    fn wrap_index(index: type_kit::GuardIndex<Allocator<Self>>) -> AllocatorIndex {
+        AllocatorIndex::Unpooled(index)
+    }
+
+    fn allocate<'a>(
         mut allocator: ScopedInnerMut<'a, Allocator<Self>>,
         context: &Context,
-        req: AllocationRequest<M>,
-    ) -> ResourceResult<AllocationIndex<M>> {
+        req: AllocationRequest,
+    ) -> ResourceResult<AllocationIndex> {
         let alloc_info = MemoryAllocateInfo::new()
             .with_allocation_size(req.requirements.size)
             .with_memory_type_index(context.get_memory_type_index(&req)?);
-        let memory: ResourceIndex<Memory<M>> = context.create_resource(alloc_info)?;
+        let memory: ResourceIndex<Memory> = context.create_resource(alloc_info)?;
         let range = ByteRange::new(req.requirements.size as usize);
         let allocation = Allocation::new(memory, range);
         allocator.memory_map.register(&allocation);
         let index = allocator.allocations.push(allocation.into_guard())?;
-        Ok(index)
+        Ok((req.memory_type_info.wrap_index)(index))
     }
 
-    fn free<'a, M: MemoryProperties>(
+    fn free<'a>(
         mut allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
         context: &Context,
-        allocation: super::AllocationIndex<M>,
+        allocation: AllocationIndex,
     ) -> ResourceResult<()> {
-        let allocation = Allocation::<M>::try_from_guard(allocator.allocations.pop(allocation)?)
-            .map_err(|(_, err)| err)?;
+        let allocation =
+            Allocation::try_from_guard(allocator.allocations.pop(allocation.into_inner())?)
+                .map_err(|(_, err)| err)?;
         let memory = allocator.memory_map.pop(allocation)?;
         if let Some(memory) = memory {
             context.destroy_resource(memory)?;
