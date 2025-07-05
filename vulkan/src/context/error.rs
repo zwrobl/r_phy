@@ -17,6 +17,7 @@ pub enum AllocatorError {
     InvalidConfiguration,
     UnsupportedMemoryType,
     InvalidAllocationIndex,
+    OutOfMemory,
     LegacyAllocError(AllocError),
 }
 
@@ -27,6 +28,7 @@ impl Display for AllocatorError {
             AllocatorError::InvalidConfiguration => write!(f, "Invalid configuration"),
             AllocatorError::UnsupportedMemoryType => write!(f, "Unsupported memory type"),
             AllocatorError::InvalidAllocationIndex => write!(f, "Invalid allocation index"),
+            AllocatorError::OutOfMemory => write!(f, "Ount of memory"),
         }
     }
 }

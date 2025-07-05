@@ -132,19 +132,7 @@ impl ResourceStorage {
     }
 
     #[inline]
-    fn destroy_resource_storage<R: 'static, M: Marker>(
-        &mut self,
-        context: &Context,
-    ) -> DestroyResult<R>
-    where
-        for<'a> R: Destroy<Context<'a> = &'a Context>,
-        ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
-    {
-        self.storage.get_mut().destroy(context)
-    }
-
-    #[inline]
-    fn opperate_ref<
+    pub fn opperate_ref<
         I: ResourceIndexList,
         R,
         E,
@@ -162,7 +150,7 @@ impl ResourceStorage {
     }
 
     #[inline]
-    fn opperate_mut<
+    pub fn opperate_mut<
         I: ResourceIndexList,
         R,
         E,
@@ -177,6 +165,18 @@ impl ResourceStorage {
         let result = f(&mut borrowed);
         borrowed.put_back(&mut self.storage)?;
         Ok(result)
+    }
+
+    #[inline]
+    fn destroy_resource_storage<R: 'static, M: Marker>(
+        &mut self,
+        context: &Context,
+    ) -> DestroyResult<R>
+    where
+        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
+    {
+        self.storage.get_mut().destroy(context)
     }
 }
 

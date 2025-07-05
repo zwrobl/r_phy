@@ -1,18 +1,23 @@
-use std::{cell::RefCell, convert::Infallible, path::Path};
+use std::{convert::Infallible, ops::Deref, path::Path, sync::Once};
 
-use graphics::{model::CommonVertex, renderer::camera::CameraMatrices};
+use graphics::{
+    model::{CommonVertex, Mesh},
+    renderer::camera::CameraMatrices,
+};
 use physics::shape;
 
 use crate::context::{
     device::{
         descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
-        memory::Allocator,
+        memory::AllocReq,
         pipeline::{
             GraphicsPipeline, GraphicsPipelineConfig, PipelineLayoutBuilder, ShaderDirectory,
         },
-        Device,
+        raw::allocator::AllocatorIndex,
+        resources::{image::Texture2DPartial, MeshPackPartial, PartialBuilder},
     },
-    error::VkError,
+    error::{VkError, VkResult},
+    Context,
 };
 use type_kit::{Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
 
@@ -21,37 +26,74 @@ use super::{
     MeshPack,
 };
 
-pub type LayoutSkybox<A> =
-    PipelineLayoutBuilder<Cons<TextureDescriptorSet<A>, Nil>, Cons<CameraMatrices, Nil>>;
+pub type LayoutSkybox =
+    PipelineLayoutBuilder<Cons<TextureDescriptorSet, Nil>, Cons<CameraMatrices, Nil>>;
 
-pub struct Skybox<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> {
-    cubemap: DropGuard<Texture2D<A>>,
-    pub mesh_pack: DropGuard<MeshPack<CommonVertex, A>>,
-    pub descriptor: DropGuard<DescriptorPool<TextureDescriptorSet<A>>>,
+pub struct SkyboxPartial<'a> {
+    cubemap: Texture2DPartial<'a>,
+    cube: MeshPackPartial<'static, CommonVertex>,
+}
+
+pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
+    cubemap: DropGuard<Texture2D>,
+    pub mesh_pack: DropGuard<MeshPack<CommonVertex>>,
+    pub descriptor: DropGuard<DescriptorPool<TextureDescriptorSet>>,
     pub pipeline: DropGuard<GraphicsPipeline<L>>,
 }
 
 const SKYBOX_SHADER: &'static str = "_resources/shaders/spv/skybox";
 
-impl<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> Create for Skybox<A, L> {
-    type Config<'a> = &'a Path;
+fn get_skybox_meshes() -> &'static [Mesh<CommonVertex>] {
+    static mut CUBE: Option<[Mesh<CommonVertex>; 1]> = None;
+    static INIT: Once = Once::new();
+    unsafe {
+        INIT.call_once(|| {
+            if CUBE.is_none() {
+                CUBE.replace([shape::Cube::new(1.0).into()]);
+            }
+        });
+        CUBE.as_ref().unwrap()
+    }
+}
+
+impl<'a> SkyboxPartial<'a> {
+    #[inline]
+    pub fn get_memory_requirements(&self) -> Vec<AllocReq> {
+        self.cubemap
+            .requirements()
+            .chain(self.cube.requirements())
+            .collect()
+    }
+}
+
+impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Skybox<L> {
+    pub fn prepare<'a>(context: &Context, cubemap_path: &'a Path) -> VkResult<SkyboxPartial<'a>> {
+        Ok(SkyboxPartial {
+            cubemap: Texture2DPartial::prepare(ImageReader::cube(cubemap_path)?, &context)?,
+            cube: MeshPackPartial::prepare(get_skybox_meshes(), &context)?,
+        })
+    }
+}
+
+impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
+    type Config<'a> = (SkyboxPartial<'a>, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (device, allocator) = context;
-        let cubemap = device.load_texture(allocator, ImageReader::cube(config)?)?;
+        let (SkyboxPartial { cubemap, cube }, allocator) = config;
+        let cubemap = Texture2D::create((cubemap, allocator), context)?;
         let descriptor = DescriptorPool::create(
-            DescriptorSetWriter::<TextureDescriptorSet<A>>::new(1)
-                .write_images::<Texture2D<A>, _>(std::slice::from_ref(&cubemap)),
-            device,
+            DescriptorSetWriter::<TextureDescriptorSet>::new(1)
+                .write_images::<Texture2D, _>(std::slice::from_ref(&cubemap)),
+            context,
         )?;
-        let layout = device.get_pipeline_layout::<L::Layout>()?;
+        let layout = context.get_pipeline_layout::<L::Layout>()?;
         let modules = ShaderDirectory::new(Path::new(SKYBOX_SHADER));
-        let pipeline = GraphicsPipeline::create((layout, &modules), device)?;
-        let mesh_pack = device.load_mesh_pack(allocator, &[shape::Cube::new(1.0).into()])?;
+        let pipeline = GraphicsPipeline::create((layout, &modules), context)?;
+        let mesh_pack = MeshPack::create((cube, allocator), context)?;
         Ok(Skybox {
             cubemap: DropGuard::new(cubemap),
             mesh_pack: DropGuard::new(mesh_pack),
@@ -61,16 +103,15 @@ impl<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> Create f
     }
 }
 
-impl<A: Allocator, L: GraphicsPipelineConfig<Layout = LayoutSkybox<A>>> Destroy for Skybox<A, L> {
-    type Context<'a> = (&'a Device, &'a mut A);
+impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Destroy for Skybox<L> {
+    type Context<'a> = &'a Context;
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let (device, allocator) = context;
-        self.descriptor.destroy(device)?;
-        self.mesh_pack.destroy((device, &RefCell::new(allocator)))?;
-        self.cubemap.destroy((device, allocator))?;
-        self.pipeline.destroy(device)?;
+        self.descriptor.destroy(context.device.deref())?;
+        self.mesh_pack.destroy(context)?;
+        self.cubemap.destroy(context)?;
+        self.pipeline.destroy(context.device.deref())?;
         Ok(())
     }
 }

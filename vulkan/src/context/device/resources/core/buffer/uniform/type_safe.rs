@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     convert::Infallible,
     marker::PhantomData,
     ops::{Index, IndexMut},
@@ -12,21 +11,22 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 use crate::context::{
     device::{
         command::operation::Operation,
-        memory::{AllocReq, Allocator, HostCoherent},
+        memory::{AllocReq, HostCoherent},
+        raw::allocator::AllocatorIndex,
         resources::{
             buffer::{
                 Buffer, BufferBuilder, BufferInfo, PersistentBuffer, PersistentBufferPartial,
             },
             PartialBuilder,
         },
-        Device,
     },
     error::{VkError, VkResult},
+    Context,
 };
 
-pub struct UniformBuffer<U: AnyBitPattern, O: Operation, A: Allocator> {
+pub struct UniformBuffer<U: AnyBitPattern, O: Operation> {
     len: usize,
-    buffer: PersistentBuffer<A>,
+    buffer: PersistentBuffer,
     _phantom: PhantomData<(U, O)>,
 }
 
@@ -52,16 +52,16 @@ impl<U: AnyBitPattern, O: Operation> UniformBufferBuilder<U, O> {
 
 impl<'a, U: AnyBitPattern, O: Operation> PartialBuilder<'a> for UniformBufferPartial<U, O> {
     type Config = UniformBufferBuilder<U, O>;
-    type Target<A: Allocator> = UniformBuffer<U, O, A>;
+    type Target = UniformBuffer<U, O>;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
         let info = BufferInfo {
             size: size_of::<U>() * config.len,
             usage: vk::BufferUsageFlags::UNIFORM_BUFFER,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
-            queue_families: &[O::get_queue_family_index(device)],
+            queue_families: &[O::get_queue_family_index(context)],
         };
-        let buffer = PersistentBufferPartial::prepare(BufferBuilder::new(info), device)?;
+        let buffer = PersistentBufferPartial::prepare(BufferBuilder::new(info), context)?;
         Ok(UniformBufferPartial {
             len: config.len,
             buffer,
@@ -74,23 +74,23 @@ impl<'a, U: AnyBitPattern, O: Operation> PartialBuilder<'a> for UniformBufferPar
     }
 }
 
-impl<'a, U: AnyBitPattern, O: Operation, A: Allocator> From<&'a UniformBuffer<U, O, A>>
-    for &'a Buffer<HostCoherent, A>
+impl<'a, U: AnyBitPattern, O: Operation> From<&'a UniformBuffer<U, O>>
+    for &'a Buffer<HostCoherent>
 {
-    fn from(value: &'a UniformBuffer<U, O, A>) -> Self {
+    fn from(value: &'a UniformBuffer<U, O>) -> Self {
         &value.buffer.buffer
     }
 }
 
-impl<'a, U: AnyBitPattern, O: Operation, A: Allocator> From<&'a mut UniformBuffer<U, O, A>>
-    for &'a mut Buffer<HostCoherent, A>
+impl<'a, U: AnyBitPattern, O: Operation> From<&'a mut UniformBuffer<U, O>>
+    for &'a mut Buffer<HostCoherent>
 {
-    fn from(value: &'a mut UniformBuffer<U, O, A>) -> Self {
+    fn from(value: &'a mut UniformBuffer<U, O>) -> Self {
         &mut value.buffer.buffer
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> Index<usize> for UniformBuffer<U, O, A> {
+impl<U: AnyBitPattern, O: Operation> Index<usize> for UniformBuffer<U, O> {
     type Output = U;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -100,7 +100,7 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> Index<usize> for UniformBuffe
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> IndexMut<usize> for UniformBuffer<U, O, A> {
+impl<U: AnyBitPattern, O: Operation> IndexMut<usize> for UniformBuffer<U, O> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         debug_assert!(index < self.len, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
@@ -108,7 +108,7 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> IndexMut<usize> for UniformBu
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> UniformBuffer<U, O, A> {
+impl<U: AnyBitPattern, O: Operation> UniformBuffer<U, O> {
     pub fn handle(&self) -> vk::Buffer {
         self.buffer.buffer.handle()
     }
@@ -118,14 +118,14 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> UniformBuffer<U, O, A> {
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> Create for UniformBuffer<U, O, A> {
-    type Config<'a> = UniformBufferPartial<U, O>;
+impl<U: AnyBitPattern, O: Operation> Create for UniformBuffer<U, O> {
+    type Config<'a> = (UniformBufferPartial<U, O>, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (device, allocator) = context;
-        let len = config.len;
-        let buffer = PersistentBuffer::create(config.buffer, (device, allocator))?;
+        let (partial, allocator) = config;
+        let len = partial.len;
+        let buffer = PersistentBuffer::create((partial.buffer, allocator), context)?;
         Ok(UniformBuffer {
             len,
             buffer,
@@ -134,8 +134,8 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> Create for UniformBuffer<U, O
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> Destroy for UniformBuffer<U, O, A> {
-    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+impl<U: AnyBitPattern, O: Operation> Destroy for UniformBuffer<U, O> {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

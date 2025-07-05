@@ -3,14 +3,18 @@
 // which makes it not worth the effort to refactor this code
 #![allow(clippy::too_many_arguments)]
 
-use std::{cell::RefCell, convert::Infallible, error::Error, marker::PhantomData};
+use std::{convert::Infallible, error::Error, marker::PhantomData, ops::Deref};
 
 use type_kit::{
     Create, CreateCollection, CreateResult, Destroy, DestroyCollection, DestroyResult, DropGuard,
     DropGuardError,
 };
 
-use crate::context::{error::VkError, Context};
+use crate::context::{
+    device::{memory::AllocReq, raw::allocator::AllocatorIndex},
+    error::{VkError, VkResult},
+    Context,
+};
 use graphics::{
     model::Drawable,
     renderer::camera::CameraMatrices,
@@ -26,7 +30,6 @@ use super::{
     },
     descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorSetWriter},
     framebuffer::AttachmentList,
-    memory::{Allocator, DefaultAllocator},
     pipeline::{
         GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList, ModuleLoader,
     },
@@ -34,7 +37,7 @@ use super::{
         buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
         MaterialPackList, MeshPackList, PartialBuilder,
     },
-    swapchain::{Swapchain, SwapchainFrame, SwapchainImageSync},
+    swapchain::{SwapchainFrame, SwapchainImageSync},
     Device,
 };
 
@@ -42,12 +45,17 @@ pub trait Frame: 'static {
     type Shader<S: ShaderType>: ShaderType + GraphicsPipelineConfig + ModuleLoader;
     type Context<P: GraphicsPipelinePackList>: FrameContext
         + for<'a> Create<Context<'a> = &'a Context>;
+    type Partial;
 
-    fn load_context<P: GraphicsPipelinePackList>(
+    fn load_context<'a, P: GraphicsPipelinePackList>(
         &self,
         context: &Context,
+        allocator: AllocatorIndex,
+        partial: Self::Partial,
         pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
     ) -> CreateResult<Self::Context<P>>;
+
+    fn get_num_frames(&self) -> usize;
 }
 
 pub trait FrameContext: Sized {
@@ -62,12 +70,10 @@ pub trait FrameContext: Sized {
     ) -> Result<(), Box<dyn Error>>;
 
     fn draw<
-        A1: Allocator,
-        A2: Allocator,
         S: ShaderType,
         D: Drawable<Material = S::Material, Vertex = S::Vertex>,
-        M: MaterialPackList<A2>,
-        V: MeshPackList<A1>,
+        M: MaterialPackList,
+        V: MeshPackList,
     >(
         &mut self,
         shader: ShaderHandle<S>,
@@ -80,9 +86,32 @@ pub trait FrameContext: Sized {
     fn end_frame(&mut self, device: &Device) -> Result<(), Box<dyn Error>>;
 }
 
+pub struct CameraUniformPartial {
+    buffer: UniformBufferPartial<CameraMatrices, Graphics>,
+}
+
+impl CameraUniformPartial {
+    #[inline]
+    pub fn get_memory_requirements(&self) -> Vec<AllocReq> {
+        self.buffer.requirements().collect()
+    }
+}
+
+impl CameraUniform {
+    #[inline]
+    pub fn prepare<R: Frame>(context: &Context, renderer: &R) -> VkResult<CameraUniformPartial> {
+        Ok(CameraUniformPartial {
+            buffer: UniformBufferPartial::prepare(
+                UniformBufferBuilder::new(renderer.get_num_frames()),
+                &context,
+            )?,
+        })
+    }
+}
+
 pub struct CameraUniform {
     pub descriptors: DropGuard<DescriptorPool<CameraDescriptorSet>>,
-    pub uniform_buffer: DropGuard<UniformBuffer<CameraMatrices, Graphics, DefaultAllocator>>,
+    pub uniform_buffer: DropGuard<UniformBuffer<CameraMatrices, Graphics>>,
 }
 
 pub struct FrameData<C: FrameContext> {
@@ -101,21 +130,18 @@ pub struct FramePool<F: FrameContext> {
 }
 
 impl Create for CameraUniform {
-    type Config<'a> = usize;
+    type Config<'a> = (CameraUniformPartial, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let buffer_partial =
-            UniformBufferPartial::prepare(UniformBufferBuilder::new(config), &context)?;
-        let uniform_buffer = UniformBuffer::create(
-            buffer_partial,
-            (context, &RefCell::new(&mut DefaultAllocator {})),
-        )?;
+        let (CameraUniformPartial { buffer }, allocator) = config;
+        let uniform_buffer = UniformBuffer::create((buffer, allocator), context)?;
         let descriptors = DescriptorPool::create(
-            DescriptorSetWriter::<CameraDescriptorSet>::new(config).write_buffer(&uniform_buffer),
+            DescriptorSetWriter::<CameraDescriptorSet>::new(uniform_buffer.len())
+                .write_buffer(&uniform_buffer),
             context,
         )?;
         Ok(CameraUniform {
@@ -126,30 +152,30 @@ impl Create for CameraUniform {
 }
 
 impl Destroy for CameraUniform {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.descriptors.destroy(context)?;
-        self.uniform_buffer
-            .destroy((context, &RefCell::new(&mut DefaultAllocator {})))?;
+        self.uniform_buffer.destroy(context)?;
         Ok(())
     }
 }
 
 impl<F: FrameContext> Create for FramePool<F> {
-    type Config<'a> = &'a Swapchain<F::Attachments>;
+    type Config<'a> = <CameraUniform as Create>::Config<'a>;
     type CreateError = VkError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let image_sync = (0..config.num_images)
+        let camera_uniform = CameraUniform::create(config, context)?;
+        let frame_count = camera_uniform.descriptors.len();
+        let image_sync = (0..camera_uniform.descriptors.len())
             .map(|_| ())
-            .create(context)
+            .create(context.device.deref())
             .collect::<Result<Vec<_>, _>>()?;
-        let primary_commands = PersistentCommandPool::create(config.num_images, context)?;
+        let primary_commands = PersistentCommandPool::create(frame_count, context)?;
         let secondary_commands =
-            PersistentCommandPool::create(config.num_images * F::REQUIRED_COMMANDS, context)?;
-        let camera_uniform = CameraUniform::create(config.num_images, context)?;
+            PersistentCommandPool::create(frame_count * F::REQUIRED_COMMANDS, context)?;
 
         Ok(FramePool {
             image_sync,
@@ -162,7 +188,7 @@ impl<F: FrameContext> Create for FramePool<F> {
 }
 
 impl<F: FrameContext> Destroy for FramePool<F> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

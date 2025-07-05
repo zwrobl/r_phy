@@ -1,6 +1,5 @@
 use std::{
     any::{type_name, TypeId},
-    cell::RefCell,
     convert::Infallible,
     error::Error,
     marker::PhantomData,
@@ -14,16 +13,17 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 use crate::context::{
     device::{
         command::operation::Operation,
-        memory::{AllocReq, Allocator, HostCoherent},
+        memory::{AllocReq, HostCoherent},
+        raw::allocator::AllocatorIndex,
         resources::{
             buffer::{
                 Buffer, BufferBuilder, BufferInfo, PersistentBuffer, PersistentBufferPartial,
             },
             PartialBuilder,
         },
-        Device,
     },
     error::{VkError, VkResult},
+    Context,
 };
 
 pub struct UniformBufferErasedPartial<O: Operation> {
@@ -53,9 +53,9 @@ impl<O: Operation> UniformBufferErasedBuilder<O> {
 
 impl<'a, O: Operation> PartialBuilder<'a> for UniformBufferErasedPartial<O> {
     type Config = UniformBufferErasedBuilder<O>;
-    type Target<A: Allocator> = UniformBufferTypeErased<O, A>;
+    type Target = UniformBufferTypeErased<O>;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
         let UniformBufferErasedBuilder {
             len,
             item_size,
@@ -66,9 +66,9 @@ impl<'a, O: Operation> PartialBuilder<'a> for UniformBufferErasedPartial<O> {
             size: item_size * config.len,
             usage: vk::BufferUsageFlags::UNIFORM_BUFFER,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
-            queue_families: &[O::get_queue_family_index(device)],
+            queue_families: &[O::get_queue_family_index(context)],
         };
-        let buffer = PersistentBufferPartial::prepare(BufferBuilder::new(info), device)?;
+        let buffer = PersistentBufferPartial::prepare(BufferBuilder::new(info), context)?;
         Ok(UniformBufferErasedPartial {
             len,
             buffer,
@@ -82,25 +82,25 @@ impl<'a, O: Operation> PartialBuilder<'a> for UniformBufferErasedPartial<O> {
     }
 }
 
-pub struct UniformBufferTypeErased<O: Operation, A: Allocator> {
+pub struct UniformBufferTypeErased<O: Operation> {
     len: usize,
-    buffer: PersistentBuffer<A>,
+    buffer: PersistentBuffer,
     item_type_id: TypeId,
     _phantom: PhantomData<O>,
 }
 
-pub struct UniformBufferRef<'a, P: AnyBitPattern, O: Operation, A: Allocator> {
+pub struct UniformBufferRef<'a, P: AnyBitPattern, O: Operation> {
     len: usize,
-    buffer: &'a mut PersistentBuffer<A>,
+    buffer: &'a mut PersistentBuffer,
     _phantom: PhantomData<(P, O)>,
 }
 
-impl<'a, P: AnyBitPattern, O: Operation, A: Allocator>
-    TryFrom<&'a mut UniformBufferTypeErased<O, A>> for UniformBufferRef<'a, P, O, A>
+impl<'a, P: AnyBitPattern, O: Operation> TryFrom<&'a mut UniformBufferTypeErased<O>>
+    for UniformBufferRef<'a, P, O>
 {
     type Error = Box<dyn Error>;
 
-    fn try_from(value: &'a mut UniformBufferTypeErased<O, A>) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a mut UniformBufferTypeErased<O>) -> Result<Self, Self::Error> {
         if value.item_type_id == TypeId::of::<P>() {
             Ok(UniformBufferRef {
                 len: value.len,
@@ -116,15 +116,13 @@ impl<'a, P: AnyBitPattern, O: Operation, A: Allocator>
     }
 }
 
-impl<'a, O: Operation, A: Allocator> From<&'a mut UniformBufferTypeErased<O, A>>
-    for &'a mut Buffer<HostCoherent, A>
-{
-    fn from(value: &'a mut UniformBufferTypeErased<O, A>) -> Self {
+impl<'a, O: Operation> From<&'a mut UniformBufferTypeErased<O>> for &'a mut Buffer<HostCoherent> {
+    fn from(value: &'a mut UniformBufferTypeErased<O>) -> Self {
         (&mut value.buffer).into()
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> Index<usize> for UniformBufferRef<'_, U, O, A> {
+impl<U: AnyBitPattern, O: Operation> Index<usize> for UniformBufferRef<'_, U, O> {
     type Output = U;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -134,9 +132,7 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> Index<usize> for UniformBuffe
     }
 }
 
-impl<U: AnyBitPattern, O: Operation, A: Allocator> IndexMut<usize>
-    for UniformBufferRef<'_, U, O, A>
-{
+impl<U: AnyBitPattern, O: Operation> IndexMut<usize> for UniformBufferRef<'_, U, O> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         debug_assert!(index < self.len, "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
@@ -144,19 +140,21 @@ impl<U: AnyBitPattern, O: Operation, A: Allocator> IndexMut<usize>
     }
 }
 
-impl<O: Operation, A: Allocator> Create for UniformBufferTypeErased<O, A> {
-    type Config<'a> = UniformBufferErasedPartial<O>;
+impl<O: Operation> Create for UniformBufferTypeErased<O> {
+    type Config<'a> = (UniformBufferErasedPartial<O>, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (device, allocator) = context;
-        let UniformBufferErasedPartial {
-            len,
-            buffer,
-            item_type_id,
-            ..
-        } = config;
-        let buffer = PersistentBuffer::create(buffer, (device, allocator))?;
+        let (
+            UniformBufferErasedPartial {
+                len,
+                buffer,
+                item_type_id,
+                ..
+            },
+            allocator,
+        ) = config;
+        let buffer = PersistentBuffer::create((buffer, allocator), context)?;
         Ok(UniformBufferTypeErased {
             len,
             buffer,
@@ -166,8 +164,8 @@ impl<O: Operation, A: Allocator> Create for UniformBufferTypeErased<O, A> {
     }
 }
 
-impl<O: Operation, A: Allocator> Destroy for UniformBufferTypeErased<O, A> {
-    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+impl<O: Operation> Destroy for UniformBufferTypeErased<O> {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

@@ -4,58 +4,26 @@ use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        memory::MemoryProperties,
-        raw::allocator::{AllocationRequest, Allocator, AllocatorIndex},
+        memory::AllocReq,
+        raw::allocator::{Allocation, Allocator, AllocatorInstance},
     },
-    error::{AllocatorError, ResourceResult},
+    error::{ResourceError, ResourceResult},
     Context,
 };
 
-use super::{AllocationIndex, AllocatorState, State, Strategy};
+use super::AllocationIndex;
 
 #[derive(Debug, Clone, Copy)]
-pub struct PageConfig {
-    page_size: u64,
-}
+pub struct PageConfig {}
 
 impl PageConfig {
     #[inline]
-    pub fn new(page_size: u64) -> Self {
-        Self { page_size }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-impl From<PageConfig> for PageState {
-    #[inline]
-    fn from(value: PageConfig) -> Self {
-        Self {
-            page_size: value.page_size,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct PageState {
-    page_size: u64,
-}
-
-impl From<PageState> for AllocatorState {
-    #[inline]
-    fn from(config: PageState) -> Self {
-        AllocatorState::Page(config)
-    }
-}
-
-impl State for PageState {
-    #[inline]
-    fn try_get(state: &AllocatorState) -> Result<&Self, AllocatorError> {
-        match state {
-            AllocatorState::Page(config) => Ok(config),
-            _ => Err(AllocatorError::InvalidConfiguration),
-        }
-    }
-}
-
+#[derive(Debug)]
 pub struct Page {}
 
 impl Page {
@@ -65,8 +33,8 @@ impl Page {
 }
 
 impl Create for Page {
-    type Config<'a> = ();
-    type CreateError = AllocatorError;
+    type Config<'a> = PageConfig;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
@@ -85,30 +53,33 @@ impl Destroy for Page {
     }
 }
 
-impl Strategy for Page {
-    type State = PageState;
-    type CreateConfig<'a> = PageConfig;
-
+impl From<Page> for AllocatorInstance {
     #[inline]
-    fn wrap_index(index: type_kit::GuardIndex<Allocator<Self>>) -> AllocatorIndex {
-        AllocatorIndex::Page(index)
+    fn from(value: Page) -> Self {
+        AllocatorInstance::Page(value)
     }
+}
 
+impl Allocator for Page {
     #[inline]
     fn allocate<'a>(
-        allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
+        &mut self,
         context: &crate::Context,
-        req: AllocationRequest,
+        req: AllocReq,
     ) -> ResourceResult<AllocationIndex> {
         todo!()
     }
 
     #[inline]
     fn free<'a>(
-        allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
+        &mut self,
         context: &crate::Context,
         allocation: AllocationIndex,
     ) -> ResourceResult<()> {
+        todo!()
+    }
+
+    fn get_allocation(&self, allocation: AllocationIndex) -> ResourceResult<Allocation> {
         todo!()
     }
 }

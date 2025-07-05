@@ -3,13 +3,15 @@ pub mod device;
 pub mod error;
 mod surface;
 
+use crate::context::device::{
+    memory::AllocReq,
+    raw::allocator::{Allocator, Unpooled},
+};
+
 use self::{
     device::{
-        memory::MemoryProperties,
         raw::{
-            allocator::{
-                AllocationEntry, AllocationRequest, AllocatorIndex, AllocatorStorage, Strategy,
-            },
+            allocator::{AllocationEntry, AllocatorIndex, AllocatorStorage},
             resources::{
                 RawCollection, Resource, ResourceIndex, ResourceStorage, ResourceStorageList,
             },
@@ -57,7 +59,7 @@ pub struct Instance {
     _entry: ash::Entry,
 }
 
-trait InstanceExtension: Sized {
+pub(crate) trait InstanceExtension: Sized {
     fn load(entry: &ash::Entry, instance: &ash::Instance) -> Self;
 }
 
@@ -168,6 +170,7 @@ impl Destroy for Instance {
 }
 
 pub struct Context {
+    default_allocator: Option<AllocatorIndex>,
     allocators: Box<RefCell<DropGuard<AllocatorStorage>>>,
     storage: Box<RefCell<DropGuard<ResourceStorage>>>,
     device: DropGuard<Device>,
@@ -177,7 +180,7 @@ pub struct Context {
     instance: DropGuard<Instance>,
 }
 
-trait DeviceExtension: Sized {
+pub(crate) trait DeviceExtension: Sized {
     fn load(instance: &ash::Instance, device: &ash::Device) -> Self;
 }
 
@@ -197,7 +200,8 @@ impl Context {
         let device = Device::create(&surface, &instance)?;
         let allocators = Box::new(RefCell::new(DropGuard::new(AllocatorStorage::new())));
         let storage = Box::new(RefCell::new(DropGuard::new(ResourceStorage::new())));
-        Ok(Self {
+        let mut context = Self {
+            default_allocator: None,
             allocators,
             storage,
             device: DropGuard::new(device),
@@ -205,12 +209,20 @@ impl Context {
             #[cfg(debug_assertions)]
             debug_utils: DropGuard::new(debug_utils),
             instance: DropGuard::new(instance),
-        })
+        };
+        let default_allocator = context.create_allocator::<Unpooled>(())?;
+        context.default_allocator.replace(default_allocator);
+        Ok(context)
     }
 
     #[inline]
     pub(crate) fn load<E: DeviceExtension>(&self) -> E {
         E::load(&self.instance, &self.device)
+    }
+
+    #[inline]
+    pub fn default_allocator(&self) -> AllocatorIndex {
+        self.default_allocator.unwrap()
     }
 }
 
@@ -267,39 +279,33 @@ impl Context {
     }
 
     #[inline]
-    pub fn create_allocator<'a, S: Strategy>(
-        &self,
-        config: S::CreateConfig<'a>,
+    pub fn create_allocator<'a, A: Allocator>(
+        &'a self,
+        config: A::Config<'a>,
     ) -> ResourceResult<AllocatorIndex> {
         self.allocators
             .borrow_mut()
-            .create_allocator::<S>(self, config)
+            .create_allocator::<A>(self, config)
     }
 
     #[inline]
-    pub fn destroy_allocator(
-        &self,
-        index: AllocatorIndex,
-    ) -> ResourceResult<()> {
-        self.allocators
-            .borrow_mut()
-            .destroy_allocator(self, index)
+    pub fn destroy_allocator(&self, index: AllocatorIndex) -> ResourceResult<()> {
+        self.allocators.borrow_mut().destroy_allocator(self, index)
     }
 
     #[inline]
     pub fn allocate(
         &self,
         index: AllocatorIndex,
-        req: AllocationRequest,
+        req: impl Into<AllocReq>,
     ) -> ResourceResult<AllocationEntry> {
-        self.allocators.borrow_mut().allocate(self, index, req)
+        self.allocators
+            .borrow_mut()
+            .allocate(self, index, req.into())
     }
 
     #[inline]
-    pub fn free(
-        &self,
-        index: AllocationEntry,
-    ) -> ResourceResult<()> {
+    pub fn free(&self, index: AllocationEntry) -> ResourceResult<()> {
         self.allocators.borrow_mut().free(self, index)
     }
 }

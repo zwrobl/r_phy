@@ -5,14 +5,15 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        memory::{AllocReq, Allocator, DeviceLocal},
+        memory::{AllocReq, DeviceLocal},
+        raw::allocator::AllocatorIndex,
         resources::{
             buffer::{StagingBuffer, StagingBufferBuilder},
             PartialBuilder,
         },
-        Device,
     },
     error::{VkError, VkResult},
+    Context,
 };
 
 use super::{Image2D, Image2DBuilder, Image2DPartial, ImageReader};
@@ -22,13 +23,13 @@ pub struct Texture2DPartial<'a> {
     reader: ImageReader<'a>,
 }
 
-pub struct Texture2D<A: Allocator> {
-    pub image: Image2D<DeviceLocal, A>,
+pub struct Texture2D {
+    pub image: Image2D<DeviceLocal>,
     pub sampler: vk::Sampler,
 }
 
-impl<A: Allocator> From<&Texture2D<A>> for vk::DescriptorImageInfo {
-    fn from(texture: &Texture2D<A>) -> Self {
+impl From<&Texture2D> for vk::DescriptorImageInfo {
+    fn from(texture: &Texture2D) -> Self {
         vk::DescriptorImageInfo {
             sampler: texture.sampler,
             image_view: texture.image.image_view,
@@ -39,10 +40,10 @@ impl<A: Allocator> From<&Texture2D<A>> for vk::DescriptorImageInfo {
 
 impl<'a> PartialBuilder<'a> for Texture2DPartial<'a> {
     type Config = ImageReader<'a>;
-    type Target<A: Allocator> = Texture2D<A>;
+    type Target = Texture2D;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
-        let image = Image2DPartial::prepare(Image2DBuilder::new(config.info()?), device)?;
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
+        let image = Image2DPartial::prepare(Image2DBuilder::new(config.info()?), context)?;
         Ok(Texture2DPartial {
             image,
             reader: config,
@@ -54,41 +55,30 @@ impl<'a> PartialBuilder<'a> for Texture2DPartial<'a> {
     }
 }
 
-impl Device {
-    pub fn load_texture<'a, A: Allocator>(
-        &self,
-        allocator: &mut A,
-        image: ImageReader<'a>,
-    ) -> VkResult<Texture2D<A>> {
-        let partial = Texture2DPartial::prepare(image, self)?;
-        Texture2D::create(partial, (self, allocator))
-    }
-}
-
-impl<A: Allocator> Create for Texture2D<A> {
-    type Config<'a> = Texture2DPartial<'a>;
+impl Create for Texture2D {
+    type Config<'a> = (Texture2DPartial<'a>, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (device, allocator) = context;
-        let Texture2DPartial { image, mut reader } = config;
-        let mut image = Image2D::create(image, (device, allocator))?;
+        let (Texture2DPartial { image, mut reader }, allocator) = config;
+        let mut image = Image2D::create((image, allocator), context)?;
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(reader.required_buffer_size()?);
         {
-            let mut staging_buffer = StagingBuffer::create(builder, device)?;
+            let mut staging_buffer =
+                StagingBuffer::create((builder, context.default_allocator()), context)?;
             let mut image_range = staging_buffer.write_range::<u8>(image_range);
             let staging_area = image_range.remaining_as_slice_mut();
             while let Some(dst_layer) = reader.read(staging_area)? {
                 staging_buffer.transfer_image_data(
-                    device,
+                    &context,
                     &mut image,
                     dst_layer,
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 )?;
             }
             image.layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-            let _ = staging_buffer.destroy(device);
+            let _ = staging_buffer.destroy(context);
         }
         let create_info = vk::SamplerCreateInfo::builder()
             .mag_filter(vk::Filter::LINEAR)
@@ -99,21 +89,20 @@ impl<A: Allocator> Create for Texture2D<A> {
             .border_color(vk::BorderColor::FLOAT_OPAQUE_BLACK)
             .min_lod(0.0)
             .max_lod(image.mip_levels as f32);
-        let sampler = unsafe { device.create_sampler(&create_info, None)? };
+        let sampler = unsafe { context.create_sampler(&create_info, None)? };
         Ok(Texture2D { image, sampler })
     }
 }
 
-impl<A: Allocator> Destroy for Texture2D<A> {
-    type Context<'a> = (&'a Device, &'a mut A);
+impl Destroy for Texture2D {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let (device, allocator) = context;
         unsafe {
-            device.destroy_sampler(self.sampler, None);
+            context.destroy_sampler(self.sampler, None);
         }
-        let _ = self.image.destroy((device, allocator));
+        let _ = self.image.destroy(context);
         Ok(())
     }
 }

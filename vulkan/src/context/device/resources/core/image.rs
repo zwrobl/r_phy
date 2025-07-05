@@ -3,10 +3,11 @@ mod texture;
 
 use crate::context::{
     device::{
-        memory::{AllocReq, AllocReqTyped, Allocator, DeviceLocal, MemoryProperties},
-        Device,
+        memory::{AllocReq, BindResource, DeviceLocal, MemoryProperties},
+        raw::allocator::{AllocationEntry, AllocatorIndex},
     },
     error::{VkError, VkResult},
+    Context,
 };
 
 use super::PartialBuilder;
@@ -30,16 +31,15 @@ struct Image2DInfo {
     mip_levels: u32,
 }
 
-pub struct Image2DBuilder<M: MemoryProperties> {
+pub struct Image2DBuilder {
     info: Image2DInfo,
-    _phantom: PhantomData<M>,
 }
 
 impl<'a, M: MemoryProperties> PartialBuilder<'a> for Image2DPartial<M> {
-    type Config = Image2DBuilder<M>;
-    type Target<A: Allocator> = Image2D<M, A>;
+    type Config = Image2DBuilder;
+    type Target = Image2D<M>;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
         let info = config.info;
         let image_info = vk::ImageCreateInfo::builder()
             .flags(info.flags)
@@ -57,9 +57,14 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for Image2DPartial<M> {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(info.usage);
-        let image = unsafe { device.create_image(&image_info, None)? };
-        let req = device.get_alloc_req(image);
-        Ok(Image2DPartial { image, info, req })
+        let image = unsafe { context.create_image(&image_info, None)? };
+        let req = BindResource::new(image).get_alloc_req(context, M::memory_type());
+        Ok(Image2DPartial {
+            image,
+            info,
+            req,
+            phantom: PhantomData,
+        })
     }
 
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
@@ -67,38 +72,34 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for Image2DPartial<M> {
     }
 }
 
-impl<M: MemoryProperties> Image2DBuilder<M> {
+impl Image2DBuilder {
     fn new(info: Image2DInfo) -> Self {
-        Self {
-            info,
-            _phantom: PhantomData,
-        }
+        Self { info }
     }
 }
 
 pub struct Image2DPartial<M: MemoryProperties> {
     image: vk::Image,
     info: Image2DInfo,
-    req: AllocReqTyped<M>,
+    req: AllocReq,
+    phantom: PhantomData<M>,
 }
 
-pub struct Image2D<M: MemoryProperties, A: Allocator> {
+pub struct Image2D<M: MemoryProperties> {
     pub array_layers: u32,
     pub mip_levels: u32,
     pub layout: vk::ImageLayout,
     pub extent: vk::Extent2D,
     pub image: vk::Image,
     pub image_view: vk::ImageView,
-    memory: A::Allocation<M>,
+    allocation: AllocationEntry,
+    phantom: PhantomData<M>,
 }
 
-impl Device {
-    pub fn create_color_attachment_image<A: Allocator>(
-        &self,
-        allocator: &mut A,
-    ) -> VkResult<Image2D<DeviceLocal, A>> {
+impl Context {
+    pub fn prepare_color_attachment_image(&self) -> VkResult<Image2DPartial<DeviceLocal>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        let partial = Image2DPartial::prepare(
+        Image2DPartial::prepare(
             Image2DBuilder::new(Image2DInfo {
                 extent,
                 format: self.physical_device.attachment_properties.formats.color,
@@ -113,16 +114,12 @@ impl Device {
                 mip_levels: 1,
             }),
             self,
-        )?;
-        Image2D::create(partial, (self, allocator))
+        )
     }
 
-    pub fn create_depth_stencil_attachment_image<A: Allocator>(
-        &self,
-        allocator: &mut A,
-    ) -> VkResult<Image2D<DeviceLocal, A>> {
+    pub fn prepare_depth_stencil_attachment_image(&self) -> VkResult<Image2DPartial<DeviceLocal>> {
         let extent = self.physical_device.surface_properties.get_current_extent();
-        let partial = Image2DPartial::prepare(
+        Image2DPartial::prepare(
             Image2DBuilder::new(Image2DInfo {
                 extent,
                 format: self
@@ -140,23 +137,26 @@ impl Device {
                 mip_levels: 1,
             }),
             self,
-        )?;
-        Image2D::create(partial, (self, allocator))
+        )
     }
 }
 
-impl<M: MemoryProperties, A: Allocator> Create for Image2D<M, A> {
-    type Config<'a> = Image2DPartial<M>;
+impl<M: MemoryProperties> Create for Image2D<M> {
+    type Config<'a> = (Image2DPartial<M>, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (device, allocator) = context;
-        let Image2DPartial { image, info, req } = config;
-        let memory = allocator.allocate(device, req)?;
-        device.bind_memory(image, &memory)?;
+        let (
+            Image2DPartial {
+                image, info, req, ..
+            },
+            allocator,
+        ) = config;
+        let allocation = context.allocate(allocator, req)?;
+        context.bind_memory(image, allocation)?;
         let view_info = vk::ImageViewCreateInfo::builder()
             .components(vk::ComponentMapping::default())
             .format(info.format)
@@ -169,7 +169,7 @@ impl<M: MemoryProperties, A: Allocator> Create for Image2D<M, A> {
                 base_array_layer: 0,
                 layer_count: info.array_layers,
             });
-        let image_view = unsafe { device.create_image_view(&view_info, None)? };
+        let image_view = unsafe { context.create_image_view(&view_info, None)? };
         Ok(Image2D {
             array_layers: info.array_layers,
             mip_levels: info.mip_levels,
@@ -177,21 +177,21 @@ impl<M: MemoryProperties, A: Allocator> Create for Image2D<M, A> {
             extent: info.extent,
             image,
             image_view,
-            memory,
+            allocation,
+            phantom: PhantomData,
         })
     }
 }
 
-impl<M: MemoryProperties, A: Allocator> Destroy for Image2D<M, A> {
-    type Context<'a> = (&'a Device, &'a mut A);
+impl<M: MemoryProperties> Destroy for Image2D<M> {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let (device, allocator) = context;
         unsafe {
-            device.destroy_image_view(self.image_view, None);
-            device.destroy_image(self.image, None);
-            allocator.free(device, &mut self.memory);
+            context.destroy_image_view(self.image_view, None);
+            context.destroy_image(self.image, None);
+            let _ = context.free(self.allocation);
         }
         Ok(())
     }

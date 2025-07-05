@@ -10,11 +10,7 @@ use crate::context::{
 };
 use type_kit::{Cons, Nil};
 
-use super::{
-    memory::{Allocator, DeviceLocal},
-    render_pass::RenderPassConfig,
-    resources::image::Image2D,
-};
+use super::{memory::DeviceLocal, render_pass::RenderPassConfig, resources::image::Image2D};
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -157,8 +153,8 @@ pub struct InputAttachment {
     pub image_view: vk::ImageView,
 }
 
-impl<A: Allocator> From<Image2D<DeviceLocal, A>> for InputAttachment {
-    fn from(image: Image2D<DeviceLocal, A>) -> Self {
+impl From<Image2D<DeviceLocal>> for InputAttachment {
+    fn from(image: Image2D<DeviceLocal>) -> Self {
         Self {
             image_view: image.image_view,
         }

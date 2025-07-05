@@ -4,10 +4,7 @@ use graphics::{
 };
 use std::{error::Error, result::Result};
 use vulkan::{
-    context::device::{
-        memory::DefaultAllocator,
-        renderer::deferred::{DeferredRenderer, DeferredShader},
-    },
+    context::device::renderer::deferred::{DeferredRenderer, DeferredShader},
     VulkanContextBuilder, VulkanRendererBuilder, VulkanRendererConfig,
 };
 use winit::{
@@ -26,12 +23,11 @@ use system::{LoopBuilder, Object};
 const RENDERER_MEM_ALLOC_PAGE_SIZE: usize = 128 * 1024 * 1024;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let renderer_builder = VulkanRendererBuilder::<DeferredRenderer<DefaultAllocator>>::new()
-        .with_config(
-            VulkanRendererConfig::builder()
-                .with_page_size(RENDERER_MEM_ALLOC_PAGE_SIZE)
-                .build()?,
-        );
+    let renderer_builder = VulkanRendererBuilder::<DeferredRenderer>::new().with_config(
+        VulkanRendererConfig::builder()
+            .with_page_size(RENDERER_MEM_ALLOC_PAGE_SIZE)
+            .build()?,
+    );
     let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-3, 1e3);
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize {

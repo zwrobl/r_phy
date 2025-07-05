@@ -11,7 +11,7 @@ use strum::EnumCount;
 
 use graphics::model::{Mesh, Vertex};
 
-use crate::context::device::memory::{Allocator, DeviceLocal};
+use crate::context::device::memory::DeviceLocal;
 
 use super::buffer::{Buffer, BufferPartial, ByteRange};
 
@@ -78,14 +78,14 @@ pub struct MeshPackDataPartial<'a, V: Vertex> {
 }
 
 #[derive(Debug)]
-pub struct MeshPackData<A: Allocator> {
-    buffer: Buffer<DeviceLocal, A>,
+pub struct MeshPackData {
+    buffer: Buffer<DeviceLocal>,
     buffer_ranges: BufferRanges,
     meshes: Vec<MeshByteRange>,
 }
 
-impl<'a, A: Allocator> From<&'a mut MeshPackData<A>> for &'a mut Buffer<DeviceLocal, A> {
-    fn from(value: &'a mut MeshPackData<A>) -> Self {
+impl<'a> From<&'a mut MeshPackData> for &'a mut Buffer<DeviceLocal> {
+    fn from(value: &'a mut MeshPackData) -> Self {
         (&mut value.buffer).into()
     }
 }
@@ -96,8 +96,8 @@ pub struct MeshPackBinding {
     pub buffer_ranges: BufferRanges,
 }
 
-impl<'a, A: Allocator> From<&'a MeshPackData<A>> for MeshPackBinding {
-    fn from(value: &'a MeshPackData<A>) -> Self {
+impl<'a> From<&'a MeshPackData> for MeshPackBinding {
+    fn from(value: &'a MeshPackData) -> Self {
         Self {
             buffer: value.buffer.handle(),
             buffer_ranges: value.buffer_ranges,

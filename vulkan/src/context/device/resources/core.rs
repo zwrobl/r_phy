@@ -1,31 +1,23 @@
-use std::{cell::RefCell, convert::Infallible, marker::PhantomData};
+use std::convert::Infallible;
 
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
-use crate::context::{
-    device::{
-        memory::{AllocReq, Allocator},
-        Device,
-    },
-    error::VkResult,
-};
+use crate::context::{device::memory::AllocReq, error::VkResult, Context};
 
 pub mod buffer;
 pub mod image;
 
 pub trait PartialBuilder<'a>: Sized {
     type Config;
-    type Target<A: Allocator>;
+    type Target;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self>;
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self>;
     fn requirements(&self) -> impl Iterator<Item = AllocReq>;
 }
 
-pub struct DummyPack<A: Allocator> {
-    _phantom: PhantomData<A>,
-}
+pub struct DummyPack {}
 
-impl<A: Allocator> Create for DummyPack<A> {
+impl Create for DummyPack {
     type Config<'a> = ();
     type CreateError = Infallible;
 
@@ -34,8 +26,8 @@ impl<A: Allocator> Create for DummyPack<A> {
     }
 }
 
-impl<A: Allocator> Destroy for DummyPack<A> {
-    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+impl Destroy for DummyPack {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {

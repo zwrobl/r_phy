@@ -1,4 +1,4 @@
-use std::{any::TypeId, cell::RefCell, convert::Infallible, error::Error, marker::PhantomData};
+use std::{any::TypeId, convert::Infallible, error::Error, marker::PhantomData};
 
 use type_kit::{Create, Destroy, DestroyResult, DropGuard};
 
@@ -9,15 +9,16 @@ use crate::context::{
             Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
             PodUniform,
         },
-        memory::{AllocReq, Allocator},
+        memory::AllocReq,
+        raw::allocator::AllocatorIndex,
         resources::{
             buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
             image::{ImageReader, Texture2D, Texture2DPartial},
             PartialBuilder,
         },
-        Device,
     },
     error::VkResult,
+    Context,
 };
 
 use super::{Material, TextureSamplers};
@@ -27,9 +28,9 @@ struct MaterialUniformPartial<'a, M: Material> {
     data: Vec<&'a M::Uniform>,
 }
 
-pub struct MaterialPackData<M: Material, A: Allocator> {
-    textures: Option<Vec<Texture2D<A>>>,
-    uniforms: Option<DropGuard<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>>>,
+pub struct MaterialPackData<M: Material> {
+    textures: Option<Vec<Texture2D>>,
+    uniforms: Option<DropGuard<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>>,
     descriptors: DropGuard<DescriptorPool<M::DescriptorLayout>>,
 }
 
@@ -58,20 +59,18 @@ impl<'a, M: Material> MaterialPackPartial<'a, M> {
     }
 }
 
-pub struct MaterialPack<M: Material, A: Allocator> {
-    data: MaterialPackData<M, A>,
+pub struct MaterialPack<M: Material> {
+    data: MaterialPackData<M>,
 }
 
-impl<'a, M: Material, A: Allocator> From<&'a MaterialPack<M, A>> for &'a MaterialPackData<M, A> {
-    fn from(pack: &'a MaterialPack<M, A>) -> Self {
+impl<'a, M: Material> From<&'a MaterialPack<M>> for &'a MaterialPackData<M> {
+    fn from(pack: &'a MaterialPack<M>) -> Self {
         &pack.data
     }
 }
 
-impl<'a, M: Material, A: Allocator> From<&'a mut MaterialPack<M, A>>
-    for &'a mut MaterialPackData<M, A>
-{
-    fn from(pack: &'a mut MaterialPack<M, A>) -> Self {
+impl<'a, M: Material> From<&'a mut MaterialPack<M>> for &'a mut MaterialPackData<M> {
+    fn from(pack: &'a mut MaterialPack<M>) -> Self {
         &mut pack.data
     }
 }
@@ -81,12 +80,10 @@ pub struct MaterialPackRef<'a, M: Material> {
     _phantom: PhantomData<M>,
 }
 
-impl<'a, A: Allocator, M: Material, T: Material> TryFrom<&'a MaterialPack<M, A>>
-    for MaterialPackRef<'a, T>
-{
+impl<'a, M: Material, T: Material> TryFrom<&'a MaterialPack<M>> for MaterialPackRef<'a, T> {
     type Error = &'static str;
 
-    fn try_from(value: &'a MaterialPack<M, A>) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a MaterialPack<M>) -> Result<Self, Self::Error> {
         if TypeId::of::<M>() == TypeId::of::<T>() {
             Ok(Self {
                 descriptors: (&*value.data.descriptors).try_into().unwrap(),
@@ -104,7 +101,7 @@ impl<'a, M: Material> MaterialPackRef<'a, M> {
     }
 }
 
-impl Device {
+impl Context {
     fn prepare_material_pack_textures<'a, M: Material>(
         &self,
         materials: &'a [M],
@@ -128,14 +125,14 @@ impl Device {
         }
     }
 
-    fn allocate_material_pack_textures_memory<'a, A: Allocator>(
+    fn allocate_material_pack_textures_memory<'a>(
         &self,
-        allocator: &mut A,
         textures: Vec<Texture2DPartial<'a>>,
-    ) -> VkResult<Vec<Texture2D<A>>> {
+        allocator: AllocatorIndex,
+    ) -> VkResult<Vec<Texture2D>> {
         textures
             .into_iter()
-            .map(|texture| Texture2D::create(texture, (self, allocator)))
+            .map(|texture| Texture2D::create((texture, allocator), self))
             .collect()
     }
 
@@ -156,14 +153,14 @@ impl Device {
         }
     }
 
-    fn allocate_material_pack_uniforms_memory<'a, M: Material, A: Allocator>(
+    fn allocate_material_pack_uniforms_memory<'a, M: Material>(
         &self,
-        allocator: &mut A,
         partial: MaterialUniformPartial<'a, M>,
-    ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics, A>, Box<dyn Error>>
+        allocator: AllocatorIndex,
+    ) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>, Box<dyn Error>>
     {
         let MaterialUniformPartial { uniform, data } = partial;
-        let mut uniform_buffer = UniformBuffer::create(uniform, (self, &RefCell::new(allocator)))?;
+        let mut uniform_buffer = UniformBuffer::create((uniform, allocator), self)?;
         for (index, uniform) in data.into_iter().enumerate() {
             *uniform_buffer[index].as_inner_mut() = *uniform;
         }
@@ -183,24 +180,24 @@ impl Device {
         })
     }
 
-    pub fn allocate_material_pack_memory<'a, M: Material, A: Allocator>(
+    pub fn allocate_material_pack_memory<'a, M: Material>(
         &self,
-        allocator: &mut A,
         partial: MaterialPackPartial<'a, M>,
-    ) -> Result<MaterialPack<M, A>, Box<dyn Error>> {
+        allocator: AllocatorIndex,
+    ) -> Result<MaterialPack<M>, Box<dyn Error>> {
         let MaterialPackPartial {
             textures,
             uniforms,
             num_materials,
         } = partial;
         let textures = if let Some(textures) = textures {
-            Some(self.allocate_material_pack_textures_memory(allocator, textures)?)
+            Some(self.allocate_material_pack_textures_memory(textures, allocator)?)
         } else {
             None
         };
         let uniforms = if let Some(uniforms) = uniforms {
             Some(DropGuard::new(
-                self.allocate_material_pack_uniforms_memory(allocator, uniforms)?,
+                self.allocate_material_pack_uniforms_memory(uniforms, allocator)?,
             ))
         } else {
             None
@@ -225,33 +222,31 @@ impl Device {
         Ok(MaterialPack { data })
     }
 
-    pub fn load_material_pack<M: Material, A: Allocator>(
+    pub fn load_material_pack<M: Material>(
         &self,
-        allocator: &mut A,
         materials: &[M],
-    ) -> Result<MaterialPack<M, A>, Box<dyn Error>> {
+        allocator: AllocatorIndex,
+    ) -> Result<MaterialPack<M>, Box<dyn Error>> {
         let pack = self.prepare_material_pack(materials)?;
-        let pack = self.allocate_material_pack_memory(allocator, pack)?;
+        let pack = self.allocate_material_pack_memory(pack, allocator)?;
         Ok(pack)
     }
 }
 
-impl<M: Material, A: Allocator> Destroy for MaterialPack<M, A> {
-    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+impl<M: Material> Destroy for MaterialPack<M> {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let (device, allocator) = context;
-        let allocator = &mut *allocator.borrow_mut();
         if let Some(textures) = self.data.textures.as_mut() {
             let _ = textures
                 .iter_mut()
-                .try_for_each(|texture| texture.destroy((device, allocator)));
+                .try_for_each(|texture| texture.destroy(context));
         }
         if let Some(uniforms) = self.data.uniforms.as_mut() {
             let _ = uniforms.destroy(context);
         }
-        let _ = self.data.descriptors.destroy(device);
+        let _ = self.data.descriptors.destroy(context);
         Ok(())
     }
 }

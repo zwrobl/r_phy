@@ -69,8 +69,8 @@ pub type PipelineLayoutMaterial<M> = PipelineLayoutBuilder<
     Cons<ModelNormalMatrix, Nil>,
 >;
 
-pub type PipelineLayoutSkybox<A> =
-    PipelineLayoutBuilder<Cons<TextureDescriptorSet<A>, Nil>, Cons<CameraMatrices, Nil>>;
+pub type PipelineLayoutSkybox =
+    PipelineLayoutBuilder<Cons<TextureDescriptorSet, Nil>, Cons<CameraMatrices, Nil>>;
 
 pub type PipelineLayoutNoMaterial =
     PipelineLayoutBuilder<Cons<CameraDescriptorSet, Nil>, Cons<ModelMatrix, Nil>>;

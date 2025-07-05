@@ -11,7 +11,6 @@ use graphics::{
 use crate::context::device::{
     descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
     framebuffer::presets::AttachmentsGBuffer,
-    memory::Allocator,
     pipeline::{
         GraphicsPipeline, GraphicsPipelinePackList, ModelMatrix, ModelNormalMatrix,
         PipelineBindData, PushConstantRangeMapper,
@@ -110,14 +109,12 @@ pub struct DrawGraph {
     pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
 }
 
-impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
+impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
     pub(super) fn append_draw_call<
-        T1: Allocator,
-        T2: Allocator,
         S: ShaderType,
         D: Drawable,
-        M: MaterialPackList<T2>,
-        V: MeshPackList<T1>,
+        M: MaterialPackList,
+        V: MeshPackList,
     >(
         &mut self,
         material_packs: &M,

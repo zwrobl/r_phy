@@ -1,32 +1,34 @@
 use std::convert::Infallible;
 
-use type_kit::{Create, Destroy, DestroyResult, FromGuard, ScopedInnerMut};
+use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
         raw::{
-            allocator::AllocatorIndex,
-            resources::{
-                memory::{Memory, MemoryAllocateInfo},
-                ResourceIndex,
-            },
+            allocator::{AllocReq, Allocation, AllocationStore, AllocatorInstance},
+            resources::{memory::Memory, ResourceIndex},
         },
         resources::buffer::ByteRange,
     },
-    error::{AllocatorError, ResourceResult},
+    error::{ResourceError, ResourceResult},
     Context,
 };
 
-use super::{Allocation, AllocationIndex, AllocationRequest, Allocator, Strategy};
+use super::{AllocationIndex, Allocator};
 
-pub struct Unpooled {}
+#[derive(Debug)]
+pub struct Unpooled {
+    store: AllocationStore,
+}
 
 impl Create for Unpooled {
     type Config<'a> = ();
-    type CreateError = AllocatorError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> type_kit::CreateResult<Self> {
-        Ok(Unpooled {})
+        Ok(Unpooled {
+            store: AllocationStore::new(),
+        })
     }
 }
 
@@ -39,43 +41,38 @@ impl Destroy for Unpooled {
     }
 }
 
-impl Strategy for Unpooled {
-    type State = ();
-    type CreateConfig<'a> = ();
+impl From<Unpooled> for AllocatorInstance {
+    #[inline]
+    fn from(value: Unpooled) -> Self {
+        AllocatorInstance::Unpooled(value)
+    }
+}
+
+impl Allocator for Unpooled {
+    #[inline]
+    fn allocate<'a>(
+        &mut self,
+        context: &Context,
+        req: AllocReq,
+    ) -> ResourceResult<AllocationIndex> {
+        let requirements = req.requirements();
+        let alloc_info = context.get_memory_allocate_info(req)?;
+        let memory: ResourceIndex<Memory> = context.create_resource(alloc_info)?;
+        let range = ByteRange::new(requirements.size as usize);
+        let index = self.store.push(Allocation::new(memory, range))?;
+        Ok(index)
+    }
 
     #[inline]
-    fn wrap_index(index: type_kit::GuardIndex<Allocator<Self>>) -> AllocatorIndex {
-        AllocatorIndex::Unpooled(index)
-    }
-
-    fn allocate<'a>(
-        mut allocator: ScopedInnerMut<'a, Allocator<Self>>,
-        context: &Context,
-        req: AllocationRequest,
-    ) -> ResourceResult<AllocationIndex> {
-        let alloc_info = MemoryAllocateInfo::new()
-            .with_allocation_size(req.requirements.size)
-            .with_memory_type_index(context.get_memory_type_index(&req)?);
-        let memory: ResourceIndex<Memory> = context.create_resource(alloc_info)?;
-        let range = ByteRange::new(req.requirements.size as usize);
-        let allocation = Allocation::new(memory, range);
-        allocator.memory_map.register(&allocation);
-        let index = allocator.allocations.push(allocation.into_guard())?;
-        Ok((req.memory_type_info.wrap_index)(index))
-    }
-
-    fn free<'a>(
-        mut allocator: type_kit::ScopedInnerMut<'a, Allocator<Self>>,
-        context: &Context,
-        allocation: AllocationIndex,
-    ) -> ResourceResult<()> {
-        let allocation =
-            Allocation::try_from_guard(allocator.allocations.pop(allocation.into_inner())?)
-                .map_err(|(_, err)| err)?;
-        let memory = allocator.memory_map.pop(allocation)?;
-        if let Some(memory) = memory {
+    fn free<'a>(&mut self, context: &Context, allocation: AllocationIndex) -> ResourceResult<()> {
+        if let Some(memory) = self.store.pop(allocation)? {
             context.destroy_resource(memory)?;
         }
         Ok(())
+    }
+
+    #[inline]
+    fn get_allocation(&self, allocation: AllocationIndex) -> ResourceResult<Allocation> {
+        self.store.get_allocation(allocation)
     }
 }

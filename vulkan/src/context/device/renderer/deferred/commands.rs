@@ -12,7 +12,6 @@ use crate::context::device::{
     framebuffer::{
         presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
     },
-    memory::Allocator,
     pipeline::GraphicsPipelinePackList,
     render_pass::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
     swapchain::SwapchainFrame,
@@ -30,7 +29,7 @@ pub(super) struct Commands<P: GraphicsPipelinePackList> {
     pub _phantom: PhantomData<P>,
 }
 
-impl<A: Allocator, P: GraphicsPipelinePackList> DeferredRendererContext<A, P> {
+impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
     pub(super) fn prepare_commands(
         &mut self,
         device: &Device,

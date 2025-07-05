@@ -1,31 +1,30 @@
-use std::{cell::RefCell, error::Error};
+use std::error::Error;
 
-use crate::context::device::{
-    memory::{AllocReq, Allocator},
-    resources::{DummyPack, PartialBuilder},
-    Device,
+use crate::context::{
+    device::{
+        memory::AllocReq,
+        raw::allocator::AllocatorIndex,
+        resources::{DummyPack, PartialBuilder},
+    },
+    Context,
 };
 use graphics::model::{Mesh, MeshTypeList, Vertex};
 use type_kit::{Cons, Create, Destroy, Nil, TypedNil};
 
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
-pub trait MeshPackList<A: Allocator>:
-    for<'a> Destroy<Context<'a> = (&'a Device, &'a RefCell<&'a mut A>)>
-{
-    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V, A>>;
+pub trait MeshPackList: for<'a> Destroy<Context<'a> = &'a Context> {
+    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>>;
 }
 
-impl<A: Allocator> MeshPackList<A> for TypedNil<DummyPack<A>> {
-    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V, A>> {
+impl MeshPackList for TypedNil<DummyPack> {
+    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>> {
         None
     }
 }
 
-impl<V: Vertex, A: Allocator, N: MeshPackList<A>> MeshPackList<A>
-    for Cons<Option<MeshPack<V, A>>, N>
-{
-    fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T, A>> {
+impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<Option<MeshPack<V>>, N> {
+    fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T>> {
         self.head
             .as_ref()
             .and_then(|pack| pack.try_into().ok())
@@ -34,69 +33,69 @@ impl<V: Vertex, A: Allocator, N: MeshPackList<A>> MeshPackList<A>
 }
 
 pub trait MeshPackListBuilder: MeshTypeList {
-    type Pack<A: Allocator>: MeshPackList<A>;
+    type Pack: MeshPackList;
 
-    fn prepare<A: Allocator>(
+    fn prepare(
         &self,
-        device: &Device,
-    ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>>;
+        context: &Context,
+    ) -> Result<impl MeshPackListPartial<Pack = Self::Pack>, Box<dyn Error>>;
 }
 
 impl MeshPackListBuilder for Nil {
-    type Pack<A: Allocator> = TypedNil<DummyPack<A>>;
+    type Pack = TypedNil<DummyPack>;
 
-    fn prepare<A: Allocator>(
+    fn prepare(
         &self,
-        _device: &Device,
-    ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
+        _context: &Context,
+    ) -> Result<impl MeshPackListPartial<Pack = Self::Pack>, Box<dyn Error>> {
         Ok(Nil::new())
     }
 }
 
 impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>>, N> {
-    type Pack<A: Allocator> = Cons<Option<MeshPack<V, A>>, N::Pack<A>>;
+    type Pack = Cons<Option<MeshPack<V>>, N::Pack>;
 
-    fn prepare<A: Allocator>(
+    fn prepare(
         &self,
-        device: &Device,
-    ) -> Result<impl MeshPackListPartial<Pack<A> = Self::Pack<A>>, Box<dyn Error>> {
+        context: &Context,
+    ) -> Result<impl MeshPackListPartial<Pack = Self::Pack>, Box<dyn Error>> {
         let meshes = self.get();
         let partial = if !meshes.is_empty() {
-            Some(MeshPackPartial::prepare(self.get(), device)?)
+            Some(MeshPackPartial::prepare(self.get(), context)?)
         } else {
             None
         };
         Ok(Cons {
             head: partial,
-            tail: self.tail.prepare(device)?,
+            tail: self.tail.prepare(context)?,
         })
     }
 }
 
 pub trait MeshPackListPartial: Sized {
-    type Pack<A: Allocator>: MeshPackList<A>;
+    type Pack: MeshPackList;
 
     fn get_memory_requirements(&self) -> Vec<AllocReq>;
 
-    fn allocate<A: Allocator>(
+    fn allocate(
         self,
-        device: &Device,
-        allocator: &mut A,
-    ) -> Result<Self::Pack<A>, Box<dyn Error>>;
+        context: &Context,
+        allocator: AllocatorIndex,
+    ) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
 impl MeshPackListPartial for Nil {
-    type Pack<A: Allocator> = TypedNil<DummyPack<A>>;
+    type Pack = TypedNil<DummyPack>;
 
     fn get_memory_requirements(&self) -> Vec<AllocReq> {
         vec![]
     }
 
-    fn allocate<A: Allocator>(
+    fn allocate(
         self,
-        _device: &Device,
-        _allocator: &mut A,
-    ) -> Result<Self::Pack<A>, Box<dyn Error>> {
+        _context: &Context,
+        _allocator: AllocatorIndex,
+    ) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(TypedNil::new())
     }
 }
@@ -104,7 +103,7 @@ impl MeshPackListPartial for Nil {
 impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
     for Cons<Option<MeshPackPartial<'a, V>>, N>
 {
-    type Pack<A: Allocator> = Cons<Option<MeshPack<V, A>>, N::Pack<A>>;
+    type Pack = Cons<Option<MeshPack<V>>, N::Pack>;
 
     fn get_memory_requirements(&self) -> Vec<AllocReq> {
         let mut alloc_reqs = self.tail.get_memory_requirements();
@@ -114,23 +113,20 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
         alloc_reqs
     }
 
-    fn allocate<A: Allocator>(
+    fn allocate(
         self,
-        device: &Device,
-        allocator: &mut A,
-    ) -> Result<Self::Pack<A>, Box<dyn Error>> {
+        context: &Context,
+        allocator: AllocatorIndex,
+    ) -> Result<Self::Pack, Box<dyn Error>> {
         let Self { head, tail } = self;
         let pack = if let Some(partial) = head {
-            Some(MeshPack::create(
-                partial,
-                (device, &RefCell::new(allocator)),
-            )?)
+            Some(MeshPack::create((partial, allocator), context)?)
         } else {
             None
         };
         Ok(Cons {
             head: pack,
-            tail: tail.allocate(device, allocator)?,
+            tail: tail.allocate(context, allocator)?,
         })
     }
 }

@@ -3,9 +3,7 @@ use std::marker::PhantomData;
 use ash::vk;
 use bytemuck::{AnyBitPattern, Zeroable};
 
-use crate::context::device::{
-    framebuffer::InputAttachment, memory::Allocator, resources::image::Texture2D,
-};
+use crate::context::device::{framebuffer::InputAttachment, resources::image::Texture2D};
 use graphics::renderer::camera::CameraMatrices;
 use type_kit::{Cons, Nil};
 
@@ -135,7 +133,7 @@ impl DescriptorBinding for CameraMatrices {
     }
 }
 
-impl<A: Allocator> DescriptorBinding for Texture2D<A> {
+impl DescriptorBinding for Texture2D {
     fn has_data() -> bool {
         true
     }
@@ -203,7 +201,7 @@ impl DescriptorBinding for InputAttachment {
 
 pub type CameraDescriptorSet = DescriptorLayoutBuilder<Cons<CameraMatrices, Nil>>;
 
-pub type TextureDescriptorSet<A> = DescriptorLayoutBuilder<Cons<Texture2D<A>, Nil>>;
+pub type TextureDescriptorSet = DescriptorLayoutBuilder<Cons<Texture2D, Nil>>;
 
 pub type GBufferDescriptorSet = DescriptorLayoutBuilder<
     Cons<

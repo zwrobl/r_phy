@@ -11,14 +11,15 @@ pub use uniform::*;
 
 use ash::vk;
 
-use std::{cell::RefCell, convert::Infallible, marker::PhantomData, usize};
+use std::{convert::Infallible, marker::PhantomData, usize};
 
 use crate::context::{
     device::{
-        memory::{AllocReq, AllocReqTyped, Allocator, MemoryProperties},
-        Device,
+        memory::{AllocReq, BindResource, MemoryProperties},
+        raw::allocator::{AllocationEntry, AllocatorIndex},
     },
     error::{VkError, VkResult},
+    Context,
 };
 
 use super::PartialBuilder;
@@ -46,13 +47,14 @@ impl<'a, M: MemoryProperties> BufferBuilder<'a, M> {
 }
 
 #[derive(Debug)]
-pub struct Buffer<M: MemoryProperties, A: Allocator> {
+pub struct Buffer<M: MemoryProperties> {
     size: usize,
     buffer: vk::Buffer,
-    memory: A::Allocation<M>,
+    allocation: AllocationEntry,
+    _phantom: PhantomData<M>,
 }
 
-impl<M: MemoryProperties, A: Allocator> Buffer<M, A> {
+impl<M: MemoryProperties> Buffer<M> {
     pub fn handle(&self) -> vk::Buffer {
         self.buffer
     }
@@ -65,15 +67,16 @@ impl<M: MemoryProperties, A: Allocator> Buffer<M, A> {
 #[derive(Debug)]
 pub struct BufferPartial<M: MemoryProperties> {
     size: usize,
-    req: AllocReqTyped<M>,
+    req: AllocReq,
     buffer: vk::Buffer,
+    _phantom: PhantomData<M>,
 }
 
 impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
     type Config = BufferBuilder<'a, M>;
-    type Target<A: Allocator> = Buffer<M, A>;
+    type Target = Buffer<M>;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
         let BufferBuilder {
             info:
                 BufferInfo {
@@ -92,9 +95,14 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
             p_queue_family_indices: queue_families.as_ptr(),
             ..Default::default()
         };
-        let buffer = unsafe { device.create_buffer(&create_info, None)? };
-        let req = device.get_alloc_req(buffer);
-        Ok(BufferPartial { size, req, buffer })
+        let buffer = unsafe { context.create_buffer(&create_info, None)? };
+        let req = BindResource::new(buffer).get_alloc_req(context, M::memory_type());
+        Ok(BufferPartial {
+            size,
+            req,
+            buffer,
+            _phantom: PhantomData,
+        })
     }
 
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
@@ -102,36 +110,41 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
     }
 }
 
-impl<M: MemoryProperties, A: Allocator> Create for Buffer<M, A> {
-    type Config<'a> = BufferPartial<M>;
+impl<M: MemoryProperties> Create for Buffer<M> {
+    type Config<'a> = (BufferPartial<M>, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (device, allocator) = context;
-        let BufferPartial { size, buffer, req } = config;
-        let memory = allocator.borrow_mut().allocate(device, req)?;
-        device.bind_memory(buffer, &memory)?;
+        let (
+            BufferPartial {
+                size, buffer, req, ..
+            },
+            allocator,
+        ) = config;
+        let allocation = context.allocate(allocator, req)?;
+        context.bind_memory(buffer, allocation)?;
         Ok(Buffer {
             size,
             buffer,
-            memory,
+            allocation,
+            _phantom: PhantomData,
         })
     }
 }
 
-impl<M: MemoryProperties, A: Allocator> Destroy for Buffer<M, A> {
-    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+impl<M: MemoryProperties> Destroy for Buffer<M> {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
+    #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let (device, allocator) = context;
         unsafe {
-            device.destroy_buffer(self.buffer, None);
+            context.destroy_buffer(self.buffer, None);
         }
-        allocator.borrow_mut().free(device, &mut self.memory);
+        let _ = context.free(self.allocation);
         Ok(())
     }
 }

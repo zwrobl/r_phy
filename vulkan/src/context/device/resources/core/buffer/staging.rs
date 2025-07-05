@@ -1,7 +1,4 @@
-use std::{
-    borrow::BorrowMut, cell::RefCell, convert::Infallible, marker::PhantomData,
-    ptr::copy_nonoverlapping,
-};
+use std::{borrow::BorrowMut, convert::Infallible, marker::PhantomData, ptr::copy_nonoverlapping};
 
 use ash::vk;
 use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
@@ -13,7 +10,8 @@ use crate::context::{
             operation::{self, Operation},
             SubmitSemaphoreState,
         },
-        memory::{Allocator, DefaultAllocator, DeviceLocal, HostCoherent},
+        memory::{DeviceLocal, HostCoherent},
+        raw::allocator::AllocatorIndex,
         resources::{
             buffer::{ByteRange, Range},
             image::Image2D,
@@ -22,6 +20,7 @@ use crate::context::{
         Device,
     },
     error::{VkError, VkResult},
+    Context,
 };
 
 use super::{Buffer, BufferBuilder, BufferInfo, PersistentBuffer, PersistentBufferPartial};
@@ -50,7 +49,7 @@ impl StagingBufferBuilder {
 
 pub struct StagingBuffer {
     range: ByteRange,
-    buffer: PersistentBuffer<DefaultAllocator>,
+    buffer: PersistentBuffer,
 }
 
 pub struct WritableRange<T: AnyBitPattern> {
@@ -58,23 +57,23 @@ pub struct WritableRange<T: AnyBitPattern> {
     range: Range<T>,
 }
 
-impl<'a> From<&'a StagingBuffer> for &'a Buffer<HostCoherent, DefaultAllocator> {
+impl<'a> From<&'a StagingBuffer> for &'a Buffer<HostCoherent> {
     fn from(value: &'a StagingBuffer) -> Self {
         (&value.buffer).into()
     }
 }
 
-impl<'a> From<&'a mut StagingBuffer> for &'a mut Buffer<HostCoherent, DefaultAllocator> {
+impl<'a> From<&'a mut StagingBuffer> for &'a mut Buffer<HostCoherent> {
     fn from(value: &'a mut StagingBuffer) -> Self {
         (&mut value.buffer).into()
     }
 }
 
 impl StagingBuffer {
-    pub fn transfer_buffer_data<'b, D: Allocator>(
+    pub fn transfer_buffer_data<'b>(
         &self,
         device: &Device,
-        dst: impl Into<&'b mut Buffer<DeviceLocal, D>>,
+        dst: impl Into<&'b mut Buffer<DeviceLocal>>,
         dst_offset: vk::DeviceSize,
     ) -> VkResult<()> {
         let command = device.allocate_transient_command::<operation::Transfer>()?;
@@ -104,10 +103,10 @@ impl StagingBuffer {
         Ok(())
     }
 
-    pub fn transfer_image_data<'b, A: Allocator>(
+    pub fn transfer_image_data<'b>(
         &self,
         device: &Device,
-        dst: impl Into<&'b mut Image2D<DeviceLocal, A>>,
+        dst: impl Into<&'b mut Image2D<DeviceLocal>>,
         dst_array_layer: u32,
         dst_final_layout: vk::ImageLayout,
     ) -> VkResult<()> {
@@ -193,14 +192,14 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
 }
 
 impl Create for StagingBuffer {
-    type Config<'a> = StagingBufferBuilder;
+    type Config<'a> = (StagingBufferBuilder, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let StagingBufferBuilder { range } = config;
+        let (StagingBufferBuilder { range }, allocator) = config;
         let info = BufferInfo {
             size: range.end,
             usage: vk::BufferUsageFlags::TRANSFER_SRC,
@@ -208,20 +207,17 @@ impl Create for StagingBuffer {
             queue_families: &[operation::Transfer::get_queue_family_index(context)],
         };
         let partial = PersistentBufferPartial::prepare(BufferBuilder::new(info), context)?;
-        let buffer =
-            PersistentBuffer::create(partial, (context, &RefCell::new(&mut DefaultAllocator {})))?;
+        let buffer = PersistentBuffer::create((partial, allocator), context)?;
         Ok(StagingBuffer { range, buffer })
     }
 }
 
 impl Destroy for StagingBuffer {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let _ = self
-            .buffer
-            .destroy((context, &RefCell::new(&mut DefaultAllocator {})));
+        let _ = self.buffer.destroy(context);
         Ok(())
     }
 }

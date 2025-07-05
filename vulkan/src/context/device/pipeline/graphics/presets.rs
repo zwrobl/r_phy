@@ -17,8 +17,8 @@ use super::GraphicsPipelineBuilder;
 //     EmptySubpass,
 // >;
 
-pub type GBufferSkyboxPipeline<At, Al> = GraphicsPipelineBuilder<
-    PipelineLayoutSkybox<Al>,
+pub type GBufferSkyboxPipeline<At> = GraphicsPipelineBuilder<
+    PipelineLayoutSkybox,
     StatesSkybox,
     DeferedRenderPass<At>,
     GBufferSkyboxPass<At>,

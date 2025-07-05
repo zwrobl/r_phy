@@ -1,9 +1,13 @@
-use std::{convert::Infallible, ffi::c_void, fmt::Debug};
+use std::{convert::Infallible, ffi::c_void, fmt::Debug, ops::Deref};
 
-use ash::vk;
+use ash::{prelude::VkResult, vk};
 use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardUnlocked};
 
-use crate::context::{error::ResourceError, Context};
+use crate::context::{
+    device::memory::AllocReq,
+    error::{AllocatorResult, ResourceError},
+    Context,
+};
 
 use super::Resource;
 
@@ -21,22 +25,16 @@ impl Default for MemoryAllocateInfo {
     }
 }
 
-impl MemoryAllocateInfo {
+impl Context {
     #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[inline]
-    pub fn with_memory_type_index(mut self, memory_type_index: u32) -> Self {
-        self.info.memory_type_index = memory_type_index;
-        self
-    }
-
-    #[inline]
-    pub fn with_allocation_size(mut self, allocation_size: vk::DeviceSize) -> Self {
-        self.info.allocation_size = allocation_size;
-        self
+    pub fn get_memory_allocate_info(&self, req: AllocReq) -> AllocatorResult<MemoryAllocateInfo> {
+        Ok(MemoryAllocateInfo {
+            info: vk::MemoryAllocateInfo {
+                allocation_size: req.requirements().size,
+                memory_type_index: self.get_memory_type_index(req)?,
+                ..Default::default()
+            },
+        })
     }
 }
 
@@ -44,8 +42,11 @@ impl MemoryAllocateInfo {
 pub struct Memory {
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
-    type_index: u32,
+    _type_index: u32,
+    // Extract map functionallity to dedicated helper structure, to be used wrapped in Optional here,
+    // Optional<MemoryMapper> to be returned by type function provided by MemoryProperties trait
     ptr: Option<*mut c_void>,
+    map_count: u32,
 }
 
 impl Create for Memory {
@@ -60,10 +61,40 @@ impl Create for Memory {
         let memory = Memory {
             memory: unsafe { context.allocate_memory(&info, None)? },
             size: info.allocation_size,
-            type_index: info.memory_type_index,
+            _type_index: info.memory_type_index,
             ptr: None,
+            map_count: 0,
         };
         Ok(memory)
+    }
+}
+
+impl Memory {
+    pub fn map(&mut self, context: &Context) -> VkResult<*mut c_void> {
+        if self.map_count == 0 && self.ptr.is_none() {
+            let ptr = unsafe {
+                context.map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::empty())?
+            };
+            self.ptr = Some(ptr);
+        }
+        self.map_count += 1;
+        Ok(self.ptr.unwrap())
+    }
+
+    pub fn unmap(&mut self, context: &Context) {
+        self.map_count -= 1;
+        if self.map_count == 0 && self.ptr.is_some() {
+            unsafe { context.unmap_memory(self.memory) };
+            self.ptr = None;
+        }
+    }
+}
+
+impl Deref for Memory {
+    type Target = vk::DeviceMemory;
+
+    fn deref(&self) -> &Self::Target {
+        &self.memory
     }
 }
 

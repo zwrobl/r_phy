@@ -1,14 +1,14 @@
 use std::{convert::Infallible, fmt::Debug, marker::PhantomData};
 
-use ash::vk;
+use ash::vk::{self};
 use type_kit::{
     Create, CreateResult, Destroy, DestroyResult, FromGuard, GenIndexRaw, TypeGuard, Valid,
 };
 
 use crate::context::{
     device::{
-        memory::{MemoryProperties, MemoryTypeInfo},
-        raw::allocator::{AllocationEntry, AllocationRequest, AllocatorIndex},
+        memory::{BindResource, MemoryProperties, MemoryType},
+        raw::allocator::{AllocationEntry, AllocatorIndex},
     },
     error::ResourceError,
     Context,
@@ -91,7 +91,7 @@ impl Default for ArrayInfo {
 #[derive(Debug, Clone, Copy)]
 pub struct ImageCreateInfo<V: ImageType> {
     allocator: AllocatorIndex,
-    memory_type_info: MemoryTypeInfo,
+    memory_type: MemoryType,
     image_info: ImageInfo,
     mip_info: Option<MipInfo>,
     array_info: Option<ArrayInfo>,
@@ -175,11 +175,6 @@ impl<V: ImageType> ImageCreateInfo<V> {
             ..Default::default()
         }
     }
-
-    fn get_allocation_request(&self, context: &Context, image: vk::Image) -> AllocationRequest {
-        let requirements = unsafe { context.get_image_memory_requirements(image) };
-        AllocationRequest::new(self.memory_type_info, requirements)
-    }
 }
 
 #[derive(Debug)]
@@ -201,7 +196,7 @@ impl<V: ImageType> Image<V> {
     ) -> ImageCreateInfo<V> {
         ImageCreateInfo {
             allocator,
-            memory_type_info: M::get_memory_type_info(),
+            memory_type: M::memory_type(),
             image_info,
             mip_info: None,
             array_info: None,
@@ -273,7 +268,7 @@ impl<V: ImageType> Create for Image<V> {
             context.create_resource::<ImageView<V>, _>(config.get_view_create_info(handle))?;
         let memory = context.allocate(
             config.allocator,
-            config.get_allocation_request(&context, handle),
+            BindResource::new(handle).get_alloc_req(context, config.memory_type),
         )?;
         Ok(Self {
             handle,

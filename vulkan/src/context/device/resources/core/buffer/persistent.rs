@@ -1,45 +1,46 @@
-use std::{cell::RefCell, convert::Infallible, ffi::c_void};
+use std::{convert::Infallible, ffi::c_void};
 
 use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        memory::{AllocReq, Allocator, HostCoherent, Memory},
+        memory::{AllocReq, HostCoherent},
+        raw::allocator::AllocatorIndex,
         resources::PartialBuilder,
-        Device,
     },
     error::{VkError, VkResult},
+    Context,
 };
 
-use super::{Buffer, BufferBuilder, BufferPartial, ByteRange};
+use super::{Buffer, BufferBuilder, BufferPartial};
 
 pub struct PersistentBufferPartial {
     buffer: BufferPartial<HostCoherent>,
 }
 
-pub struct PersistentBuffer<A: Allocator> {
-    pub buffer: Buffer<HostCoherent, A>,
+pub struct PersistentBuffer {
+    pub buffer: Buffer<HostCoherent>,
     pub ptr: Option<*mut c_void>,
 }
 
-impl<'a, A: Allocator> From<&'a PersistentBuffer<A>> for &'a Buffer<HostCoherent, A> {
-    fn from(value: &'a PersistentBuffer<A>) -> Self {
+impl<'a> From<&'a PersistentBuffer> for &'a Buffer<HostCoherent> {
+    fn from(value: &'a PersistentBuffer) -> Self {
         &value.buffer
     }
 }
 
-impl<'a, A: Allocator> From<&'a mut PersistentBuffer<A>> for &'a mut Buffer<HostCoherent, A> {
-    fn from(value: &'a mut PersistentBuffer<A>) -> Self {
+impl<'a> From<&'a mut PersistentBuffer> for &'a mut Buffer<HostCoherent> {
+    fn from(value: &'a mut PersistentBuffer) -> Self {
         &mut value.buffer
     }
 }
 
 impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
     type Config = BufferBuilder<'a, HostCoherent>;
-    type Target<A: Allocator> = PersistentBuffer<A>;
+    type Target = PersistentBuffer;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
-        let buffer = BufferPartial::prepare(config, device)?;
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
+        let buffer = BufferPartial::prepare(config, context)?;
         Ok(PersistentBufferPartial { buffer })
     }
 
@@ -48,23 +49,17 @@ impl<'a> PartialBuilder<'a> for PersistentBufferPartial {
     }
 }
 
-impl<A: Allocator> Create for PersistentBuffer<A> {
-    type Config<'a> = PersistentBufferPartial;
+impl Create for PersistentBuffer {
+    type Config<'a> = (PersistentBufferPartial, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (device, allocator) = context;
-        let mut buffer = Buffer::create(config.buffer, (device, allocator))?;
-        let ptr = buffer.memory.map(
-            &device,
-            ByteRange {
-                beg: 0,
-                end: buffer.size,
-            },
-        )?;
+        let (partial, allocator) = config;
+        let buffer = Buffer::create((partial.buffer, allocator), context)?;
+        let ptr = context.map_allocation(buffer.allocation)?;
         Ok(PersistentBuffer {
             buffer,
             ptr: Some(ptr),
@@ -72,17 +67,13 @@ impl<A: Allocator> Create for PersistentBuffer<A> {
     }
 }
 
-impl<A: Allocator> Destroy for PersistentBuffer<A> {
-    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+impl Destroy for PersistentBuffer {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let (device, allocator) = context;
-        if let Some(..) = self.ptr {
-            self.buffer.memory.unmap(device);
-            self.ptr = None;
-        }
-        self.buffer.destroy((device, allocator))?;
+        let _ = context.unmap_allocation(self.buffer.allocation);
+        let _ = self.buffer.destroy(context)?;
         Ok(())
     }
 }

@@ -4,7 +4,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::context::device::{
-    command::operation::Operation, memory::Allocator, resources::buffer::UniformBuffer, Device,
+    command::operation::Operation, resources::buffer::UniformBuffer, Device,
 };
 
 use super::{Descriptor, DescriptorBinding, DescriptorLayout};
@@ -47,9 +47,9 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         self.num_sets
     }
 
-    pub fn write_buffer<U: AnyBitPattern + DescriptorBinding, O: Operation, A: Allocator>(
+    pub fn write_buffer<U: AnyBitPattern + DescriptorBinding, O: Operation>(
         mut self,
-        buffer: &UniformBuffer<U, O, A>,
+        buffer: &UniformBuffer<U, O>,
     ) -> Self {
         let writes = T::get_descriptor_writes::<U>();
         if writes.is_empty() {

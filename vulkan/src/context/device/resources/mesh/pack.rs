@@ -1,4 +1,4 @@
-use std::{any::TypeId, cell::RefCell, convert::Infallible, marker::PhantomData};
+use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
 use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
@@ -6,7 +6,8 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 use crate::context::{
     device::{
         command::operation::{self, Operation},
-        memory::{AllocReq, Allocator},
+        memory::AllocReq,
+        raw::allocator::AllocatorIndex,
         resources::{
             buffer::{
                 Buffer, BufferBuilder, BufferInfo, BufferPartial, Range, StagingBuffer,
@@ -14,9 +15,9 @@ use crate::context::{
             },
             PartialBuilder,
         },
-        Device,
     },
     error::{VkError, VkResult},
+    Context,
 };
 use graphics::model::{Mesh, Vertex};
 
@@ -26,9 +27,9 @@ use super::{
 
 impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
     type Config = &'a [Mesh<V>];
-    type Target<A: Allocator> = MeshPack<V, A>;
+    type Target = MeshPack<V>;
 
-    fn prepare(config: Self::Config, device: &Device) -> VkResult<Self> {
+    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
         let num_vertices = config.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let num_indices = config.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let mut builder = StagingBufferBuilder::new();
@@ -44,9 +45,9 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
                     | vk::BufferUsageFlags::INDEX_BUFFER
                     | vk::BufferUsageFlags::TRANSFER_DST,
                 sharing_mode: vk::SharingMode::EXCLUSIVE,
-                queue_families: &[operation::Graphics::get_queue_family_index(device)],
+                queue_families: &[operation::Graphics::get_queue_family_index(context)],
             }),
-            device,
+            context,
         )?;
         let partial = MeshPackDataPartial {
             buffer,
@@ -65,33 +66,36 @@ pub struct MeshPackPartial<'a, V: Vertex> {
 }
 
 #[derive(Debug)]
-pub struct MeshPack<V: Vertex, A: Allocator> {
-    pub data: MeshPackData<A>,
+pub struct MeshPack<V: Vertex> {
+    pub data: MeshPackData,
     _phantom: PhantomData<V>,
 }
 
-impl<V: Vertex, A: Allocator> Create for MeshPack<V, A> {
-    type Config<'a> = MeshPackPartial<'a, V>;
+impl<V: Vertex> Create for MeshPack<V> {
+    type Config<'a> = (MeshPackPartial<'a, V>, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (device, allocator) = context;
-        let MeshPackPartial {
-            partial:
-                MeshPackDataPartial {
-                    buffer,
-                    buffer_ranges,
-                    meshes,
-                },
-        } = config;
-        let mut buffer = Buffer::create(buffer, (device, allocator))?;
+        let (
+            MeshPackPartial {
+                partial:
+                    MeshPackDataPartial {
+                        buffer,
+                        buffer_ranges,
+                        meshes,
+                    },
+            },
+            allocator,
+        ) = config;
+        let mut buffer = Buffer::create((buffer, allocator), context)?;
         let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let mut builder = StagingBufferBuilder::new();
         let vertex_range = builder.append::<V>(num_vertices);
         let index_range = builder.append::<u32>(num_indices);
         let (vertex_ranges, index_ranges) = {
-            let mut staging_buffer = StagingBuffer::create(builder, device)?;
+            let mut staging_buffer =
+                StagingBuffer::create((builder, context.default_allocator()), &context)?;
             let mut vertex_writer = staging_buffer.write_range::<V>(vertex_range);
             let vertex_ranges = meshes
                 .iter()
@@ -102,8 +106,8 @@ impl<V: Vertex, A: Allocator> Create for MeshPack<V, A> {
                 .iter()
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
-            staging_buffer.transfer_buffer_data(device, &mut buffer, 0)?;
-            let _ = staging_buffer.destroy(device);
+            staging_buffer.transfer_buffer_data(&context, &mut buffer, 0)?;
+            let _ = staging_buffer.destroy(&context);
             (vertex_ranges, index_ranges)
         };
         let meshes = vertex_ranges
@@ -126,8 +130,8 @@ impl<V: Vertex, A: Allocator> Create for MeshPack<V, A> {
     }
 }
 
-impl<V: Vertex, A: Allocator> Destroy for MeshPack<V, A> {
-    type Context<'a> = (&'a Device, &'a RefCell<&'a mut A>);
+impl<V: Vertex> Destroy for MeshPack<V> {
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
@@ -137,23 +141,23 @@ impl<V: Vertex, A: Allocator> Destroy for MeshPack<V, A> {
 }
 
 #[derive(Debug)]
-pub struct MeshPackRef<'a, V: Vertex, A: Allocator> {
-    pub data: &'a MeshPackData<A>,
+pub struct MeshPackRef<'a, V: Vertex> {
+    pub data: &'a MeshPackData,
     pub _phantom: PhantomData<V>,
 }
 
-impl<'a, V: Vertex, A: Allocator> Clone for MeshPackRef<'a, V, A> {
+impl<'a, V: Vertex> Clone for MeshPackRef<'a, V> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, V: Vertex, A: Allocator> Copy for MeshPackRef<'a, V, A> {}
+impl<'a, V: Vertex> Copy for MeshPackRef<'a, V> {}
 
-impl<'a, V: Vertex, T: Vertex, A: Allocator> TryFrom<&'a MeshPack<V, A>> for MeshPackRef<'a, T, A> {
+impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
     type Error = &'static str;
 
-    fn try_from(value: &'a MeshPack<V, A>) -> Result<Self, Self::Error> {
+    fn try_from(value: &'a MeshPack<V>) -> Result<Self, Self::Error> {
         if TypeId::of::<T>() == TypeId::of::<V>() {
             Ok(Self {
                 data: &value.data,
@@ -165,8 +169,8 @@ impl<'a, V: Vertex, T: Vertex, A: Allocator> TryFrom<&'a MeshPack<V, A>> for Mes
     }
 }
 
-impl<'a, V: Vertex, A: Allocator> From<MeshPackRef<'a, V, A>> for MeshPackBinding {
-    fn from(value: MeshPackRef<'a, V, A>) -> Self {
+impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
+    fn from(value: MeshPackRef<'a, V>) -> Self {
         MeshPackBinding {
             buffer: value.data.buffer.handle(),
             buffer_ranges: value.data.buffer_ranges,
@@ -174,7 +178,7 @@ impl<'a, V: Vertex, A: Allocator> From<MeshPackRef<'a, V, A>> for MeshPackBindin
     }
 }
 
-impl<'a, V: Vertex, A: Allocator> MeshPackRef<'a, V, A> {
+impl<'a, V: Vertex> MeshPackRef<'a, V> {
     pub fn get(&self, index: usize) -> MeshRange<V> {
         MeshRange {
             vertices: self.data.meshes[index].vertices.into(),
@@ -182,30 +186,30 @@ impl<'a, V: Vertex, A: Allocator> MeshPackRef<'a, V, A> {
         }
     }
 
-    pub fn as_raw(&self) -> &MeshPackData<A> {
+    pub fn as_raw(&self) -> &MeshPackData {
         self.data
     }
 }
 
-impl<'a, V: Vertex, A: Allocator> From<&'a MeshPack<V, A>> for &'a MeshPackData<A> {
-    fn from(value: &'a MeshPack<V, A>) -> Self {
+impl<'a, V: Vertex> From<&'a MeshPack<V>> for &'a MeshPackData {
+    fn from(value: &'a MeshPack<V>) -> Self {
         &value.data
     }
 }
 
-impl<'a, V: Vertex, A: Allocator> From<&'a mut MeshPack<V, A>> for &'a mut MeshPackData<A> {
-    fn from(value: &'a mut MeshPack<V, A>) -> Self {
+impl<'a, V: Vertex> From<&'a mut MeshPack<V>> for &'a mut MeshPackData {
+    fn from(value: &'a mut MeshPack<V>) -> Self {
         &mut value.data
     }
 }
 
-impl<'a, V: Vertex, A: Allocator> From<&'a MeshPack<V, A>> for MeshPackBinding {
-    fn from(value: &'a MeshPack<V, A>) -> Self {
+impl<'a, V: Vertex> From<&'a MeshPack<V>> for MeshPackBinding {
+    fn from(value: &'a MeshPack<V>) -> Self {
         (&value.data).into()
     }
 }
 
-impl<V: Vertex, A: Allocator> MeshPack<V, A> {
+impl<V: Vertex> MeshPack<V> {
     pub fn get(&self, index: usize) -> MeshRange<V> {
         self.data.meshes[index].into()
     }
@@ -234,13 +238,13 @@ pub struct MeshRange<V: Vertex> {
     pub indices: Range<u32>,
 }
 
-impl Device {
-    pub fn load_mesh_pack<V: Vertex, A: Allocator>(
+impl Context {
+    pub fn load_mesh_pack<V: Vertex>(
         &self,
-        allocator: &mut A,
         meshes: &[Mesh<V>],
-    ) -> VkResult<MeshPack<V, A>> {
+        allocator: AllocatorIndex,
+    ) -> VkResult<MeshPack<V>> {
         let partial = MeshPackPartial::prepare(meshes, self)?;
-        MeshPack::create(partial, (self, &RefCell::new(allocator)))
+        MeshPack::create((partial, allocator), self)
     }
 }
