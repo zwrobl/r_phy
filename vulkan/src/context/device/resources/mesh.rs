@@ -11,9 +11,13 @@ use strum::EnumCount;
 
 use graphics::model::{Mesh, Vertex};
 
-use crate::context::device::memory::DeviceLocal;
-
-use super::buffer::{Buffer, BufferPartial, ByteRange};
+use crate::context::device::{
+    memory::DeviceLocal,
+    raw::{
+        range::ByteRange,
+        resources::buffer::{Buffer, BufferPartial},
+    },
+};
 
 #[derive(strum::EnumCount)]
 pub enum BufferType {
@@ -99,7 +103,7 @@ pub struct MeshPackBinding {
 impl<'a> From<&'a MeshPackData> for MeshPackBinding {
     fn from(value: &'a MeshPackData) -> Self {
         Self {
-            buffer: value.buffer.handle(),
+            buffer: value.buffer.get_vk_buffer(),
             buffer_ranges: value.buffer_ranges,
         }
     }

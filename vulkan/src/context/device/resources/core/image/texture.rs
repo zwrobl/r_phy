@@ -5,14 +5,14 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        memory::{AllocReq, DeviceLocal},
-        raw::allocator::AllocatorIndex,
-        resources::{
-            buffer::{StagingBuffer, StagingBufferBuilder},
-            PartialBuilder,
+        memory::DeviceLocal,
+        raw::{
+            allocator::AllocatorIndex,
+            resources::buffer::{StagingBuffer, StagingBufferBuilder, StagingBufferPartial},
+            Partial,
         },
     },
-    error::{VkError, VkResult},
+    error::{ResourceError, VkError},
     Context,
 };
 
@@ -21,6 +21,40 @@ use super::{Image2D, Image2DBuilder, Image2DPartial, ImageReader};
 pub struct Texture2DPartial<'a> {
     image: Image2DPartial<DeviceLocal>,
     reader: ImageReader<'a>,
+}
+
+impl<'c> Create for Texture2DPartial<'c> {
+    type Config<'a> = ImageReader<'c>;
+
+    type CreateError = ResourceError;
+
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let image = Image2DPartial::create(Image2DBuilder::new(config.info()?), context)?;
+        Ok(Texture2DPartial {
+            image,
+            reader: config,
+        })
+    }
+}
+
+impl<'a> Partial for Texture2DPartial<'a> {
+    #[inline]
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.image.register_memory_requirements(builder);
+    }
+}
+
+impl<'b> Destroy for Texture2DPartial<'b> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.image.destroy(context)
+    }
 }
 
 pub struct Texture2D {
@@ -38,23 +72,6 @@ impl From<&Texture2D> for vk::DescriptorImageInfo {
     }
 }
 
-impl<'a> PartialBuilder<'a> for Texture2DPartial<'a> {
-    type Config = ImageReader<'a>;
-    type Target = Texture2D;
-
-    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
-        let image = Image2DPartial::prepare(Image2DBuilder::new(config.info()?), context)?;
-        Ok(Texture2DPartial {
-            image,
-            reader: config,
-        })
-    }
-
-    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
-        self.image.requirements()
-    }
-}
-
 impl Create for Texture2D {
     type Config<'a> = (Texture2DPartial<'a>, AllocatorIndex);
     type CreateError = VkError;
@@ -64,9 +81,12 @@ impl Create for Texture2D {
         let mut image = Image2D::create((image, allocator), context)?;
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(reader.required_buffer_size()?);
+        let stating_buffer_partial = StagingBufferPartial::create(builder, context)?;
         {
-            let mut staging_buffer =
-                StagingBuffer::create((builder, context.default_allocator()), context)?;
+            let mut staging_buffer = StagingBuffer::create(
+                (stating_buffer_partial, context.default_allocator()),
+                context,
+            )?;
             let mut image_range = staging_buffer.write_range::<u8>(image_range);
             let staging_area = image_range.remaining_as_slice_mut();
             while let Some(dst_layer) = reader.read(staging_area)? {

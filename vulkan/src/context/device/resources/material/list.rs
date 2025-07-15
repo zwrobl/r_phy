@@ -1,7 +1,14 @@
 use std::error::Error;
 
 use crate::context::{
-    device::{memory::AllocReq, raw::allocator::AllocatorIndex, resources::DummyPack},
+    device::{
+        memory::AllocReq,
+        raw::{
+            allocator::{AllocatorBuilder, AllocatorIndex},
+            Partial,
+        },
+        resources::DummyPack,
+    },
     Context,
 };
 use graphics::model::{MaterialCollection, MaterialTypeList};
@@ -52,7 +59,7 @@ impl<M: Material, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<V
 pub trait MaterialPackListPartial: Sized {
     type Pack: MaterialPackList;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReq>;
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B);
 
     fn allocate(
         self,
@@ -64,9 +71,7 @@ pub trait MaterialPackListPartial: Sized {
 impl MaterialPackListPartial for Nil {
     type Pack = TypedNil<DummyPack>;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        vec![]
-    }
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {}
 
     fn allocate(
         self,
@@ -82,12 +87,9 @@ impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
 {
     type Pack = Cons<Option<MaterialPack<M>>, N::Pack>;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        let mut alloc_reqs = self.tail.get_memory_requirements();
-        if let Some(partial) = &self.head {
-            alloc_reqs.extend(partial.get_alloc_req());
-        }
-        alloc_reqs
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
+        self.head.register_memory_requirements(builder);
+        self.tail.register_memory_requirements(builder);
     }
 
     fn allocate(

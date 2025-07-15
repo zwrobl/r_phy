@@ -4,7 +4,10 @@ use graphics::renderer::camera::CameraMatrices;
 use math::types::Vector4;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
-use crate::context::error::{VkError, VkResult};
+use crate::context::{
+    device::raw::resources::buffer::Buffer,
+    error::{VkError, VkResult},
+};
 
 use self::{
     level::{Level, Primary, Secondary},
@@ -18,8 +21,7 @@ use super::{
     pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
     resources::{
-        buffer::Buffer, image::Image2D, BufferType, LayoutSkybox, MeshPackBinding,
-        MeshRangeBindData, Skybox,
+        image::Image2D, BufferType, LayoutSkybox, MeshPackBinding, MeshRangeBindData, Skybox,
     },
     swapchain::SwapchainFrame,
     Device, QueueFamilies,
@@ -198,7 +200,7 @@ pub mod operation {
     // Lots of pub(in path) syntax in this module
     // some of it contents could be moved to separate module
     // placed higher in the source tree
-    pub trait Operation {
+    pub trait Operation: 'static {
         fn get_queue(device: &Device) -> vk::Queue;
         fn get_queue_family_index(device: &Device) -> u32;
         fn get_transient_command_pool(device: &Device) -> vk::CommandPool;
@@ -437,7 +439,12 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         let src = src.into();
         let dst = dst.into();
         unsafe {
-            device.cmd_copy_buffer(L::buffer(&command.data), src.handle(), dst.handle(), ranges);
+            device.cmd_copy_buffer(
+                L::buffer(&command.data),
+                src.get_vk_buffer(),
+                dst.get_vk_buffer(),
+                ranges,
+            );
         }
         RecordingCommand(command, device)
     }
@@ -639,7 +646,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         unsafe {
             device.cmd_copy_buffer_to_image(
                 L::buffer(&command.data),
-                src.handle(),
+                src.get_vk_buffer(),
                 dst.image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[vk::BufferImageCopy {

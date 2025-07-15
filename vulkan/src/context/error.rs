@@ -58,11 +58,12 @@ impl Display for CollectionError {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum ResourceError {
     AllocatorError(AllocatorError),
     TypeConversion(TypeGuardConversionError),
     CollectionError(CollectionError),
+    ImageError(ImageError),
     VkError(vk::Result),
 }
 
@@ -72,6 +73,7 @@ impl Display for ResourceError {
             ResourceError::AllocatorError(error) => write!(f, "{}", error),
             ResourceError::TypeConversion(error) => write!(f, "{}", error),
             ResourceError::CollectionError(error) => write!(f, "{}", error),
+            ResourceError::ImageError(error) => write!(f, "{}", error),
             ResourceError::VkError(error) => write!(f, "Vulkan error: {:?}", error),
         }
     }
@@ -100,6 +102,12 @@ impl From<GenCollectionError> for ResourceError {
 impl From<GuardCollectionError> for ResourceError {
     fn from(error: GuardCollectionError) -> Self {
         ResourceError::CollectionError(CollectionError::GuardCollection(error))
+    }
+}
+
+impl From<ImageError> for ResourceError {
+    fn from(error: ImageError) -> Self {
+        ResourceError::ImageError(error)
     }
 }
 

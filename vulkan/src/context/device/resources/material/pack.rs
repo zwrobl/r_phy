@@ -9,13 +9,12 @@ use crate::context::{
             Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter, FragmentStage,
             PodUniform,
         },
-        memory::AllocReq,
-        raw::allocator::AllocatorIndex,
-        resources::{
-            buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
-            image::{ImageReader, Texture2D, Texture2DPartial},
-            PartialBuilder,
+        raw::{
+            allocator::AllocatorIndex,
+            resources::buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+            Partial,
         },
+        resources::image::{ImageReader, Texture2D, Texture2DPartial},
     },
     error::VkResult,
     Context,
@@ -26,6 +25,25 @@ use super::{Material, TextureSamplers};
 struct MaterialUniformPartial<'a, M: Material> {
     uniform: UniformBufferPartial<PodUniform<M::Uniform, FragmentStage>, Graphics>,
     data: Vec<&'a M::Uniform>,
+}
+
+impl<'a, M: Material> Partial for MaterialUniformPartial<'a, M> {
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.uniform.register_memory_requirements(builder);
+    }
+}
+
+impl<'b, M: Material> Destroy for MaterialUniformPartial<'b, M> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.uniform.destroy(context)
+    }
 }
 
 pub struct MaterialPackData<M: Material> {
@@ -40,22 +58,26 @@ pub struct MaterialPackPartial<'a, M: Material> {
     num_materials: usize,
 }
 
-impl<'a, M: Material> MaterialPackPartial<'a, M> {
-    pub fn get_alloc_req(&self) -> impl Iterator<Item = AllocReq> {
-        let mut alloc_reqs: Vec<AllocReq> = if let Some(buffer) = &self.uniforms {
-            buffer.uniform.requirements().collect()
-        } else {
-            vec![]
-        };
-        if let Some(textures) = &self.textures {
-            alloc_reqs.extend(
-                textures
-                    .iter()
-                    .map(|texture| texture.requirements())
-                    .flatten(),
-            );
-        }
-        alloc_reqs.into_iter()
+impl<'a, M: Material> Partial for MaterialPackPartial<'a, M> {
+    #[inline]
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.uniforms.register_memory_requirements(builder);
+        self.textures.register_memory_requirements(builder);
+    }
+}
+
+impl<'b, M: Material> Destroy for MaterialPackPartial<'b, M> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let _ = self.uniforms.destroy(context);
+        let _ = self.textures.destroy(context);
+        Ok(())
     }
 }
 
@@ -115,7 +137,7 @@ impl Context {
                     material
                         .images()
                         .unwrap()
-                        .map(|image| Texture2DPartial::prepare(ImageReader::image(image)?, self))
+                        .map(|image| Texture2DPartial::create(ImageReader::image(image)?, self))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -145,8 +167,10 @@ impl Context {
             .filter_map(|material| material.uniform())
             .collect::<Vec<_>>();
         if !data.is_empty() {
-            let uniform =
-                UniformBufferPartial::prepare(UniformBufferBuilder::new(materials.len()), self)?;
+            let uniform = UniformBufferPartial::create(
+                UniformBufferInfoBuilder::new().with_len(materials.len()),
+                self,
+            )?;
             Ok(Some(MaterialUniformPartial { uniform, data }))
         } else {
             Ok(None)

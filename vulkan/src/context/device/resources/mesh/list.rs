@@ -2,9 +2,11 @@ use std::error::Error;
 
 use crate::context::{
     device::{
-        memory::AllocReq,
-        raw::allocator::AllocatorIndex,
-        resources::{DummyPack, PartialBuilder},
+        raw::{
+            allocator::{AllocatorBuilder, AllocatorIndex},
+            Partial,
+        },
+        resources::DummyPack,
     },
     Context,
 };
@@ -61,7 +63,7 @@ impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>
     ) -> Result<impl MeshPackListPartial<Pack = Self::Pack>, Box<dyn Error>> {
         let meshes = self.get();
         let partial = if !meshes.is_empty() {
-            Some(MeshPackPartial::prepare(self.get(), context)?)
+            Some(MeshPackPartial::create(self.get(), context)?)
         } else {
             None
         };
@@ -75,7 +77,7 @@ impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>
 pub trait MeshPackListPartial: Sized {
     type Pack: MeshPackList;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReq>;
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B);
 
     fn allocate(
         self,
@@ -87,10 +89,6 @@ pub trait MeshPackListPartial: Sized {
 impl MeshPackListPartial for Nil {
     type Pack = TypedNil<DummyPack>;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        vec![]
-    }
-
     fn allocate(
         self,
         _context: &Context,
@@ -98,6 +96,9 @@ impl MeshPackListPartial for Nil {
     ) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(TypedNil::new())
     }
+
+    #[inline]
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {}
 }
 
 impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
@@ -105,12 +106,10 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
 {
     type Pack = Cons<Option<MeshPack<V>>, N::Pack>;
 
-    fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        let mut alloc_reqs = self.tail.get_memory_requirements();
-        if let Some(partial) = &self.head {
-            alloc_reqs.extend(partial.requirements());
-        }
-        alloc_reqs
+    #[inline]
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
+        self.head.register_memory_requirements(builder);
+        self.tail.register_memory_requirements(builder);
     }
 
     fn allocate(

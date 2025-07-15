@@ -24,26 +24,25 @@ use crate::context::{
             presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
             InputAttachment,
         },
-        memory::{AllocReq, DeviceLocal},
+        memory::DeviceLocal,
         pipeline::{
             GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
             GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
             GraphicsPipelinePackList, ModuleLoader, Modules, PipelineLayoutMaterial,
             ShaderDirectory, StatesDepthWriteDisabled,
         },
-        raw::allocator::AllocatorIndex,
+        raw::{allocator::AllocatorIndex, Partial},
         render_pass::{
             DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
         },
         resources::{
             image::{Image2D, Image2DPartial},
-            MaterialPackList, MeshPack, MeshPackList, MeshPackPartial, PartialBuilder, Skybox,
-            SkyboxPartial,
+            MaterialPackList, MeshPack, MeshPackList, MeshPackPartial, Skybox, SkyboxPartial,
         },
         swapchain::Swapchain,
         Device,
     },
-    error::{ShaderResult, VkError, VkResult},
+    error::{ResourceError, ShaderResult, VkError},
     Context,
 };
 
@@ -252,17 +251,49 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
     }
 }
 
-impl GBufferPartial {
+impl Create for GBufferPartial {
+    type Config<'a> = ();
+
+    type CreateError = ResourceError;
+
+    fn create<'a, 'b>(_config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        Ok(GBufferPartial {
+            combined: context.prepare_color_attachment_image()?,
+            albedo: context.prepare_color_attachment_image()?,
+            normal: context.prepare_color_attachment_image()?,
+            position: context.prepare_color_attachment_image()?,
+            depth: context.prepare_depth_stencil_attachment_image()?,
+        })
+    }
+}
+
+impl Partial for GBufferPartial {
     #[inline]
-    pub fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        self.combined
-            .requirements()
-            .chain(self.combined.requirements())
-            .chain(self.albedo.requirements())
-            .chain(self.normal.requirements())
-            .chain(self.position.requirements())
-            .chain(self.depth.requirements())
-            .collect()
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.albedo.register_memory_requirements(builder);
+        self.combined.register_memory_requirements(builder);
+        self.depth.register_memory_requirements(builder);
+        self.normal.register_memory_requirements(builder);
+        self.position.register_memory_requirements(builder);
+    }
+}
+
+impl Destroy for GBufferPartial {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.albedo.destroy(context);
+        self.combined.destroy(context);
+        self.depth.destroy(context);
+        self.normal.destroy(context);
+        self.position.destroy(context);
+        Ok(())
     }
 }
 
@@ -278,16 +309,6 @@ impl GBuffer {
             .push(self.normal.image_view)
             .push(self.albedo.image_view)
             .push(self.combined.image_view)
-    }
-
-    pub fn prepare(context: &Context) -> VkResult<GBufferPartial> {
-        Ok(GBufferPartial {
-            combined: context.prepare_color_attachment_image()?,
-            albedo: context.prepare_color_attachment_image()?,
-            normal: context.prepare_color_attachment_image()?,
-            position: context.prepare_color_attachment_image()?,
-            depth: context.prepare_depth_stencil_attachment_image()?,
-        })
     }
 }
 
@@ -445,32 +466,41 @@ impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererPipelines<P> {
     }
 }
 
-impl<'a> DeferredRendererPartial<'a> {
-    #[inline]
-    pub fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        self.g_buffer
-            .get_memory_requirements()
-            .into_iter()
-            .chain(self.skybox.get_memory_requirements().into_iter())
-            .chain(self.meshes.requirements())
-            .collect()
+impl<'c> Create for DeferredRendererPartial<'c> {
+    type Config<'a> = &'a Path;
+
+    type CreateError = ResourceError;
+
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        Ok(DeferredRendererPartial {
+            g_buffer: GBufferPartial::create((), context)?,
+            skybox: SkyboxPartial::create(config, context)?,
+            meshes: MeshPackPartial::create(get_deferred_renderer_meshes(), &context)?,
+        })
     }
 }
 
-impl DeferredRenderer {
-    #[inline]
-    pub fn prepare<'a>(
-        context: &Context,
-        cubemap_path: &'a Path,
-    ) -> VkResult<DeferredRendererPartial<'a>> {
-        Ok(DeferredRendererPartial {
-            g_buffer: GBuffer::prepare(context)?,
-            skybox: Skybox::<GBufferSkyboxPipeline<AttachmentsGBuffer>>::prepare(
-                context,
-                cubemap_path,
-            )?,
-            meshes: MeshPackPartial::prepare(get_deferred_renderer_meshes(), &context)?,
-        })
+impl<'a> Partial for DeferredRendererPartial<'a> {
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.g_buffer.register_memory_requirements(builder);
+        self.meshes.register_memory_requirements(builder);
+        self.skybox.register_memory_requirements(builder);
+    }
+}
+
+impl<'b> Destroy for DeferredRendererPartial<'b> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.g_buffer.destroy(context);
+        self.meshes.destroy(context);
+        self.skybox.destroy(context);
+        Ok(())
     }
 }
 

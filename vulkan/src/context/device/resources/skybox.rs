@@ -9,14 +9,13 @@ use physics::shape;
 use crate::context::{
     device::{
         descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
-        memory::AllocReq,
         pipeline::{
             GraphicsPipeline, GraphicsPipelineConfig, PipelineLayoutBuilder, ShaderDirectory,
         },
-        raw::allocator::AllocatorIndex,
-        resources::{image::Texture2DPartial, MeshPackPartial, PartialBuilder},
+        raw::{allocator::AllocatorIndex, Partial},
+        resources::{image::Texture2DPartial, MeshPackPartial},
     },
-    error::{VkError, VkResult},
+    error::{ResourceError, VkError},
     Context,
 };
 use type_kit::{Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
@@ -56,22 +55,41 @@ fn get_skybox_meshes() -> &'static [Mesh<CommonVertex>] {
     }
 }
 
-impl<'a> SkyboxPartial<'a> {
-    #[inline]
-    pub fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        self.cubemap
-            .requirements()
-            .chain(self.cube.requirements())
-            .collect()
+impl<'c> Create for SkyboxPartial<'c> {
+    type Config<'a> = &'a Path;
+
+    type CreateError = ResourceError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        Ok(SkyboxPartial {
+            cubemap: Texture2DPartial::create(ImageReader::cube(config)?, context)?,
+            cube: MeshPackPartial::create(get_skybox_meshes(), context)?,
+        })
     }
 }
 
-impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Skybox<L> {
-    pub fn prepare<'a>(context: &Context, cubemap_path: &'a Path) -> VkResult<SkyboxPartial<'a>> {
-        Ok(SkyboxPartial {
-            cubemap: Texture2DPartial::prepare(ImageReader::cube(cubemap_path)?, &context)?,
-            cube: MeshPackPartial::prepare(get_skybox_meshes(), &context)?,
-        })
+impl<'a> Partial for SkyboxPartial<'a> {
+    #[inline]
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.cube.register_memory_requirements(builder);
+        self.cubemap.register_memory_requirements(builder);
+    }
+}
+
+impl<'b> Destroy for SkyboxPartial<'b> {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.cube.destroy(context);
+        self.cubemap.destroy(context);
+        Ok(())
     }
 }
 

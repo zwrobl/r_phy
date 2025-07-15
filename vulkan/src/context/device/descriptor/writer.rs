@@ -4,7 +4,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::context::device::{
-    command::operation::Operation, resources::buffer::UniformBuffer, Device,
+    command::operation::Operation, raw::resources::buffer::UniformBuffer, Device,
 };
 
 use super::{Descriptor, DescriptorBinding, DescriptorLayout};
@@ -72,7 +72,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         let buffer_write_base_index = self.bufer_writes.len();
         self.bufer_writes
             .extend((0..num_uniforms).map(|index| vk::DescriptorBufferInfo {
-                buffer: buffer.handle(),
+                buffer: buffer.get_vk_buffer(),
                 offset: (size_of::<U>() * index) as vk::DeviceSize,
                 range: size_of::<U>() as vk::DeviceSize,
             }));

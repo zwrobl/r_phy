@@ -349,6 +349,62 @@ impl<T: Destroy> Destroy for Option<T> {
     }
 }
 
+pub struct VecDestoryError<T: Destroy> {
+    err_item: T,
+    err: T::DestroyError,
+}
+
+// TODO: It is reasonable to require for Destory: Debug,
+// as printing the type for destory failure could be common
+impl<T: Destroy> Debug for VecDestoryError<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VecDestoryError")
+            .field("err", &self.err)
+            .finish()
+    }
+}
+
+impl<T: Destroy> Display for VecDestoryError<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.err)
+    }
+}
+
+impl<T: Destroy> Error for VecDestoryError<T> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.err.source()
+    }
+}
+
+impl<T: Destroy> Destroy for Vec<T>
+where
+    for<'a> T::Context<'a>: Copy,
+{
+    type Context<'a> = T::Context<'a>;
+
+    type DestroyError = VecDestoryError<T>;
+
+    // TODO: Error handling in this case is only viable for aborting the application,
+    // as some iterm for which .destory(..) returns error is kept in the collection
+    // what are viable approaches for the end user to handle such situaion?
+    // - inspect failing object and fix the issue? The failing object should be returned in the result
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        if let Err((index, err)) = self
+            .iter_mut()
+            .enumerate()
+            .rev()
+            .try_for_each(|(index, item)| item.destroy(context).map_err(|err| (index, err)))
+        {
+            let err_item = self.swap_remove(index);
+            self.truncate(index);
+            Err(VecDestoryError { err_item, err })
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct DropGuard<T: Destroy> {
     #[cfg(debug_assertions)]

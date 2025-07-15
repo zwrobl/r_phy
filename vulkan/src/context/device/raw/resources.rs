@@ -7,9 +7,9 @@ use std::{convert::Infallible, fmt::Debug};
 use buffer::BufferRaw;
 use image::{ImageRaw, ImageViewRaw};
 use type_kit::{
-    list_type, BorrowList, Cons, Contains, Conv, Create, Destroy, DestroyResult, DropGuardError,
+    list_type, BorrowList, Cons, Contains, Create, Destroy, DestroyResult, DropGuardError,
     FromGuard, GenCollectionResult, GenIndexRaw, GuardIndex, IndexList, Marked, Marker, Nil,
-    ScopedEntryMutResult, ScopedEntryResult, TypeGuard, TypeGuardCollection, TypedIndex,
+    ScopedEntryMutResult, ScopedEntryResult, TypeGuardCollection, TypedIndex,
 };
 
 use crate::context::{

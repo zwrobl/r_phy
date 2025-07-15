@@ -2,9 +2,12 @@ use std::convert::Infallible;
 
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
-use crate::context::{device::memory::AllocReq, error::VkResult, Context};
+use crate::context::{
+    device::{memory::AllocReq, raw::Partial},
+    error::VkResult,
+    Context,
+};
 
-pub mod buffer;
 pub mod image;
 
 pub trait PartialBuilder<'a>: Sized {
@@ -31,6 +34,15 @@ impl Destroy for DummyPack {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
+        unreachable!()
+    }
+}
+
+impl Partial for DummyPack {
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        _builder: &mut B,
+    ) {
         unreachable!()
     }
 }

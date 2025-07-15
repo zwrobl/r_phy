@@ -11,7 +11,11 @@ use type_kit::{
 };
 
 use crate::context::{
-    device::{memory::AllocReq, raw::allocator::AllocatorIndex},
+    device::raw::{
+        allocator::AllocatorIndex,
+        resources::buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+        Partial,
+    },
     error::{VkError, VkResult},
     Context,
 };
@@ -33,10 +37,7 @@ use super::{
     pipeline::{
         GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList, ModuleLoader,
     },
-    resources::{
-        buffer::{UniformBuffer, UniformBufferBuilder, UniformBufferPartial},
-        MaterialPackList, MeshPackList, PartialBuilder,
-    },
+    resources::{MaterialPackList, MeshPackList},
     swapchain::{SwapchainFrame, SwapchainImageSync},
     Device,
 };
@@ -90,10 +91,22 @@ pub struct CameraUniformPartial {
     buffer: UniformBufferPartial<CameraMatrices, Graphics>,
 }
 
-impl CameraUniformPartial {
-    #[inline]
-    pub fn get_memory_requirements(&self) -> Vec<AllocReq> {
-        self.buffer.requirements().collect()
+impl Destroy for CameraUniformPartial {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.buffer.destroy(context)
+    }
+}
+
+impl Partial for CameraUniformPartial {
+    fn register_memory_requirements<B: super::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.buffer.register_memory_requirements(builder);
     }
 }
 
@@ -101,8 +114,8 @@ impl CameraUniform {
     #[inline]
     pub fn prepare<R: Frame>(context: &Context, renderer: &R) -> VkResult<CameraUniformPartial> {
         Ok(CameraUniformPartial {
-            buffer: UniformBufferPartial::prepare(
-                UniformBufferBuilder::new(renderer.get_num_frames()),
+            buffer: UniformBufferPartial::create(
+                UniformBufferInfoBuilder::new().with_len(renderer.get_num_frames()),
                 &context,
             )?,
         })
@@ -153,11 +166,11 @@ impl Create for CameraUniform {
 
 impl Destroy for CameraUniform {
     type Context<'a> = &'a Context;
-    type DestroyError = DropGuardError<Infallible>;
+    type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.descriptors.destroy(context)?;
-        self.uniform_buffer.destroy(context)?;
+        let _ = self.descriptors.destroy(context);
+        let _ = self.uniform_buffer.destroy(context);
         Ok(())
     }
 }

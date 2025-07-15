@@ -6,17 +6,18 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 use crate::context::{
     device::{
         command::operation::{self, Operation},
-        memory::AllocReq,
-        raw::allocator::AllocatorIndex,
-        resources::{
-            buffer::{
-                Buffer, BufferBuilder, BufferInfo, BufferPartial, Range, StagingBuffer,
-                StagingBufferBuilder,
+        memory::DeviceLocal,
+        raw::{
+            allocator::{AllocatorBuilder, AllocatorIndex},
+            range::Range,
+            resources::buffer::{
+                Buffer, BufferInfoBuilder, BufferPartial, StagingBuffer, StagingBufferBuilder,
+                StagingBufferPartial,
             },
-            PartialBuilder,
+            Partial,
         },
     },
-    error::{VkError, VkResult},
+    error::{ResourceError, VkError, VkResult},
     Context,
 };
 use graphics::model::{Mesh, Vertex};
@@ -25,11 +26,19 @@ use super::{
     BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData, MeshPackDataPartial,
 };
 
-impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
-    type Config = &'a [Mesh<V>];
-    type Target = MeshPack<V>;
+impl<'a, V: Vertex> Partial for MeshPackPartial<'a, V> {
+    #[inline]
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
+        self.partial.buffer.register_memory_requirements(builder);
+    }
+}
 
-    fn prepare(config: Self::Config, context: &Context) -> VkResult<Self> {
+impl<'b, V: Vertex> Create for MeshPackPartial<'b, V> {
+    type Config<'a> = &'b [Mesh<V>];
+
+    type CreateError = ResourceError;
+
+    fn create<'a>(config: Self::Config<'a>, context: Self::Context<'a>) -> CreateResult<Self> {
         let num_vertices = config.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let num_indices = config.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let mut builder = StagingBufferBuilder::new();
@@ -38,15 +47,16 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
         let mut buffer_ranges = BufferRanges::new();
         buffer_ranges.set(BufferType::Vertex, vertex_range);
         buffer_ranges.set(BufferType::Index, index_range);
-        let buffer = BufferPartial::prepare(
-            BufferBuilder::new(BufferInfo {
-                size: buffer_ranges.get_rquired_buffer_size(),
-                usage: vk::BufferUsageFlags::VERTEX_BUFFER
-                    | vk::BufferUsageFlags::INDEX_BUFFER
-                    | vk::BufferUsageFlags::TRANSFER_DST,
-                sharing_mode: vk::SharingMode::EXCLUSIVE,
-                queue_families: &[operation::Graphics::get_queue_family_index(context)],
-            }),
+        let buffer = BufferPartial::create(
+            BufferInfoBuilder::<DeviceLocal>::new()
+                .with_sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .with_usage(
+                    vk::BufferUsageFlags::VERTEX_BUFFER
+                        | vk::BufferUsageFlags::INDEX_BUFFER
+                        | vk::BufferUsageFlags::TRANSFER_DST,
+                )
+                .with_queue_families(&[operation::Graphics::get_queue_family_index(context)])
+                .with_size(buffer_ranges.get_rquired_buffer_size() as vk::DeviceSize),
             context,
         )?;
         let partial = MeshPackDataPartial {
@@ -56,8 +66,15 @@ impl<'a, V: Vertex> PartialBuilder<'a> for MeshPackPartial<'a, V> {
         };
         Ok(MeshPackPartial { partial })
     }
-    fn requirements(&self) -> impl Iterator<Item = AllocReq> {
-        self.partial.buffer.requirements()
+}
+
+impl<'b, V: Vertex> Destroy for MeshPackPartial<'b, V> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.partial.buffer.destroy(context)
     }
 }
 
@@ -94,8 +111,13 @@ impl<V: Vertex> Create for MeshPack<V> {
         let vertex_range = builder.append::<V>(num_vertices);
         let index_range = builder.append::<u32>(num_indices);
         let (vertex_ranges, index_ranges) = {
-            let mut staging_buffer =
-                StagingBuffer::create((builder, context.default_allocator()), &context)?;
+            let mut staging_buffer = StagingBuffer::create(
+                (
+                    StagingBufferPartial::create(builder, context)?,
+                    context.default_allocator(),
+                ),
+                &context,
+            )?;
             let mut vertex_writer = staging_buffer.write_range::<V>(vertex_range);
             let vertex_ranges = meshes
                 .iter()
@@ -172,7 +194,7 @@ impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
 impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
     fn from(value: MeshPackRef<'a, V>) -> Self {
         MeshPackBinding {
-            buffer: value.data.buffer.handle(),
+            buffer: value.data.buffer.get_vk_buffer(),
             buffer_ranges: value.data.buffer_ranges,
         }
     }
@@ -244,7 +266,7 @@ impl Context {
         meshes: &[Mesh<V>],
         allocator: AllocatorIndex,
     ) -> VkResult<MeshPack<V>> {
-        let partial = MeshPackPartial::prepare(meshes, self)?;
+        let partial = MeshPackPartial::create(meshes, self)?;
         MeshPack::create((partial, allocator), self)
     }
 }

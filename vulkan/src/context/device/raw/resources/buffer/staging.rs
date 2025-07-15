@@ -1,8 +1,14 @@
-use std::{borrow::BorrowMut, convert::Infallible, marker::PhantomData, ptr::copy_nonoverlapping};
+use std::{
+    borrow::BorrowMut,
+    convert::Infallible,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    ptr::copy_nonoverlapping,
+};
 
 use ash::vk;
 use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
-use type_kit::{Create, Destroy, DestroyResult};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
@@ -11,19 +17,20 @@ use crate::context::{
             SubmitSemaphoreState,
         },
         memory::{DeviceLocal, HostCoherent},
-        raw::allocator::AllocatorIndex,
-        resources::{
-            buffer::{ByteRange, Range},
-            image::Image2D,
-            PartialBuilder,
+        raw::{
+            allocator::AllocatorIndex,
+            range::{ByteRange, Range},
+            resources::buffer::{BufferInfoBuilder, BufferPartial, PersistentBuffer},
+            Partial,
         },
+        resources::image::Image2D,
         Device,
     },
-    error::{VkError, VkResult},
+    error::{ResourceError, VkError, VkResult},
     Context,
 };
 
-use super::{Buffer, BufferBuilder, BufferInfo, PersistentBuffer, PersistentBufferPartial};
+use super::Buffer;
 
 pub struct StagingBufferBuilder {
     range: ByteRange,
@@ -47,8 +54,53 @@ impl StagingBufferBuilder {
     }
 }
 
+#[derive(Debug)]
+pub struct StagingBufferPartial {
+    partial: BufferPartial<HostCoherent>,
+}
+
+impl Partial for StagingBufferPartial {
+    #[inline]
+    fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
+        &self,
+        builder: &mut B,
+    ) {
+        self.partial.register_memory_requirements(builder);
+    }
+}
+
+impl Create for StagingBufferPartial {
+    type Config<'a> = StagingBufferBuilder;
+
+    type CreateError = ResourceError;
+
+    #[inline]
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let partial = BufferPartial::create(
+            BufferInfoBuilder::<HostCoherent>::new()
+                .with_usage(vk::BufferUsageFlags::TRANSFER_SRC)
+                .with_sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .with_queue_families(&[operation::Transfer::get_queue_family_index(context)])
+                .with_size(config.range.end as vk::DeviceSize),
+            context,
+        )?;
+        Ok(StagingBufferPartial { partial })
+    }
+}
+
+impl Destroy for StagingBufferPartial {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.partial.destroy(context)
+    }
+}
+
+#[derive(Debug)]
 pub struct StagingBuffer {
-    range: ByteRange,
     buffer: PersistentBuffer,
 }
 
@@ -59,39 +111,55 @@ pub struct WritableRange<T: AnyBitPattern> {
 
 impl<'a> From<&'a StagingBuffer> for &'a Buffer<HostCoherent> {
     fn from(value: &'a StagingBuffer) -> Self {
-        (&value.buffer).into()
+        &value.buffer
     }
 }
 
 impl<'a> From<&'a mut StagingBuffer> for &'a mut Buffer<HostCoherent> {
     fn from(value: &'a mut StagingBuffer) -> Self {
-        (&mut value.buffer).into()
+        &mut value.buffer
+    }
+}
+
+impl Deref for StagingBuffer {
+    type Target = Buffer<HostCoherent>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+impl DerefMut for StagingBuffer {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.buffer
     }
 }
 
 impl StagingBuffer {
     pub fn transfer_buffer_data<'b>(
         &self,
-        device: &Device,
+        context: &Context,
         dst: impl Into<&'b mut Buffer<DeviceLocal>>,
         dst_offset: vk::DeviceSize,
     ) -> VkResult<()> {
-        let command = device.allocate_transient_command::<operation::Transfer>()?;
-        let command = device.begin_primary_command(command)?;
-        let command = device.record_command(command, |command| {
+        let command = context.allocate_transient_command::<operation::Transfer>()?;
+        let command = context.begin_primary_command(command)?;
+        let command = context.record_command(command, |command| {
             command.copy_buffer(
                 &self.buffer,
                 dst,
                 &[vk::BufferCopy {
                     src_offset: 0,
                     dst_offset,
-                    size: self.range.end as vk::DeviceSize,
+                    size: self.buffer.get_size() as vk::DeviceSize,
                 }],
             )
         });
-        let command = device
+        let command = context
             .submit_command(
-                device.finish_command(command)?,
+                context.finish_command(command)?,
                 SubmitSemaphoreState {
                     semaphores: &[],
                     masks: &[],
@@ -99,13 +167,13 @@ impl StagingBuffer {
                 &[],
             )?
             .wait()?;
-        device.free_command(&command);
+        context.free_command(&command);
         Ok(())
     }
 
     pub fn transfer_image_data<'b>(
         &self,
-        device: &Device,
+        context: &Device,
         dst: impl Into<&'b mut Image2D<DeviceLocal>>,
         dst_array_layer: u32,
         dst_final_layout: vk::ImageLayout,
@@ -117,9 +185,9 @@ impl StagingBuffer {
         );
         let dst_mip_levels = dst.mip_levels;
         let dst_old_layout = dst.layout;
-        let command = device
-            .begin_primary_command(device.allocate_transient_command::<operation::Graphics>()?)?;
-        let command = device.record_command(command, |command| {
+        let command = context
+            .begin_primary_command(context.allocate_transient_command::<operation::Graphics>()?)?;
+        let command = context.record_command(command, |command| {
             command
                 .change_layout(
                     dst.borrow_mut(),
@@ -141,9 +209,9 @@ impl StagingBuffer {
                 )
         });
 
-        let command = device
+        let command = context
             .submit_command(
-                device.finish_command(command)?,
+                context.finish_command(command)?,
                 SubmitSemaphoreState {
                     semaphores: &[],
                     masks: &[],
@@ -151,16 +219,13 @@ impl StagingBuffer {
                 &[],
             )?
             .wait()?;
-        // Shouldn't free_command consume Command instead of taking it by reference?
-        device.free_command(&command);
+        context.free_command(&command);
         Ok(())
     }
 
     pub fn write_range<T: AnyBitPattern>(&mut self, range: Range<T>) -> WritableRange<T> {
-        // TODO: Improve safety,
-        // - Range should comme from current staging buffer builder (unnecessary complexity?)
         debug_assert!(
-            <Range<T> as Into<ByteRange>>::into(range).end <= self.range.end,
+            <Range<T> as Into<ByteRange>>::into(range).end <= self.buffer.get_size(),
             "Invalid range for StagingBuffer write!"
         );
         WritableRange {
@@ -192,23 +257,14 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
 }
 
 impl Create for StagingBuffer {
-    type Config<'a> = (StagingBufferBuilder, AllocatorIndex);
+    type Config<'a> = (StagingBufferPartial, AllocatorIndex);
     type CreateError = VkError;
 
-    fn create<'a, 'b>(
-        config: Self::Config<'a>,
-        context: Self::Context<'b>,
-    ) -> type_kit::CreateResult<Self> {
-        let (StagingBufferBuilder { range }, allocator) = config;
-        let info = BufferInfo {
-            size: range.end,
-            usage: vk::BufferUsageFlags::TRANSFER_SRC,
-            sharing_mode: vk::SharingMode::EXCLUSIVE,
-            queue_families: &[operation::Transfer::get_queue_family_index(context)],
-        };
-        let partial = PersistentBufferPartial::prepare(BufferBuilder::new(info), context)?;
+    #[inline]
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let (StagingBufferPartial { partial }, allocator) = config;
         let buffer = PersistentBuffer::create((partial, allocator), context)?;
-        Ok(StagingBuffer { range, buffer })
+        Ok(StagingBuffer { buffer })
     }
 }
 
@@ -216,6 +272,7 @@ impl Destroy for StagingBuffer {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
+    #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let _ = self.buffer.destroy(context);
         Ok(())

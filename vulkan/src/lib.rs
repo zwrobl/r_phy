@@ -4,7 +4,6 @@ use ash::vk;
 use context::device::renderer::deferred::DeferredRenderer;
 use context::device::resources::{
     MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
-    MeshPackListBuilder, MeshPackListPartial,
 };
 use context::Context;
 use math::types::Matrix4;
@@ -28,6 +27,9 @@ use winit::window::Window;
 
 use crate::context::device::frame::{CameraUniform, CameraUniformPartial};
 use crate::context::device::raw::allocator::{AllocatorIndex, Static, StaticConfig};
+use crate::context::device::raw::Partial;
+use crate::context::device::renderer::deferred::DeferredRendererPartial;
+use crate::context::device::resources::{MeshPackListBuilder, MeshPackListPartial};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VulkanRendererConfig {
@@ -155,14 +157,9 @@ impl<
         let materials = materials.prepare(&context)?;
         let meshes = meshes.prepare(&context)?;
         let camera_uniform = CameraUniform::prepare(context, renderer)?;
-        materials
-            .get_memory_requirements()
-            .into_iter()
-            .chain(meshes.get_memory_requirements().into_iter())
-            .chain(camera_uniform.get_memory_requirements().into_iter())
-            .for_each(|req| {
-                allocator_config.push_allocation(req);
-            });
+        materials.register_memory_requirements(&mut allocator_config);
+        meshes.register_memory_requirements(&mut allocator_config);
+        camera_uniform.register_memory_requirements(&mut allocator_config);
         let allocator = context.create_allocator::<Static>(allocator_config)?;
         let meshes = meshes.allocate(&context, allocator)?;
         let materials = materials.allocate(&context, allocator)?;
@@ -206,14 +203,9 @@ impl VulkanRenderer {
     pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
         let cubemap_path = Path::new("_resources/assets/skybox/skybox");
         let context = Context::build(window)?;
-        let renderer_partial = DeferredRenderer::prepare(&context, cubemap_path)?;
+        let renderer_partial = DeferredRendererPartial::create(cubemap_path, &context)?;
         let mut allocator_config = StaticConfig::new();
-        renderer_partial
-            .get_memory_requirements()
-            .into_iter()
-            .for_each(|req| {
-                allocator_config.push_allocation(req);
-            });
+        renderer_partial.register_memory_requirements(&mut allocator_config);
         let allocator = context.create_allocator::<Static>(allocator_config)?;
         let renderer = DeferredRenderer::create((renderer_partial, allocator), &context)?;
         Ok(Self {

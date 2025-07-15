@@ -12,10 +12,13 @@ use crate::context::{
             AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties, MemoryType,
         },
         raw::{
-            allocator::{AllocReq, Allocation, AllocationStore, Allocator, AllocatorInstance},
+            allocator::{
+                AllocReq, Allocation, AllocationStore, Allocator, AllocatorBuilder,
+                AllocatorInstance,
+            },
+            range::ByteRange,
             resources::{memory::Memory, ResourceIndex},
         },
-        resources::buffer::ByteRange,
     },
     error::{AllocatorError, ResourceError, ResourceResult},
     Context,
@@ -108,6 +111,13 @@ pub struct StaticConfig {
     builders: BufferBuilders,
 }
 
+impl AllocatorBuilder for StaticConfig {
+    #[inline]
+    fn with_allocation<M: MemoryProperties>(&mut self, req: AllocReqTyped<M>) -> &mut Self {
+        self.push_allocation(req)
+    }
+}
+
 impl StaticConfig {
     #[inline]
     pub fn new() -> Self {
@@ -117,34 +127,29 @@ impl StaticConfig {
     }
 
     #[inline]
-    pub fn push_allocation<R: Into<AllocReq>>(&mut self, req: R) -> &mut Self {
-        let req: AllocReq = req.into();
+    pub fn push_allocation_type<M: MemoryProperties, T: Marker>(
+        &mut self,
+        req: AllocReqTyped<M>,
+    ) -> &mut Self
+    where
+        BufferBuilders: Contains<LinearBufferBuilder<M>, T>,
+    {
         let requirements = req.requirements();
-        let info = match req.get_memory_type() {
-            MemoryType::DeviceLocal => {
-                &mut self
-                    .builders
-                    .get_mut::<LinearBufferBuilder<DeviceLocal>, _>()
-                    .info
-            }
-            MemoryType::HostCoherent => {
-                &mut self
-                    .builders
-                    .get_mut::<LinearBufferBuilder<HostCoherent>, _>()
-                    .info
-            }
-            MemoryType::HostVisible => {
-                &mut self
-                    .builders
-                    .get_mut::<LinearBufferBuilder<HostVisible>, _>()
-                    .info
-            }
-        };
+        let info = &mut self.builders.get_mut::<LinearBufferBuilder<M>, _>().info;
         info.range
             .extend_raw(requirements.size as usize, requirements.alignment as usize);
         info.memory_type_bits
             .bitand_assign(requirements.memory_type_bits);
         self
+    }
+
+    #[inline]
+    pub fn push_allocation<R: Into<AllocReq>>(&mut self, req: R) -> &mut Self {
+        match req.into() {
+            AllocReq::DeviceLocal(req) => self.push_allocation_type(req),
+            AllocReq::HostVisible(req) => self.push_allocation_type(req),
+            AllocReq::HostCoherent(req) => self.push_allocation_type(req),
+        }
     }
 }
 
