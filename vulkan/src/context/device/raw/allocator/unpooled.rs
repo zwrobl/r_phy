@@ -7,9 +7,9 @@ use crate::context::{
         memory::{AllocReqTyped, MemoryProperties},
         raw::{
             allocator::{Allocation, AllocationStore, AllocatorInstance},
+            range::ByteRange,
             resources::{memory::Memory, ResourceIndex},
         },
-        resources::buffer::ByteRange,
     },
     error::{ResourceError, ResourceResult},
     Context,

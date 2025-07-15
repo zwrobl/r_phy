@@ -11,20 +11,22 @@ use std::{collections::HashMap, convert::Infallible, ffi::c_void, fmt::Debug};
 use ash::vk;
 use type_kit::{
     Create, Destroy, DestroyResult, DropGuardError, FromGuard, GenCollection, GenIndex,
-    GenIndexRaw, GuardCollection, GuardIndex, IntoOuter, TypeGuard, TypeGuardCollection,
+    GenIndexRaw, GuardCollection, GuardIndex, TypeGuard, TypeGuardCollection,
 };
 
 use crate::context::{
     device::{
         memory::{
             AllocReq, AllocReqTyped, BindResource, DeviceLocal, HostCoherent, HostVisible,
-            MemoryProperties,
+            MemoryProperties, MemoryType,
         },
-        raw::resources::{
-            memory::{Memory, MemoryRaw},
-            ResourceIndex,
+        raw::{
+            range::ByteRange,
+            resources::{
+                memory::{Memory, MemoryRaw},
+                ResourceIndex,
+            },
         },
-        resources::buffer::ByteRange,
     },
     error::{AllocatorError, ResourceError, ResourceResult},
     Context,
@@ -204,6 +206,10 @@ impl Destroy for AllocationStore {
         self.memory_map.free_memory(context);
         Ok(())
     }
+}
+
+pub trait AllocatorBuilder {
+    fn with_allocation<M: MemoryProperties>(&mut self, req: AllocReqTyped<M>) -> &mut Self;
 }
 
 pub trait Allocator: 'static + Sized
@@ -413,6 +419,7 @@ impl<M: MemoryProperties> Copy for AllocationEntry<M> {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct AllocationEntryRaw {
+    memory_type: MemoryType,
     allocator: AllocatorIndex,
     allocation: AllocationIndexRaw,
 }
@@ -422,6 +429,7 @@ impl<M: MemoryProperties> FromGuard for AllocationEntry<M> {
 
     fn into_inner(self) -> Self::Inner {
         AllocationEntryRaw {
+            memory_type: M::memory_type(),
             allocator: self.allocator,
             allocation: self.allocation.into_inner(),
         }
@@ -434,6 +442,42 @@ impl<M: MemoryProperties> FromGuard for AllocationEntry<M> {
         }
     }
 }
+
+#[derive(Debug)]
+pub enum AllocationEntryTyped {
+    DeviceLocal(AllocationEntry<DeviceLocal>),
+    HostVisible(AllocationEntry<HostVisible>),
+    HostCoherent(AllocationEntry<HostCoherent>),
+}
+
+impl AllocationEntryRaw {
+    #[inline]
+    pub fn into_typed(self) -> AllocationEntryTyped {
+        match self.memory_type {
+            MemoryType::DeviceLocal => AllocationEntryTyped::DeviceLocal(unsafe {
+                AllocationEntry::<DeviceLocal>::from_inner(self)
+            }),
+            MemoryType::HostCoherent => AllocationEntryTyped::HostCoherent(unsafe {
+                AllocationEntry::<HostCoherent>::from_inner(self)
+            }),
+            MemoryType::HostVisible => AllocationEntryTyped::HostVisible(unsafe {
+                AllocationEntry::<HostVisible>::from_inner(self)
+            }),
+        }
+    }
+}
+
+impl Context {
+    #[inline]
+    pub(crate) fn free_allocation_raw(&self, allocation: AllocationEntryRaw) -> ResourceResult<()> {
+        match allocation.into_typed() {
+            AllocationEntryTyped::DeviceLocal(allocation) => self.free(allocation),
+            AllocationEntryTyped::HostVisible(allocation) => self.free(allocation),
+            AllocationEntryTyped::HostCoherent(allocation) => self.free(allocation),
+        }
+    }
+}
+
 pub struct AllocatorStorage {
     allocators: GenCollection<AllocatorInstance>,
 }

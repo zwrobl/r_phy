@@ -1,22 +1,135 @@
-use std::{convert::Infallible, marker::PhantomData};
+mod persistent;
+mod staging;
+mod uniform;
+
+use std::{convert::Infallible, ffi::c_void, marker::PhantomData};
 
 use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 
-use crate::context::{device::memory::MemoryProperties, error::ResourceError, Context};
+use crate::context::{
+    device::{
+        memory::{BindResource, HostCoherent, MemoryProperties},
+        raw::allocator::{AllocationEntry, AllocationEntryRaw, AllocatorIndex},
+    },
+    error::{ResourceError, ResourceResult},
+    Context,
+};
 
 use super::Resource;
 
 #[derive(Debug, Clone, Copy)]
+pub struct BufferInfo<'a, M: MemoryProperties> {
+    create_info: vk::BufferCreateInfo,
+    _queue_families: &'a [u32],
+    _phantom: PhantomData<M>,
+}
+
+#[derive(Debug)]
+pub struct BufferInfoBuilder<'a, M: MemoryProperties> {
+    size: Option<vk::DeviceSize>,
+    usage: Option<vk::BufferUsageFlags>,
+    sharing_mode: Option<vk::SharingMode>,
+    queue_families: Option<&'a [u32]>,
+    _phantom: PhantomData<M>,
+}
+
+impl<'a, M: MemoryProperties> BufferInfoBuilder<'a, M> {
+    #[inline]
+    pub fn new<T: MemoryProperties>() -> BufferInfoBuilder<'static, T> {
+        BufferInfoBuilder {
+            size: None,
+            usage: None,
+            sharing_mode: None,
+            queue_families: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn with_size(self, size: vk::DeviceSize) -> Self {
+        Self {
+            size: Some(size),
+            ..self
+        }
+    }
+
+    #[inline]
+    pub fn with_usage(self, usage: vk::BufferUsageFlags) -> Self {
+        Self {
+            usage: Some(usage),
+            ..self
+        }
+    }
+
+    #[inline]
+    pub fn with_sharing_mode(self, sharing_mode: vk::SharingMode) -> Self {
+        Self {
+            sharing_mode: Some(sharing_mode),
+            ..self
+        }
+    }
+
+    #[inline]
+    pub fn with_queue_families<'b>(self, queue_families: &'b [u32]) -> BufferInfoBuilder<'b, M> {
+        BufferInfoBuilder {
+            size: self.size,
+            usage: self.usage,
+            sharing_mode: self.sharing_mode,
+            queue_families: Some(queue_families),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn build(self) -> BufferInfo<'a, M> {
+        let queue_families = self.queue_families.unwrap();
+        let create_info = vk::BufferCreateInfo {
+            size: self.size.unwrap(),
+            usage: self.usage.unwrap(),
+            sharing_mode: self.sharing_mode.unwrap(),
+            queue_family_index_count: queue_families.len() as u32,
+            p_queue_family_indices: queue_families.as_ptr(),
+            ..Default::default()
+        };
+        BufferInfo {
+            create_info,
+            _queue_families: queue_families,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct BufferRaw {
-    handle: vk::Buffer,
-    size: vk::DeviceSize,
+    buffer: vk::Buffer,
+    size: usize,
+    ptr: Option<*mut c_void>,
+    allocation: AllocationEntryRaw,
 }
 
 #[derive(Debug)]
 pub struct Buffer<M: MemoryProperties> {
-    buffer: BufferRaw,
-    _phantom: PhantomData<M>,
+    buffer: vk::Buffer,
+    size: usize,
+    ptr: Option<*mut c_void>,
+    allocation: AllocationEntry<M>,
+}
+
+impl<M: MemoryProperties> Buffer<M> {
+    #[inline]
+    pub fn get_size(&self) -> usize {
+        self.size
+    }
+
+    #[inline]
+    pub fn get_ptr(&self) -> Option<*mut c_void> {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn get_vk_buffer(&self) -> vk::Buffer {
+        self.buffer
+    }
 }
 
 impl<M: MemoryProperties> FromGuard for Buffer<M> {
@@ -24,14 +137,21 @@ impl<M: MemoryProperties> FromGuard for Buffer<M> {
 
     #[inline]
     fn into_inner(self) -> Self::Inner {
-        self.buffer
+        BufferRaw {
+            buffer: self.buffer,
+            size: self.size,
+            ptr: self.ptr,
+            allocation: self.allocation.into_inner(),
+        }
     }
 
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            buffer: inner,
-            _phantom: PhantomData,
+            buffer: inner.buffer,
+            size: inner.size,
+            ptr: inner.ptr,
+            allocation: AllocationEntry::<M>::from_inner(inner.allocation),
         }
     }
 }
@@ -41,17 +161,21 @@ impl<M: MemoryProperties> Resource for Buffer<M> {
 }
 
 impl<M: MemoryProperties> Create for Buffer<M> {
-    type Config<'a> = vk::BufferCreateInfo;
+    type Config<'a> = (BufferInfo<'a, M>, AllocatorIndex);
     type CreateError = ResourceError;
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let (config, allocator) = config;
+        let buffer = unsafe { context.create_buffer(&config.create_info, None)? };
+        let alloc_req = BindResource::new(buffer).get_alloc_req::<M>(context);
+        let allocation = context.allocate(allocator, alloc_req)?;
+        context.bind_memory(buffer, allocation)?;
         let buffer = Buffer {
-            buffer: BufferRaw {
-                handle: unsafe { context.create_buffer(&config, None)? },
-                size: config.size,
-            },
-            _phantom: PhantomData,
+            buffer,
+            size: config.create_info.size as usize,
+            allocation,
+            ptr: None,
         };
         Ok(buffer)
     }
@@ -64,8 +188,9 @@ impl Destroy for BufferRaw {
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
-            context.destroy_buffer(self.handle, None);
+            context.destroy_buffer(self.buffer, None);
         }
+        let _ = context.free_allocation_raw(self.allocation);
         Ok(())
     }
 }
@@ -76,7 +201,29 @@ impl<M: MemoryProperties> Destroy for Buffer<M> {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let _ = self.buffer.destroy(context);
+        unsafe {
+            context.destroy_buffer(self.buffer, None);
+        }
+        let _ = context.free(self.allocation);
+        Ok(())
+    }
+}
+
+impl Buffer<HostCoherent> {
+    #[inline]
+    pub fn map_memory(&mut self, context: &Context) -> ResourceResult<()> {
+        if self.ptr.is_none() {
+            self.ptr = Some(context.map_allocation(self.allocation)?);
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub fn unmap_memory(&mut self, context: &Context) -> ResourceResult<()> {
+        if self.ptr.is_some() {
+            context.unmap_allocation(self.allocation)?;
+            self.ptr = None;
+        }
         Ok(())
     }
 }
