@@ -573,7 +573,7 @@ use std::{
 
 use crate::{
     Cons, Contains, Destroy, DestroyResult, DropGuard, FromGuard, Guard, IntoOuter, Marked, Marker,
-    Nil, TypeGuard, TypeGuardConversionError, TypeList, Valid, ValidMut, ValidRef,
+    Nil, TypeGuard, TypeGuardConversionError, TypeList, ValidMut, ValidRef,
 };
 
 pub struct GenIndex<T> {
@@ -636,12 +636,10 @@ impl<T: 'static> FromGuard for GenIndex<T> {
             generation: self.generation,
         }
     }
-}
 
-impl<T> From<Valid<GenIndex<T>>> for GenIndex<T> {
     #[inline]
-    fn from(value: Valid<GenIndex<T>>) -> Self {
-        let GenIndexRaw { index, generation } = value.into_inner();
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        let GenIndexRaw { index, generation } = inner;
         GenIndex::wrap(generation, index)
     }
 }

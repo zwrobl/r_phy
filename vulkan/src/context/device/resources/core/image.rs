@@ -3,7 +3,7 @@ mod texture;
 
 use crate::context::{
     device::{
-        memory::{AllocReq, BindResource, DeviceLocal, MemoryProperties},
+        memory::{AllocReq, AllocReqTyped, BindResource, DeviceLocal, MemoryProperties},
         raw::allocator::{AllocationEntry, AllocatorIndex},
     },
     error::{VkError, VkResult},
@@ -12,7 +12,7 @@ use crate::context::{
 
 use super::PartialBuilder;
 use ash::vk;
-use std::{convert::Infallible, marker::PhantomData};
+use std::convert::Infallible;
 use type_kit::{Create, Destroy, DestroyResult};
 
 pub use reader::*;
@@ -58,13 +58,8 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for Image2DPartial<M> {
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(info.usage);
         let image = unsafe { context.create_image(&image_info, None)? };
-        let req = BindResource::new(image).get_alloc_req(context, M::memory_type());
-        Ok(Image2DPartial {
-            image,
-            info,
-            req,
-            phantom: PhantomData,
-        })
+        let req = BindResource::new(image).get_alloc_req(context);
+        Ok(Image2DPartial { image, info, req })
     }
 
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
@@ -81,8 +76,7 @@ impl Image2DBuilder {
 pub struct Image2DPartial<M: MemoryProperties> {
     image: vk::Image,
     info: Image2DInfo,
-    req: AllocReq,
-    phantom: PhantomData<M>,
+    req: AllocReqTyped<M>,
 }
 
 pub struct Image2D<M: MemoryProperties> {
@@ -92,8 +86,7 @@ pub struct Image2D<M: MemoryProperties> {
     pub extent: vk::Extent2D,
     pub image: vk::Image,
     pub image_view: vk::ImageView,
-    allocation: AllocationEntry,
-    phantom: PhantomData<M>,
+    allocation: AllocationEntry<M>,
 }
 
 impl Context {
@@ -178,7 +171,6 @@ impl<M: MemoryProperties> Create for Image2D<M> {
             image,
             image_view,
             allocation,
-            phantom: PhantomData,
         })
     }
 }

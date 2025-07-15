@@ -2,13 +2,13 @@ use std::{convert::Infallible, fmt::Debug, marker::PhantomData};
 
 use ash::vk::{self};
 use type_kit::{
-    Create, CreateResult, Destroy, DestroyResult, FromGuard, GenIndexRaw, TypeGuard, Valid,
+    Create, CreateResult, Destroy, DestroyResult, FromGuard, GenIndexRaw, IntoOuter, TypeGuard,
 };
 
 use crate::context::{
     device::{
-        memory::{BindResource, MemoryProperties, MemoryType},
-        raw::allocator::{AllocationEntry, AllocatorIndex},
+        memory::{BindResource, MemoryProperties},
+        raw::allocator::{AllocationEntry, AllocationEntryRaw, AllocatorIndex},
     },
     error::ResourceError,
     Context,
@@ -89,16 +89,15 @@ impl Default for ArrayInfo {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ImageCreateInfo<V: ImageType> {
+pub struct ImageCreateInfo<V: ImageType, M: MemoryProperties> {
     allocator: AllocatorIndex,
-    memory_type: MemoryType,
     image_info: ImageInfo,
     mip_info: Option<MipInfo>,
     array_info: Option<ArrayInfo>,
-    _phantom: PhantomData<V>,
+    _phantom: PhantomData<(V, M)>,
 }
 
-impl<V: ImageType> ImageCreateInfo<V> {
+impl<V: ImageType, M: MemoryProperties> ImageCreateInfo<V, M> {
     pub fn with_mip_enabled(mut self) -> Self {
         let max_mip_levels = MipInfo::get_max_for_extent(self.image_info.extent);
         self.mip_info = Some(MipInfo {
@@ -178,25 +177,21 @@ impl<V: ImageType> ImageCreateInfo<V> {
 }
 
 #[derive(Debug)]
-pub struct Image<V: ImageType> {
+pub struct Image<V: ImageType, M: MemoryProperties> {
     handle: vk::Image,
     extent: vk::Extent3D,
     format: vk::Format,
     layout: vk::ImageLayout,
     usage: vk::ImageUsageFlags,
     view: ResourceIndex<ImageView<V>>,
-    memory: AllocationEntry,
+    memory: AllocationEntry<M>,
 }
 
-impl<V: ImageType> Image<V> {
+impl<V: ImageType, M: MemoryProperties> Image<V, M> {
     #[inline]
-    pub fn create_info<M: MemoryProperties>(
-        allocator: AllocatorIndex,
-        image_info: ImageInfo,
-    ) -> ImageCreateInfo<V> {
+    pub fn create_info(allocator: AllocatorIndex, image_info: ImageInfo) -> ImageCreateInfo<V, M> {
         ImageCreateInfo {
             allocator,
-            memory_type: M::memory_type(),
             image_info,
             mip_info: None,
             array_info: None,
@@ -213,29 +208,10 @@ pub struct ImageRaw {
     layout: vk::ImageLayout,
     usage: vk::ImageUsageFlags,
     view: TypeGuard<GenIndexRaw>,
-    memory: AllocationEntry,
+    memory: TypeGuard<AllocationEntryRaw>,
 }
 
-impl<V: ImageType> From<Valid<Image<V>>> for Image<V> {
-    #[inline]
-    fn from(guard: Valid<Image<V>>) -> Self {
-        let inner = guard.into_inner();
-        Self {
-            handle: inner.handle,
-            extent: inner.extent,
-            format: inner.format,
-            layout: inner.layout,
-            usage: inner.usage,
-            memory: inner.memory,
-            view: {
-                let view: Valid<ResourceIndex<ImageView<V>>> = inner.view.try_into().unwrap();
-                view.into()
-            },
-        }
-    }
-}
-
-impl<V: ImageType> FromGuard for Image<V> {
+impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
     type Inner = ImageRaw;
 
     #[inline]
@@ -246,18 +222,31 @@ impl<V: ImageType> FromGuard for Image<V> {
             format: self.format,
             layout: self.layout,
             usage: self.usage,
-            memory: self.memory,
+            memory: self.memory.into_guard(),
             view: self.view.into_guard(),
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            handle: inner.handle,
+            extent: inner.extent,
+            format: inner.format,
+            layout: inner.layout,
+            usage: inner.usage,
+            memory: inner.memory.try_into_outer().unwrap(),
+            view: ResourceIndex::<ImageView<V>>::try_from_guard(inner.view).unwrap(),
         }
     }
 }
 
-impl<V: ImageType> Resource for Image<V> {
+impl<V: ImageType, M: MemoryProperties> Resource for Image<V, M> {
     type RawType = ImageRaw;
 }
 
-impl<V: ImageType> Create for Image<V> {
-    type Config<'a> = ImageCreateInfo<V>;
+impl<V: ImageType, M: MemoryProperties> Create for Image<V, M> {
+    type Config<'a> = ImageCreateInfo<V, M>;
     type CreateError = ResourceError;
 
     #[inline]
@@ -268,7 +257,7 @@ impl<V: ImageType> Create for Image<V> {
             context.create_resource::<ImageView<V>, _>(config.get_view_create_info(handle))?;
         let memory = context.allocate(
             config.allocator,
-            BindResource::new(handle).get_alloc_req(context, config.memory_type),
+            BindResource::new(handle).get_alloc_req(context),
         )?;
         Ok(Self {
             handle,
@@ -282,7 +271,7 @@ impl<V: ImageType> Create for Image<V> {
     }
 }
 
-impl<V: ImageType> Destroy for Image<V> {
+impl<V: ImageType, M: MemoryProperties> Destroy for Image<V, M> {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
@@ -331,17 +320,6 @@ pub struct ImageViewRaw {
     handle: vk::ImageView,
 }
 
-impl<V: ImageType> From<Valid<ImageView<V>>> for ImageView<V> {
-    #[inline]
-    fn from(guard: Valid<ImageView<V>>) -> Self {
-        let inner = guard.into_inner();
-        Self {
-            handle: inner.handle,
-            _phantom: PhantomData,
-        }
-    }
-}
-
 impl<V: ImageType> FromGuard for ImageView<V> {
     type Inner = ImageViewRaw;
 
@@ -349,6 +327,14 @@ impl<V: ImageType> FromGuard for ImageView<V> {
     fn into_inner(self) -> Self::Inner {
         ImageViewRaw {
             handle: self.handle,
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            handle: inner.handle,
+            _phantom: PhantomData,
         }
     }
 }

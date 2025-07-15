@@ -4,8 +4,9 @@ use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
+        memory::{AllocReqTyped, MemoryProperties},
         raw::{
-            allocator::{AllocReq, Allocation, AllocationStore, AllocatorInstance},
+            allocator::{Allocation, AllocationStore, AllocatorInstance},
             resources::{memory::Memory, ResourceIndex},
         },
         resources::buffer::ByteRange,
@@ -50,21 +51,25 @@ impl From<Unpooled> for AllocatorInstance {
 
 impl Allocator for Unpooled {
     #[inline]
-    fn allocate<'a>(
+    fn allocate<'a, M: MemoryProperties>(
         &mut self,
         context: &Context,
-        req: AllocReq,
-    ) -> ResourceResult<AllocationIndex> {
+        req: AllocReqTyped<M>,
+    ) -> ResourceResult<AllocationIndex<M>> {
         let requirements = req.requirements();
         let alloc_info = context.get_memory_allocate_info(req)?;
-        let memory: ResourceIndex<Memory> = context.create_resource(alloc_info)?;
+        let memory: ResourceIndex<Memory<M>> = context.create_resource(alloc_info)?;
         let range = ByteRange::new(requirements.size as usize);
         let index = self.store.push(Allocation::new(memory, range))?;
         Ok(index)
     }
 
     #[inline]
-    fn free<'a>(&mut self, context: &Context, allocation: AllocationIndex) -> ResourceResult<()> {
+    fn free<'a, M: MemoryProperties>(
+        &mut self,
+        context: &Context,
+        allocation: AllocationIndex<M>,
+    ) -> ResourceResult<()> {
         if let Some(memory) = self.store.pop(allocation)? {
             context.destroy_resource(memory)?;
         }
@@ -72,7 +77,10 @@ impl Allocator for Unpooled {
     }
 
     #[inline]
-    fn get_allocation(&self, allocation: AllocationIndex) -> ResourceResult<Allocation> {
+    fn get_allocation<M: MemoryProperties>(
+        &self,
+        allocation: AllocationIndex<M>,
+    ) -> ResourceResult<Allocation<M>> {
         self.store.get_allocation(allocation)
     }
 }

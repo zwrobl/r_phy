@@ -4,7 +4,7 @@ pub mod error;
 mod surface;
 
 use crate::context::device::{
-    memory::AllocReq,
+    memory::{AllocReqTyped, MemoryProperties},
     raw::allocator::{Allocator, Unpooled},
 };
 
@@ -294,18 +294,16 @@ impl Context {
     }
 
     #[inline]
-    pub fn allocate(
+    pub fn allocate<M: MemoryProperties>(
         &self,
         index: AllocatorIndex,
-        req: impl Into<AllocReq>,
-    ) -> ResourceResult<AllocationEntry> {
-        self.allocators
-            .borrow_mut()
-            .allocate(self, index, req.into())
+        req: AllocReqTyped<M>,
+    ) -> ResourceResult<AllocationEntry<M>> {
+        self.allocators.borrow_mut().allocate(self, index, req)
     }
 
     #[inline]
-    pub fn free(&self, index: AllocationEntry) -> ResourceResult<()> {
+    pub fn free<M: MemoryProperties>(&self, index: AllocationEntry<M>) -> ResourceResult<()> {
         self.allocators.borrow_mut().free(self, index)
     }
 }

@@ -2,18 +2,18 @@ pub mod buffer;
 pub mod image;
 pub mod memory;
 
-use std::convert::Infallible;
+use std::{convert::Infallible, fmt::Debug};
 
 use buffer::BufferRaw;
 use image::{ImageRaw, ImageViewRaw};
 use type_kit::{
     list_type, BorrowList, Cons, Contains, Conv, Create, Destroy, DestroyResult, DropGuardError,
     FromGuard, GenCollectionResult, GenIndexRaw, GuardIndex, IndexList, Marked, Marker, Nil,
-    ScopedEntryMutResult, ScopedEntryResult, TypeGuard, TypeGuardCollection, TypedIndex, Valid,
+    ScopedEntryMutResult, ScopedEntryResult, TypeGuard, TypeGuardCollection, TypedIndex,
 };
 
 use crate::context::{
-    device::raw::resources::memory::Memory,
+    device::raw::resources::memory::MemoryRaw,
     error::{ResourceError, ResourceResult},
     Context,
 };
@@ -27,9 +27,25 @@ pub trait Resource:
 
 pub type Raw<R> = <R as Resource>::RawType;
 
-#[derive(Debug, Clone, Copy)]
 pub struct ResourceIndex<R: Resource> {
     index: GuardIndex<R>,
+}
+
+impl<R: Resource> Clone for ResourceIndex<R> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<R: Resource> Copy for ResourceIndex<R> {}
+
+impl<R: Resource> Debug for ResourceIndex<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResourceIndex")
+            .field("index", &self.index)
+            .finish()
+    }
 }
 
 impl<R: Resource> FromGuard for ResourceIndex<R> {
@@ -39,11 +55,10 @@ impl<R: Resource> FromGuard for ResourceIndex<R> {
     fn into_inner(self) -> Self::Inner {
         self.index.into_inner()
     }
-}
 
-impl<R: Resource> From<Valid<ResourceIndex<R>>> for ResourceIndex<R> {
-    fn from(value: Valid<ResourceIndex<R>>) -> Self {
-        let index = unsafe { TypeGuard::from_inner::<GuardIndex<R>>(value.into_inner()) };
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        let index = unsafe { TypeGuard::from_inner::<GuardIndex<R>>(inner) };
         let index: Conv<GuardIndex<R>> = index.try_into().unwrap();
         Self {
             index: index.unwrap(),
@@ -53,7 +68,7 @@ impl<R: Resource> From<Valid<ResourceIndex<R>>> for ResourceIndex<R> {
 
 pub type RawCollection<R> = TypeGuardCollection<<R as Resource>::RawType>;
 pub type ResourceStorageList = list_type![
-    TypeGuardCollection<Memory>,
+    TypeGuardCollection<MemoryRaw>,
     TypeGuardCollection<BufferRaw>,
     TypeGuardCollection<ImageRaw>,
     TypeGuardCollection<ImageViewRaw>,
@@ -188,7 +203,7 @@ impl Destroy for ResourceStorage {
         self.destroy_resource_storage::<ImageViewRaw, _>(context)?;
         self.destroy_resource_storage::<ImageRaw, _>(context)?;
         self.destroy_resource_storage::<BufferRaw, _>(context)?;
-        self.destroy_resource_storage::<Memory, _>(context)?;
+        self.destroy_resource_storage::<MemoryRaw, _>(context)?;
         Ok(())
     }
 }

@@ -1,12 +1,16 @@
-use std::{convert::Infallible, ops::BitAndAssign};
+use std::{convert::Infallible, marker::PhantomData, ops::BitAndAssign, u32};
 
 use ash::vk;
-use strum::EnumCount;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult};
+use type_kit::{
+    list_type, unpack_list, Cons, Contains, Create, CreateResult, Destroy, DestroyResult,
+    FromGuard, Marker, Nil,
+};
 
 use crate::context::{
     device::{
-        memory::MemoryType,
+        memory::{
+            AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties, MemoryType,
+        },
         raw::{
             allocator::{AllocReq, Allocation, AllocationStore, Allocator, AllocatorInstance},
             resources::{memory::Memory, ResourceIndex},
@@ -20,22 +24,95 @@ use crate::context::{
 use super::AllocationIndex;
 
 #[derive(Debug, Clone, Copy)]
-struct LinearBuffer {
-    memory: ResourceIndex<Memory>,
+struct BufferInfo {
     range: ByteRange,
     memory_type_bits: u32,
 }
 
+impl Default for BufferInfo {
+    fn default() -> Self {
+        Self {
+            range: ByteRange::empty(),
+            memory_type_bits: u32::MAX,
+        }
+    }
+}
+#[derive(Debug, Clone, Copy)]
+struct LinearBuffer<M: MemoryProperties> {
+    memory: ResourceIndex<Memory<M>>,
+    info: BufferInfo,
+}
+
+impl<M: MemoryProperties> LinearBuffer<M> {
+    fn allocate(&mut self, req: AllocReqTyped<M>) -> ResourceResult<Allocation<M>> {
+        let requirements = req.requirements();
+        if (self.info.memory_type_bits & requirements.memory_type_bits) != 0 {
+            let range = self
+                .info
+                .range
+                .alloc_raw(requirements.size as usize, requirements.alignment as usize)
+                .ok_or(AllocatorError::OutOfMemory)?;
+            Ok(Allocation::new(self.memory, range))
+        } else {
+            Err(ResourceError::AllocatorError(
+                AllocatorError::InvalidConfiguration,
+            ))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LinearBufferBuilder<M: MemoryProperties> {
+    info: BufferInfo,
+    _phantom: PhantomData<M>,
+}
+
+impl<M: MemoryProperties> LinearBufferBuilder<M> {
+    fn try_build(self, context: &Context) -> ResourceResult<Option<LinearBuffer<M>>> {
+        if self.info.range.len() != 0 && self.info.memory_type_bits != 0 {
+            let alloc_info =
+                context.get_memory_allocate_info(M::alloc_req_typed(vk::MemoryRequirements {
+                    size: self.info.range.len() as vk::DeviceSize,
+                    memory_type_bits: self.info.memory_type_bits,
+                    ..Default::default()
+                }))?;
+            let memory = context.create_resource(alloc_info)?;
+            Ok(Some(LinearBuffer {
+                memory,
+                info: self.info,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl<M: MemoryProperties> Default for LinearBufferBuilder<M> {
+    fn default() -> Self {
+        Self {
+            info: Default::default(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+type BufferBuilders = list_type![
+    LinearBufferBuilder<DeviceLocal>,
+    LinearBufferBuilder<HostCoherent>,
+    LinearBufferBuilder<HostVisible>,
+    Nil
+];
+
 #[derive(Debug)]
 pub struct StaticConfig {
-    buffers: [(ByteRange, u32); MemoryType::COUNT],
+    builders: BufferBuilders,
 }
 
 impl StaticConfig {
     #[inline]
     pub fn new() -> Self {
         Self {
-            buffers: [(ByteRange::empty(), u32::MAX); MemoryType::COUNT],
+            builders: Default::default(),
         }
     }
 
@@ -43,21 +120,56 @@ impl StaticConfig {
     pub fn push_allocation<R: Into<AllocReq>>(&mut self, req: R) -> &mut Self {
         let req: AllocReq = req.into();
         let requirements = req.requirements();
-        let memory_type = req.get_memory_type();
-        let (range, memory_type_bits) = &mut self.buffers[memory_type as usize];
-        range.extend_raw(requirements.size as usize, requirements.alignment as usize);
-        memory_type_bits.bitand_assign(requirements.memory_type_bits);
+        let info = match req.get_memory_type() {
+            MemoryType::DeviceLocal => {
+                &mut self
+                    .builders
+                    .get_mut::<LinearBufferBuilder<DeviceLocal>, _>()
+                    .info
+            }
+            MemoryType::HostCoherent => {
+                &mut self
+                    .builders
+                    .get_mut::<LinearBufferBuilder<HostCoherent>, _>()
+                    .info
+            }
+            MemoryType::HostVisible => {
+                &mut self
+                    .builders
+                    .get_mut::<LinearBufferBuilder<HostVisible>, _>()
+                    .info
+            }
+        };
+        info.range
+            .extend_raw(requirements.size as usize, requirements.alignment as usize);
+        info.memory_type_bits
+            .bitand_assign(requirements.memory_type_bits);
         self
+    }
+}
+
+type Buffers = list_type![
+    Option<LinearBuffer<DeviceLocal>>,
+    Option<LinearBuffer<HostCoherent>>,
+    Option<LinearBuffer<HostVisible>>,
+    Nil
+];
+
+impl<M: MemoryProperties> Destroy for LinearBuffer<M> {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let _ = context.destroy_resource(self.memory);
+        Ok(())
     }
 }
 
 #[derive(Debug)]
 pub struct Static {
-    buffers: [Option<LinearBuffer>; MemoryType::COUNT],
+    buffers: Buffers,
     store: AllocationStore,
 }
-
-impl Static {}
 
 impl Create for Static {
     type Config<'a> = StaticConfig;
@@ -65,30 +177,19 @@ impl Create for Static {
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let StaticConfig { buffers: config } = config;
-        let buffers = config.iter().enumerate().try_fold(
-            [None; MemoryType::COUNT],
-            |mut buffers, (i, &(range, memory_type_bits))| {
-                if range.len() != 0 && memory_type_bits != 0 {
-                    let req =
-                        MemoryType::from_repr(i)
-                            .unwrap()
-                            .get_alloc_req(vk::MemoryRequirements {
-                                size: range.len() as vk::DeviceSize,
-                                alignment: 0,
-                                memory_type_bits,
-                            });
-                    let alloc_info = context.get_memory_allocate_info(req)?;
-                    let memory = context.create_resource(alloc_info)?;
-                    buffers[i] = Some(LinearBuffer {
-                        memory,
-                        range,
-                        memory_type_bits,
-                    });
-                }
-                Result::<_, ResourceError>::Ok(buffers)
-            },
-        )?;
+        let unpack_list![
+            device_local_builder,
+            host_coherent_builder,
+            host_visible_builder,
+            _nil
+        ] = config.builders;
+        let mut buffers: Buffers = Buffers::default();
+        *buffers.get_mut::<Option<LinearBuffer<DeviceLocal>>, _>() =
+            device_local_builder.try_build(context)?;
+        *buffers.get_mut::<Option<LinearBuffer<HostCoherent>>, _>() =
+            host_coherent_builder.try_build(context)?;
+        *buffers.get_mut::<Option<LinearBuffer<HostVisible>>, _>() =
+            host_visible_builder.try_build(context)?;
         Ok(Self {
             buffers,
             store: AllocationStore::new(),
@@ -102,11 +203,7 @@ impl Destroy for Static {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.buffers.iter().for_each(|buffer| {
-            if let Some(buffer) = buffer {
-                let _ = context.destroy_resource(buffer.memory);
-            }
-        });
+        let _ = self.buffers.destroy(context);
         Ok(())
     }
 }
@@ -118,39 +215,56 @@ impl From<Static> for AllocatorInstance {
     }
 }
 
+impl Static {
+    #[inline]
+    fn allocate_memory_type<M: MemoryProperties, T: Marker>(
+        &mut self,
+        req: AllocReqTyped<M>,
+    ) -> ResourceResult<Allocation<M>>
+    where
+        Buffers: Contains<Option<LinearBuffer<M>>, T>,
+    {
+        self.buffers
+            .get_mut::<Option<LinearBuffer<M>>, _>()
+            .as_mut()
+            .map(|buffer| buffer.allocate(req))
+            .ok_or(ResourceError::AllocatorError(
+                AllocatorError::UnsupportedMemoryType,
+            ))?
+    }
+}
+
 impl Allocator for Static {
     #[inline]
-    fn allocate<'a>(
+    fn allocate<'a, M: MemoryProperties>(
         &mut self,
         _context: &crate::Context,
-        req: AllocReq,
-    ) -> ResourceResult<AllocationIndex> {
-        if let Some(buffer) = &mut self.buffers[req.get_memory_type() as usize] {
-            let requirements = req.requirements();
-            if (buffer.memory_type_bits & requirements.memory_type_bits) != 0 {
-                let range = buffer
-                    .range
-                    .alloc_raw(requirements.size as usize, requirements.alignment as usize)
-                    .ok_or(AllocatorError::OutOfMemory)?;
-                return self.store.push(Allocation::new(buffer.memory, range));
-            }
+        req: AllocReqTyped<M>,
+    ) -> ResourceResult<AllocationIndex<M>> {
+        let allocation = match req.into() {
+            AllocReq::DeviceLocal(req) => self.allocate_memory_type(req)?.into_inner(),
+            AllocReq::HostCoherent(req) => self.allocate_memory_type(req)?.into_inner(),
+            AllocReq::HostVisible(req) => self.allocate_memory_type(req)?.into_inner(),
         };
-        Err(ResourceError::AllocatorError(
-            AllocatorError::UnsupportedMemoryType,
-        ))
+        Ok(self
+            .store
+            .push(unsafe { Allocation::<M>::from_inner(allocation) })?)
     }
 
     #[inline]
-    fn free<'a>(
+    fn free<'a, M: MemoryProperties>(
         &mut self,
         _context: &crate::Context,
-        allocation: AllocationIndex,
+        allocation: AllocationIndex<M>,
     ) -> ResourceResult<()> {
         self.store.pop(allocation).map(|_| ())
     }
 
     #[inline]
-    fn get_allocation(&self, allocation: AllocationIndex) -> ResourceResult<Allocation> {
+    fn get_allocation<M: MemoryProperties>(
+        &self,
+        allocation: AllocationIndex<M>,
+    ) -> ResourceResult<Allocation<M>> {
         self.store.get_allocation(allocation)
     }
 }

@@ -1,6 +1,6 @@
 #[cfg(test)]
 pub(crate) mod test_types {
-    use super::{FromGuard, Valid};
+    use super::FromGuard;
 
     #[derive(Debug, Clone, Copy)]
     pub struct A(pub u32);
@@ -11,11 +11,9 @@ pub(crate) mod test_types {
         fn into_inner(self) -> Self::Inner {
             self.0
         }
-    }
 
-    impl From<Valid<A>> for A {
-        fn from(value: Valid<A>) -> Self {
-            A(value.into_inner())
+        unsafe fn from_inner(inner: Self::Inner) -> Self {
+            Self(inner)
         }
     }
 
@@ -28,11 +26,9 @@ pub(crate) mod test_types {
         fn into_inner(self) -> Self::Inner {
             self.0
         }
-    }
 
-    impl From<Valid<B>> for B {
-        fn from(value: Valid<B>) -> Self {
-            B(value.into_inner())
+        unsafe fn from_inner(inner: Self::Inner) -> Self {
+            Self(inner)
         }
     }
 }
@@ -169,10 +165,12 @@ pub type ValidMut<'a, T> = TypeGuardUnlockedMut<'a, <T as FromGuard>::Inner, T>;
 pub type Guard<T> = TypeGuard<<T as FromGuard>::Inner>;
 pub type GuardResult<T> = Result<T, (Guard<T>, TypeGuardConversionError)>;
 
-pub trait FromGuard: 'static + From<Valid<Self>> {
+pub trait FromGuard: 'static + Sized {
     type Inner;
 
     fn into_inner(self) -> Self::Inner;
+
+    unsafe fn from_inner(inner: Self::Inner) -> Self;
 
     #[inline]
     fn try_from_guard(value: Guard<Self>) -> GuardResult<Self> {
@@ -188,6 +186,13 @@ pub trait FromGuard: 'static + From<Valid<Self>> {
     #[inline]
     fn into_guard(self) -> Guard<Self> {
         unsafe { TypeGuard::from_inner::<Self>(self.into_inner()) }
+    }
+}
+
+impl<T: FromGuard> Valid<T> {
+    #[inline]
+    fn into(self) -> T {
+        unsafe { T::from_inner(self.into_inner()) }
     }
 }
 
@@ -484,13 +489,6 @@ impl<T: Destroy> Destroy for TypeGuard<T> {
     }
 }
 
-impl<T> From<Valid<TypedNil<T>>> for TypedNil<T> {
-    #[inline]
-    fn from(_: Valid<TypedNil<T>>) -> Self {
-        TypedNil::new()
-    }
-}
-
 impl<T: 'static> FromGuard for TypedNil<T> {
     type Inner = Self;
 
@@ -498,26 +496,10 @@ impl<T: 'static> FromGuard for TypedNil<T> {
     fn into_inner(self) -> Self::Inner {
         self
     }
-}
 
-impl<T: FromGuard, N: FromGuard> From<Valid<Cons<T, N>>> for Cons<T, N> {
     #[inline]
-    fn from(value: Valid<Cons<T, N>>) -> Self {
-        let Cons { head, tail } = value.into_inner();
-        let head: Valid<T> = unsafe {
-            TypeGuard::from_inner::<T>(head)
-                .try_into()
-                .unwrap_unchecked()
-        };
-        let tail: Valid<N> = unsafe {
-            TypeGuard::from_inner::<N>(tail)
-                .try_into()
-                .unwrap_unchecked()
-        };
-        Cons {
-            head: head.into(),
-            tail: tail.into(),
-        }
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        inner
     }
 }
 
@@ -529,6 +511,14 @@ impl<T: FromGuard, N: FromGuard> FromGuard for Cons<T, N> {
         Cons {
             head: self.head.into_inner(),
             tail: self.tail.into_inner(),
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Cons {
+            head: T::from_inner(inner.head),
+            tail: N::from_inner(inner.tail),
         }
     }
 }

@@ -15,7 +15,7 @@ use std::{convert::Infallible, marker::PhantomData, usize};
 
 use crate::context::{
     device::{
-        memory::{AllocReq, BindResource, MemoryProperties},
+        memory::{AllocReq, AllocReqTyped, BindResource, MemoryProperties},
         raw::allocator::{AllocationEntry, AllocatorIndex},
     },
     error::{VkError, VkResult},
@@ -50,8 +50,7 @@ impl<'a, M: MemoryProperties> BufferBuilder<'a, M> {
 pub struct Buffer<M: MemoryProperties> {
     size: usize,
     buffer: vk::Buffer,
-    allocation: AllocationEntry,
-    _phantom: PhantomData<M>,
+    allocation: AllocationEntry<M>,
 }
 
 impl<M: MemoryProperties> Buffer<M> {
@@ -67,9 +66,8 @@ impl<M: MemoryProperties> Buffer<M> {
 #[derive(Debug)]
 pub struct BufferPartial<M: MemoryProperties> {
     size: usize,
-    req: AllocReq,
+    req: AllocReqTyped<M>,
     buffer: vk::Buffer,
-    _phantom: PhantomData<M>,
 }
 
 impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
@@ -96,13 +94,8 @@ impl<'a, M: MemoryProperties> PartialBuilder<'a> for BufferPartial<M> {
             ..Default::default()
         };
         let buffer = unsafe { context.create_buffer(&create_info, None)? };
-        let req = BindResource::new(buffer).get_alloc_req(context, M::memory_type());
-        Ok(BufferPartial {
-            size,
-            req,
-            buffer,
-            _phantom: PhantomData,
-        })
+        let req = BindResource::new(buffer).get_alloc_req(context);
+        Ok(BufferPartial { size, req, buffer })
     }
 
     fn requirements(&self) -> impl Iterator<Item = AllocReq> {
@@ -130,7 +123,6 @@ impl<M: MemoryProperties> Create for Buffer<M> {
             size,
             buffer,
             allocation,
-            _phantom: PhantomData,
         })
     }
 }

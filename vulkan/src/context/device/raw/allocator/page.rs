@@ -4,7 +4,7 @@ use type_kit::{Create, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        memory::AllocReq,
+        memory::{AllocReqTyped, MemoryProperties},
         raw::allocator::{Allocation, Allocator, AllocatorInstance},
     },
     error::{ResourceError, ResourceResult},
@@ -62,24 +62,27 @@ impl From<Page> for AllocatorInstance {
 
 impl Allocator for Page {
     #[inline]
-    fn allocate<'a>(
+    fn allocate<'a, M: MemoryProperties>(
         &mut self,
         context: &crate::Context,
-        req: AllocReq,
-    ) -> ResourceResult<AllocationIndex> {
+        req: AllocReqTyped<M>,
+    ) -> ResourceResult<AllocationIndex<M>> {
         todo!()
     }
 
     #[inline]
-    fn free<'a>(
+    fn free<'a, M: MemoryProperties>(
         &mut self,
         context: &crate::Context,
-        allocation: AllocationIndex,
+        allocation: AllocationIndex<M>,
     ) -> ResourceResult<()> {
         todo!()
     }
 
-    fn get_allocation(&self, allocation: AllocationIndex) -> ResourceResult<Allocation> {
+    fn get_allocation<M: MemoryProperties>(
+        &self,
+        allocation: AllocationIndex<M>,
+    ) -> ResourceResult<Allocation<M>> {
         todo!()
     }
 }

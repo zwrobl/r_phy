@@ -1,7 +1,7 @@
 use std::{convert::Infallible, marker::PhantomData};
 
 use ash::vk;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, Valid};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 
 use crate::context::{device::memory::MemoryProperties, error::ResourceError, Context};
 
@@ -20,17 +20,6 @@ pub struct Buffer<M: MemoryProperties> {
     _phantom: PhantomData<M>,
 }
 
-impl<M: MemoryProperties> From<Valid<Buffer<M>>> for Buffer<M> {
-    fn from(guard: Valid<Buffer<M>>) -> Self {
-        let inner = guard.into_inner();
-        Self {
-            handle: inner.handle,
-            size: inner.size,
-            _phantom: PhantomData,
-        }
-    }
-}
-
 impl<M: MemoryProperties> FromGuard for Buffer<M> {
     type Inner = BufferRaw;
 
@@ -39,6 +28,15 @@ impl<M: MemoryProperties> FromGuard for Buffer<M> {
         BufferRaw {
             handle: self.handle,
             size: self.size,
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            handle: inner.handle,
+            size: inner.size,
+            _phantom: PhantomData,
         }
     }
 }

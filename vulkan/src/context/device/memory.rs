@@ -7,7 +7,7 @@ use crate::context::{
     Context,
 };
 
-#[derive(Debug, Clone, Copy, strum::EnumCount, strum::FromRepr)]
+#[derive(Debug, Clone, Copy)]
 pub enum MemoryType {
     DeviceLocal,
     HostCoherent,
@@ -198,8 +198,8 @@ impl BindResource {
     }
 
     #[inline]
-    pub fn get_alloc_req(&self, context: &Context, memory_type: MemoryType) -> AllocReq {
-        memory_type.get_alloc_req(context.get_memory_requirements(*self))
+    pub fn get_alloc_req<M: MemoryProperties>(&self, context: &Context) -> AllocReqTyped<M> {
+        M::alloc_req_typed(context.get_memory_requirements(*self))
     }
 }
 
