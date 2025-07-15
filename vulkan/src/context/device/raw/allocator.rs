@@ -33,7 +33,7 @@ use crate::context::{
 #[derive(Debug, Clone, Copy)]
 pub struct AllocationRaw {
     range: ByteRange,
-    memory: TypeGuard<GenIndexRaw>,
+    memory: GenIndexRaw,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,7 +63,7 @@ impl<M: MemoryProperties> FromGuard for Allocation<M> {
     fn into_inner(self) -> Self::Inner {
         AllocationRaw {
             range: self.range,
-            memory: self.memory.into_guard(),
+            memory: self.memory.into_inner(),
         }
     }
 
@@ -72,7 +72,7 @@ impl<M: MemoryProperties> FromGuard for Allocation<M> {
         let inner: AllocationRaw = inner;
         Self {
             range: inner.range,
-            memory: inner.memory.try_into_outer().unwrap(),
+            memory: ResourceIndex::<Memory<M>>::from_inner(inner.memory),
         }
     }
 }
@@ -378,7 +378,7 @@ impl<M: MemoryProperties> Copy for AllocationIndex<M> {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct AllocationIndexRaw {
-    index: TypeGuard<GenIndexRaw>,
+    index: GenIndexRaw,
 }
 
 impl<M: MemoryProperties> FromGuard for AllocationIndex<M> {
@@ -386,13 +386,13 @@ impl<M: MemoryProperties> FromGuard for AllocationIndex<M> {
 
     fn into_inner(self) -> Self::Inner {
         AllocationIndexRaw {
-            index: self.index.into_guard(),
+            index: self.index.into_inner(),
         }
     }
 
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            index: inner.index.try_into_outer().unwrap(),
+            index: GuardIndex::<Allocation<M>>::from_inner(inner.index),
         }
     }
 }
@@ -414,7 +414,7 @@ impl<M: MemoryProperties> Copy for AllocationEntry<M> {}
 #[derive(Debug, Clone, Copy)]
 pub struct AllocationEntryRaw {
     allocator: AllocatorIndex,
-    allocation: TypeGuard<AllocationIndexRaw>,
+    allocation: AllocationIndexRaw,
 }
 
 impl<M: MemoryProperties> FromGuard for AllocationEntry<M> {
@@ -423,14 +423,14 @@ impl<M: MemoryProperties> FromGuard for AllocationEntry<M> {
     fn into_inner(self) -> Self::Inner {
         AllocationEntryRaw {
             allocator: self.allocator,
-            allocation: self.allocation.into_guard(),
+            allocation: self.allocation.into_inner(),
         }
     }
 
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
             allocator: inner.allocator,
-            allocation: inner.allocation.try_into_outer().unwrap(),
+            allocation: AllocationIndex::<M>::from_inner(inner.allocation),
         }
     }
 }

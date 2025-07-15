@@ -207,8 +207,8 @@ pub struct ImageRaw {
     format: vk::Format,
     layout: vk::ImageLayout,
     usage: vk::ImageUsageFlags,
-    view: TypeGuard<GenIndexRaw>,
-    memory: TypeGuard<AllocationEntryRaw>,
+    view: GenIndexRaw,
+    memory: AllocationEntryRaw,
 }
 
 impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
@@ -222,8 +222,8 @@ impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
             format: self.format,
             layout: self.layout,
             usage: self.usage,
-            memory: self.memory.into_guard(),
-            view: self.view.into_guard(),
+            memory: self.memory.into_inner(),
+            view: self.view.into_inner(),
         }
     }
 
@@ -235,8 +235,8 @@ impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
             format: inner.format,
             layout: inner.layout,
             usage: inner.usage,
-            memory: inner.memory.try_into_outer().unwrap(),
-            view: ResourceIndex::<ImageView<V>>::try_from_guard(inner.view).unwrap(),
+            memory: AllocationEntry::<M>::from_inner(inner.memory),
+            view: ResourceIndex::<ImageView<V>>::from_inner(inner.view),
         }
     }
 }

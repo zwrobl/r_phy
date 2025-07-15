@@ -58,10 +58,8 @@ impl<R: Resource> FromGuard for ResourceIndex<R> {
 
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
-        let index = unsafe { TypeGuard::from_inner::<GuardIndex<R>>(inner) };
-        let index: Conv<GuardIndex<R>> = index.try_into().unwrap();
         Self {
-            index: index.unwrap(),
+            index: GuardIndex::<R>::from_inner(inner),
         }
     }
 }

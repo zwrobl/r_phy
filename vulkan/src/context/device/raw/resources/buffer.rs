@@ -15,8 +15,7 @@ pub struct BufferRaw {
 
 #[derive(Debug)]
 pub struct Buffer<M: MemoryProperties> {
-    handle: vk::Buffer,
-    size: vk::DeviceSize,
+    buffer: BufferRaw,
     _phantom: PhantomData<M>,
 }
 
@@ -25,17 +24,13 @@ impl<M: MemoryProperties> FromGuard for Buffer<M> {
 
     #[inline]
     fn into_inner(self) -> Self::Inner {
-        BufferRaw {
-            handle: self.handle,
-            size: self.size,
-        }
+        self.buffer
     }
 
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            handle: inner.handle,
-            size: inner.size,
+            buffer: inner,
             _phantom: PhantomData,
         }
     }
@@ -52,8 +47,10 @@ impl<M: MemoryProperties> Create for Buffer<M> {
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let buffer = Buffer {
-            handle: unsafe { context.create_buffer(&config, None)? },
-            size: config.size,
+            buffer: BufferRaw {
+                handle: unsafe { context.create_buffer(&config, None)? },
+                size: config.size,
+            },
             _phantom: PhantomData,
         };
         Ok(buffer)
@@ -79,9 +76,7 @@ impl<M: MemoryProperties> Destroy for Buffer<M> {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        unsafe {
-            context.destroy_buffer(self.handle, None);
-        }
+        let _ = self.buffer.destroy(context);
         Ok(())
     }
 }
