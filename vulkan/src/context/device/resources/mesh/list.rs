@@ -98,7 +98,7 @@ impl MeshPackListPartial for Nil {
     }
 
     #[inline]
-    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {}
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, _builder: &mut B) {}
 }
 
 impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial

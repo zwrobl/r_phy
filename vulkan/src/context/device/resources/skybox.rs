@@ -86,8 +86,8 @@ impl Destroy for SkyboxPartial {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.cube.destroy(context);
-        self.cubemap.destroy(context);
+        let _ = self.cube.destroy(context);
+        let _ = self.cubemap.destroy(context);
         Ok(())
     }
 }

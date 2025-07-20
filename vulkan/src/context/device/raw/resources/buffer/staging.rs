@@ -28,7 +28,7 @@ use crate::context::{
         },
         Device,
     },
-    error::{AshResult, ResourceError, ResourceResult, VkResult},
+    error::{AshResult, ResourceError, VkResult},
     Context,
 };
 

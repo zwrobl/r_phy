@@ -1,9 +1,7 @@
-mod presets;
 mod sampler;
 mod texture;
 mod view;
 
-pub use presets::*;
 pub use sampler::*;
 pub use texture::*;
 pub use view::*;
@@ -14,13 +12,13 @@ use ash::vk;
 
 use crate::context::{
     device::{
-        memory::{AllocReqTyped, BindResource, MemoryProperties},
+        memory::{AllocReqTyped, BindResource, DeviceLocal, MemoryProperties},
         raw::{
             allocator::{AllocationEntry, AllocationEntryRaw, AllocatorBuilder, AllocatorIndex},
             Partial,
         },
     },
-    error::ResourceError,
+    error::{ResourceError, ResourceResult},
     Context,
 };
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
@@ -345,5 +343,56 @@ impl Destroy for ImageRaw {
         }
         let _ = context.free_allocation_raw(self.allocation);
         Ok(())
+    }
+}
+
+impl Context {
+    pub fn prepare_color_attachment_image(
+        &self,
+    ) -> ResourceResult<ImagePartial<Image2D, DeviceLocal>> {
+        let extent = self.physical_device.surface_properties.get_current_extent();
+        ImagePartial::create(
+            ImageCreateInfo::new(ImageInfo {
+                extent: vk::Extent3D {
+                    width: extent.width,
+                    height: extent.height,
+                    depth: 1,
+                },
+                format: self.physical_device.attachment_properties.formats.color,
+                samples: self.physical_device.attachment_properties.msaa_samples,
+                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT
+                    | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT
+                    | vk::ImageUsageFlags::INPUT_ATTACHMENT,
+                aspect: vk::ImageAspectFlags::COLOR,
+                ..Default::default()
+            }),
+            self,
+        )
+    }
+
+    pub fn prepare_depth_stencil_attachment_image(
+        &self,
+    ) -> ResourceResult<ImagePartial<Image2D, DeviceLocal>> {
+        let extent = self.physical_device.surface_properties.get_current_extent();
+        ImagePartial::create(
+            ImageCreateInfo::new(ImageInfo {
+                extent: vk::Extent3D {
+                    width: extent.width,
+                    height: extent.height,
+                    depth: 1,
+                },
+                format: self
+                    .physical_device
+                    .attachment_properties
+                    .formats
+                    .depth_stencil,
+                samples: self.physical_device.attachment_properties.msaa_samples,
+                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                    | vk::ImageUsageFlags::INPUT_ATTACHMENT,
+                aspect: vk::ImageAspectFlags::DEPTH,
+                ..Default::default()
+            }),
+            self,
+        )
     }
 }

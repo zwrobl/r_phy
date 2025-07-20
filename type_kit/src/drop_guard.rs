@@ -350,7 +350,7 @@ impl<T: Destroy> Destroy for Option<T> {
 }
 
 pub struct VecDestoryError<T: Destroy> {
-    err_item: T,
+    _err_item: T,
     err: T::DestroyError,
 }
 
@@ -398,7 +398,10 @@ where
         {
             let err_item = self.swap_remove(index);
             self.truncate(index);
-            Err(VecDestoryError { err_item, err })
+            Err(VecDestoryError {
+                _err_item: err_item,
+                err,
+            })
         } else {
             Ok(())
         }

@@ -71,7 +71,7 @@ pub trait MaterialPackListPartial: Sized {
 impl MaterialPackListPartial for Nil {
     type Pack = TypedNil<DummyPack>;
 
-    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {}
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, _builder: &mut B) {}
 
     fn allocate(
         self,

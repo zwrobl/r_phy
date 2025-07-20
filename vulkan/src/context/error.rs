@@ -44,7 +44,7 @@ impl Error for AllocatorError {}
 pub type AllocatorResult<T> = Result<T, AllocatorError>;
 
 #[derive(Debug, Clone, Copy)]
-enum CollectionError {
+pub enum CollectionError {
     GenCollection(GenCollectionError),
     GuardCollection(GuardCollectionError),
 }

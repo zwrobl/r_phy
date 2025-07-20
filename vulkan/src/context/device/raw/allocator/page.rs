@@ -37,8 +37,8 @@ impl Create for Page {
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(
-        config: Self::Config<'a>,
-        context: Self::Context<'b>,
+        _config: Self::Config<'a>,
+        _context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         todo!()
     }
@@ -48,7 +48,7 @@ impl Destroy for Page {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+    fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
         todo!()
     }
 }
@@ -64,8 +64,8 @@ impl Allocator for Page {
     #[inline]
     fn allocate<'a, M: MemoryProperties>(
         &mut self,
-        context: &crate::Context,
-        req: AllocReqTyped<M>,
+        _context: &crate::Context,
+        _req: AllocReqTyped<M>,
     ) -> ResourceResult<AllocationIndex<M>> {
         todo!()
     }
@@ -73,15 +73,15 @@ impl Allocator for Page {
     #[inline]
     fn free<'a, M: MemoryProperties>(
         &mut self,
-        context: &crate::Context,
-        allocation: AllocationIndex<M>,
+        _context: &crate::Context,
+        _allocation: AllocationIndex<M>,
     ) -> ResourceResult<()> {
         todo!()
     }
 
     fn get_allocation<M: MemoryProperties>(
         &self,
-        allocation: AllocationIndex<M>,
+        _allocation: AllocationIndex<M>,
     ) -> ResourceResult<Allocation<M>> {
         todo!()
     }

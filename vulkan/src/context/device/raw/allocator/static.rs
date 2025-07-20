@@ -8,9 +8,7 @@ use type_kit::{
 
 use crate::context::{
     device::{
-        memory::{
-            AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties, MemoryType,
-        },
+        memory::{AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties},
         raw::{
             allocator::{
                 AllocReq, Allocation, AllocationStore, Allocator, AllocatorBuilder,
@@ -65,7 +63,7 @@ impl<M: MemoryProperties> LinearBuffer<M> {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct LinearBufferBuilder<M: MemoryProperties> {
+pub struct LinearBufferBuilder<M: MemoryProperties> {
     info: BufferInfo,
     _phantom: PhantomData<M>,
 }
