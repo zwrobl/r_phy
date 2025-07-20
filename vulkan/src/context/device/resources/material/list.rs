@@ -2,9 +2,9 @@ use std::error::Error;
 
 use crate::context::{
     device::{
-        memory::AllocReq,
         raw::{
             allocator::{AllocatorBuilder, AllocatorIndex},
+            resources::image::Image2DReader,
             Partial,
         },
         resources::DummyPack,
@@ -83,7 +83,7 @@ impl MaterialPackListPartial for Nil {
 }
 
 impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
-    for Cons<Option<MaterialPackPartial<'a, M>>, N>
+    for Cons<Option<MaterialPackPartial<'a, M, Image2DReader<'a>>>, N>
 {
     type Pack = Cons<Option<MaterialPack<M>>, N::Pack>;
 

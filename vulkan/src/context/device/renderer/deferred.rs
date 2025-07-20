@@ -31,12 +31,15 @@ use crate::context::{
             GraphicsPipelinePackList, ModuleLoader, Modules, PipelineLayoutMaterial,
             ShaderDirectory, StatesDepthWriteDisabled,
         },
-        raw::{allocator::AllocatorIndex, Partial},
+        raw::{
+            allocator::AllocatorIndex,
+            resources::image::{Image, Image2D, ImagePartial},
+            Partial,
+        },
         render_pass::{
             DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
         },
         resources::{
-            image::{Image2D, Image2DPartial},
             MaterialPackList, MeshPack, MeshPackList, MeshPackPartial, Skybox, SkyboxPartial,
         },
         swapchain::Swapchain,
@@ -102,25 +105,25 @@ impl<S: ShaderType> ModuleLoader for DeferredShader<S> {
 }
 
 pub struct GBufferPartial {
-    pub combined: Image2DPartial<DeviceLocal>,
-    pub albedo: Image2DPartial<DeviceLocal>,
-    pub normal: Image2DPartial<DeviceLocal>,
-    pub position: Image2DPartial<DeviceLocal>,
-    pub depth: Image2DPartial<DeviceLocal>,
+    pub combined: ImagePartial<Image2D, DeviceLocal>,
+    pub albedo: ImagePartial<Image2D, DeviceLocal>,
+    pub normal: ImagePartial<Image2D, DeviceLocal>,
+    pub position: ImagePartial<Image2D, DeviceLocal>,
+    pub depth: ImagePartial<Image2D, DeviceLocal>,
 }
 
-pub struct DeferredRendererPartial<'a> {
+pub struct DeferredRendererPartial {
     g_buffer: GBufferPartial,
-    skybox: SkyboxPartial<'a>,
+    skybox: SkyboxPartial,
     meshes: MeshPackPartial<'static, CommonVertex>,
 }
 
 pub struct GBuffer {
-    pub combined: DropGuard<Image2D<DeviceLocal>>,
-    pub albedo: DropGuard<Image2D<DeviceLocal>>,
-    pub normal: DropGuard<Image2D<DeviceLocal>>,
-    pub position: DropGuard<Image2D<DeviceLocal>>,
-    pub depth: DropGuard<Image2D<DeviceLocal>>,
+    pub combined: DropGuard<Image<Image2D, DeviceLocal>>,
+    pub albedo: DropGuard<Image<Image2D, DeviceLocal>>,
+    pub normal: DropGuard<Image<Image2D, DeviceLocal>>,
+    pub position: DropGuard<Image<Image2D, DeviceLocal>>,
+    pub depth: DropGuard<Image<Image2D, DeviceLocal>>,
 }
 
 struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
@@ -288,11 +291,11 @@ impl Destroy for GBufferPartial {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.albedo.destroy(context);
-        self.combined.destroy(context);
-        self.depth.destroy(context);
-        self.normal.destroy(context);
-        self.position.destroy(context);
+        let _ = self.albedo.destroy(context);
+        let _ = self.combined.destroy(context);
+        let _ = self.depth.destroy(context);
+        let _ = self.normal.destroy(context);
+        let _ = self.position.destroy(context);
         Ok(())
     }
 }
@@ -304,11 +307,11 @@ impl GBuffer {
     ) -> Builder<AttachmentsGBuffer> {
         AttachmentsBuilder::new()
             .push(swapchain_image)
-            .push(self.depth.image_view)
-            .push(self.position.image_view)
-            .push(self.normal.image_view)
-            .push(self.albedo.image_view)
-            .push(self.combined.image_view)
+            .push(self.depth.get_image_view().get_vk_image_view())
+            .push(self.position.get_image_view().get_vk_image_view())
+            .push(self.normal.get_image_view().get_vk_image_view())
+            .push(self.albedo.get_image_view().get_vk_image_view())
+            .push(self.combined.get_image_view().get_vk_image_view())
     }
 }
 
@@ -318,11 +321,11 @@ impl Create for GBuffer {
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let (partial, allocator) = config;
-        let combined = Image2D::create((partial.combined, allocator), context)?;
-        let albedo = Image2D::create((partial.albedo, allocator), context)?;
-        let normal = Image2D::create((partial.normal, allocator), context)?;
-        let position = Image2D::create((partial.position, allocator), context)?;
-        let depth = Image2D::create((partial.depth, allocator), context)?;
+        let combined = Image::create((partial.combined, allocator), context)?;
+        let albedo = Image::create((partial.albedo, allocator), context)?;
+        let normal = Image::create((partial.normal, allocator), context)?;
+        let position = Image::create((partial.position, allocator), context)?;
+        let depth = Image::create((partial.depth, allocator), context)?;
         Ok(GBuffer {
             combined: DropGuard::new(combined),
             albedo: DropGuard::new(albedo),
@@ -393,7 +396,7 @@ impl Destroy for DeferredRendererFrameData {
 
 impl Create for DeferredRendererResources {
     type Config<'a> = (
-        SkyboxPartial<'a>,
+        SkyboxPartial,
         MeshPackPartial<'static, CommonVertex>,
         AllocatorIndex,
     );
@@ -466,7 +469,7 @@ impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererPipelines<P> {
     }
 }
 
-impl<'c> Create for DeferredRendererPartial<'c> {
+impl Create for DeferredRendererPartial {
     type Config<'a> = &'a Path;
 
     type CreateError = ResourceError;
@@ -480,7 +483,7 @@ impl<'c> Create for DeferredRendererPartial<'c> {
     }
 }
 
-impl<'a> Partial for DeferredRendererPartial<'a> {
+impl Partial for DeferredRendererPartial {
     fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
         &self,
         builder: &mut B,
@@ -491,21 +494,21 @@ impl<'a> Partial for DeferredRendererPartial<'a> {
     }
 }
 
-impl<'b> Destroy for DeferredRendererPartial<'b> {
+impl Destroy for DeferredRendererPartial {
     type Context<'a> = &'a Context;
 
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.g_buffer.destroy(context);
-        self.meshes.destroy(context);
-        self.skybox.destroy(context);
+        let _ = self.g_buffer.destroy(context);
+        let _ = self.meshes.destroy(context);
+        let _ = self.skybox.destroy(context);
         Ok(())
     }
 }
 
 impl Create for DeferredRenderer {
-    type Config<'a> = (DeferredRendererPartial<'a>, AllocatorIndex);
+    type Config<'a> = (DeferredRendererPartial, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(

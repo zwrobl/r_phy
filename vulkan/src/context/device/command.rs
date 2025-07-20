@@ -5,8 +5,11 @@ use math::types::Vector4;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
-    device::raw::resources::buffer::Buffer,
-    error::{VkError, VkResult},
+    device::raw::resources::{
+        buffer::Buffer,
+        image::{Image, ImageType},
+    },
+    error::AshResult,
 };
 
 use self::{
@@ -20,9 +23,7 @@ use super::{
     memory::MemoryProperties,
     pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstant, PushConstantDataRef},
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    resources::{
-        image::Image2D, BufferType, LayoutSkybox, MeshPackBinding, MeshRangeBindData, Skybox,
-    },
+    resources::{BufferType, LayoutSkybox, MeshPackBinding, MeshRangeBindData, Skybox},
     swapchain::SwapchainFrame,
     Device, QueueFamilies,
 };
@@ -34,7 +35,7 @@ pub struct Persistent;
 pub mod level {
     use ash::vk;
 
-    use crate::context::{device::Device, error::VkResult};
+    use crate::context::{device::Device, error::AshResult};
 
     pub trait Level {
         const LEVEL: vk::CommandBufferLevel;
@@ -47,7 +48,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> VkResult<Self::PersistentAllocator>;
+        ) -> AshResult<Self::PersistentAllocator>;
 
         fn destory_persistent_alocator(device: &Device, allocator: &mut Self::PersistentAllocator);
 
@@ -90,7 +91,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> VkResult<Self::PersistentAllocator> {
+        ) -> AshResult<Self::PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -164,7 +165,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> VkResult<Self::PersistentAllocator> {
+        ) -> AshResult<Self::PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -265,7 +266,7 @@ impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
 
 impl<L: Level, O: Operation> Create for PersistentCommandPool<L, O> {
     type Config<'a> = usize;
-    type CreateError = VkError;
+    type CreateError = vk::Result;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let command_pool = unsafe {
@@ -345,7 +346,7 @@ impl Device {
     pub fn begin_primary_command<T, O: Operation>(
         &self,
         command: NewCommand<T, Primary, O>,
-    ) -> VkResult<BeginCommand<T, Primary, O>> {
+    ) -> AshResult<BeginCommand<T, Primary, O>> {
         let NewCommand(command) = command;
         unsafe {
             self.device
@@ -378,7 +379,7 @@ impl Device {
     pub fn finish_command<T, L: Level, O: Operation>(
         &self,
         command: BeginCommand<T, L, O>,
-    ) -> VkResult<FinishedCommand<T, L, O>> {
+    ) -> AshResult<FinishedCommand<T, L, O>> {
         let BeginCommand(command) = command;
         unsafe {
             self.device.end_command_buffer(L::buffer(&command.data))?;
@@ -449,9 +450,9 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn change_layout<'b, 'c, M: MemoryProperties>(
+    pub fn change_layout<V: ImageType, M: MemoryProperties>(
         self,
-        image: impl Into<&'c mut Image2D<M>>,
+        image: &mut Image<V, M>,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
         array_layer: u32,
@@ -459,11 +460,6 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         level_count: u32,
     ) -> Self {
         let RecordingCommand(command, device) = self;
-        let image = image.into();
-        debug_assert!(
-            base_level + level_count <= image.mip_levels,
-            "Image mip level count exceeded!"
-        );
         unsafe {
             device.cmd_pipeline_barrier(
                 L::buffer(&command.data),
@@ -481,7 +477,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                     new_layout,
                     src_queue_family_index: O::get_queue_family_index(device),
                     dst_queue_family_index: O::get_queue_family_index(device),
-                    image: image.image,
+                    image: image.get_vk_image(),
                     subresource_range: vk::ImageSubresourceRange {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
                         base_mip_level: base_level,
@@ -492,34 +488,32 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                     ..Default::default()
                 }],
             );
-            // TODO: Reconsider setting the layout here as it could be error prone
-            // when handling partial layout transition (e.g. single mip level subresource)
-            // image.layout = new_layout;
         }
         RecordingCommand(command, device)
     }
 
-    pub fn generate_mip<'b, 'c, M: MemoryProperties>(
+    pub fn generate_mip<V: ImageType, M: MemoryProperties>(
         self,
-        image: impl Into<&'c mut Image2D<M>>,
+        image: &mut Image<V, M>,
         array_layer: u32,
     ) -> Self {
-        let image = image.into();
-        let image_mip_levels = image.mip_levels;
-        // debug_assert!(
-        //     image.layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        //     "Invalid image layout for mip levels generation!"
-        // );
-        (1..image_mip_levels)
+        let image_info = image.get_image_info();
+        let mip_info = image_info.mip_info.unwrap();
+        let extent = vk::Extent2D {
+            width: image_info.extent.width,
+            height: image_info.extent.height,
+        };
+        (1..mip_info.level_count)
             .fold(self, |command, level| {
-                command.generate_mip_level(image.image, image.extent, level, array_layer)
+                command.generate_mip_level(image.get_vk_image(), extent, level, array_layer)
             })
             .change_layout(
                 image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 array_layer,
-                image_mip_levels - 1,
+                // TODO: Should it be mip_info.level_count + mip_info.mip_info.base_mip_level
+                mip_info.level_count - 1,
                 1,
             )
     }
@@ -634,20 +628,18 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn copy_image<'b, 'c, S: MemoryProperties, D: MemoryProperties>(
+    pub fn copy_image<'b, 'c, V: ImageType, M: MemoryProperties, B: MemoryProperties>(
         self,
-        src: impl Into<&'b Buffer<S>>,
-        dst: impl Into<&'c mut Image2D<D>>,
+        src: &Buffer<B>,
+        dst: &mut Image<V, M>,
         dst_layer: u32,
     ) -> Self {
         let RecordingCommand(command, device) = self;
-        let src = src.into();
-        let dst = dst.into();
         unsafe {
             device.cmd_copy_buffer_to_image(
                 L::buffer(&command.data),
                 src.get_vk_buffer(),
-                dst.image,
+                dst.get_vk_image(),
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[vk::BufferImageCopy {
                     buffer_offset: 0,
@@ -660,11 +652,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                         layer_count: 1,
                     },
                     image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
-                    image_extent: vk::Extent3D {
-                        width: dst.extent.width,
-                        height: dst.extent.height,
-                        depth: 1,
-                    },
+                    image_extent: dst.get_image_info().extent,
                 }],
             );
         }
@@ -826,7 +814,7 @@ impl Device {
         command: FinishedCommand<T, Primary, O>,
         wait: SubmitSemaphoreState,
         signal: &[vk::Semaphore],
-    ) -> VkResult<SubmitedCommand<'a, T, Primary, O>> {
+    ) -> AshResult<SubmitedCommand<'a, T, Primary, O>> {
         let FinishedCommand(command) = command;
         unsafe {
             self.device.queue_submit(
@@ -858,7 +846,7 @@ impl<'a, T, L: Level, O: Operation> From<&'a SubmitedCommand<'a, T, L, O>>
 }
 
 impl<'a, O: Operation> SubmitedCommand<'a, Transient, Primary, O> {
-    pub fn wait(self) -> VkResult<Self> {
+    pub fn wait(self) -> AshResult<Self> {
         let SubmitedCommand(command, device) = self;
         unsafe {
             device.wait_for_fences(&[command.data.fence], true, u64::MAX)?;
@@ -890,7 +878,7 @@ pub(super) struct TransientCommandPools {
 }
 
 impl TransientCommandPools {
-    pub fn create(device: &ash::Device, queue_families: QueueFamilies) -> VkResult<Self> {
+    pub fn create(device: &ash::Device, queue_families: QueueFamilies) -> AshResult<Self> {
         let transfer = unsafe {
             device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
@@ -921,7 +909,7 @@ impl TransientCommandPools {
 impl Device {
     pub fn allocate_transient_command<O: Operation>(
         &self,
-    ) -> VkResult<NewCommand<Transient, Primary, O>> {
+    ) -> AshResult<NewCommand<Transient, Primary, O>> {
         let &buffer = unsafe {
             self.device
                 .allocate_command_buffers(

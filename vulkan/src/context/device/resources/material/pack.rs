@@ -11,12 +11,14 @@ use crate::context::{
         },
         raw::{
             allocator::AllocatorIndex,
-            resources::buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+            resources::{
+                buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+                image::{Image2D, Image2DReader, ImageReader, Texture, TexturePartial},
+            },
             Partial,
         },
-        resources::image::{ImageReader, Texture2D, Texture2DPartial},
     },
-    error::VkResult,
+    error::{ResourceResult, VkResult},
     Context,
 };
 
@@ -47,18 +49,18 @@ impl<'b, M: Material> Destroy for MaterialUniformPartial<'b, M> {
 }
 
 pub struct MaterialPackData<M: Material> {
-    textures: Option<Vec<Texture2D>>,
+    textures: Option<Vec<Texture<Image2D>>>,
     uniforms: Option<DropGuard<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>>,
     descriptors: DropGuard<DescriptorPool<M::DescriptorLayout>>,
 }
 
-pub struct MaterialPackPartial<'a, M: Material> {
-    textures: Option<Vec<Texture2DPartial<'a>>>,
+pub struct MaterialPackPartial<'a, M: Material, R: ImageReader<Type = Image2D>> {
+    textures: Option<Vec<TexturePartial<Image2D, R>>>,
     uniforms: Option<MaterialUniformPartial<'a, M>>,
     num_materials: usize,
 }
 
-impl<'a, M: Material> Partial for MaterialPackPartial<'a, M> {
+impl<'a, M: Material, R: ImageReader<Type = Image2D>> Partial for MaterialPackPartial<'a, M, R> {
     #[inline]
     fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
         &self,
@@ -69,7 +71,7 @@ impl<'a, M: Material> Partial for MaterialPackPartial<'a, M> {
     }
 }
 
-impl<'b, M: Material> Destroy for MaterialPackPartial<'b, M> {
+impl<'b, M: Material, R: ImageReader<Type = Image2D>> Destroy for MaterialPackPartial<'b, M, R> {
     type Context<'a> = &'a Context;
 
     type DestroyError = Infallible;
@@ -127,7 +129,7 @@ impl Context {
     fn prepare_material_pack_textures<'a, M: Material>(
         &self,
         materials: &'a [M],
-    ) -> VkResult<Option<Vec<Texture2DPartial<'a>>>> {
+    ) -> VkResult<Option<Vec<TexturePartial<Image2D, Image2DReader<'a>>>>> {
         if M::NUM_IMAGES > 0 {
             let textures = materials
                 .iter()
@@ -137,7 +139,7 @@ impl Context {
                     material
                         .images()
                         .unwrap()
-                        .map(|image| Texture2DPartial::create(ImageReader::image(image)?, self))
+                        .map(|image| TexturePartial::create(Image2DReader::new(image)?, self))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -149,12 +151,12 @@ impl Context {
 
     fn allocate_material_pack_textures_memory<'a>(
         &self,
-        textures: Vec<Texture2DPartial<'a>>,
+        textures: Vec<TexturePartial<Image2D, Image2DReader>>,
         allocator: AllocatorIndex,
-    ) -> VkResult<Vec<Texture2D>> {
+    ) -> ResourceResult<Vec<Texture<Image2D>>> {
         textures
             .into_iter()
-            .map(|texture| Texture2D::create((texture, allocator), self))
+            .map(|texture| Texture::<Image2D>::create((texture, allocator), self))
             .collect()
     }
 
@@ -194,7 +196,7 @@ impl Context {
     pub fn prepare_material_pack<'a, M: Material>(
         &self,
         materials: &'a [M],
-    ) -> Result<MaterialPackPartial<'a, M>, Box<dyn Error>> {
+    ) -> Result<MaterialPackPartial<'a, M, Image2DReader<'a>>, Box<dyn Error>> {
         let textures = self.prepare_material_pack_textures(materials)?;
         let uniforms = self.prepare_material_pack_uniforms(materials)?;
         Ok(MaterialPackPartial {
@@ -206,7 +208,7 @@ impl Context {
 
     pub fn allocate_material_pack_memory<'a, M: Material>(
         &self,
-        partial: MaterialPackPartial<'a, M>,
+        partial: MaterialPackPartial<'a, M, Image2DReader<'a>>,
         allocator: AllocatorIndex,
     ) -> Result<MaterialPack<M>, Box<dyn Error>> {
         let MaterialPackPartial {

@@ -5,7 +5,7 @@ pub mod memory;
 use std::{convert::Infallible, fmt::Debug};
 
 use buffer::BufferRaw;
-use image::{ImageRaw, ImageViewRaw};
+use image::{ImageRaw, TextureRaw};
 use type_kit::{
     list_type, BorrowList, Cons, Contains, Create, Destroy, DestroyResult, DropGuardError,
     FromGuard, GenCollectionResult, GenIndexRaw, GuardIndex, IndexList, Marked, Marker, Nil,
@@ -69,7 +69,7 @@ pub type ResourceStorageList = list_type![
     TypeGuardCollection<MemoryRaw>,
     TypeGuardCollection<BufferRaw>,
     TypeGuardCollection<ImageRaw>,
-    TypeGuardCollection<ImageViewRaw>,
+    TypeGuardCollection<TextureRaw>,
     Nil
 ];
 
@@ -198,7 +198,7 @@ impl Destroy for ResourceStorage {
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.destroy_resource_storage::<ImageViewRaw, _>(context)?;
+        self.destroy_resource_storage::<TextureRaw, _>(context)?;
         self.destroy_resource_storage::<ImageRaw, _>(context)?;
         self.destroy_resource_storage::<BufferRaw, _>(context)?;
         self.destroy_resource_storage::<MemoryRaw, _>(context)?;

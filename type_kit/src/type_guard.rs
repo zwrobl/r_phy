@@ -207,6 +207,20 @@ impl<T: FromGuard> IntoOuter<T> for Guard<T> {
     }
 }
 
+impl<T: FromGuard> FromGuard for Option<T> {
+    type Inner = Option<T::Inner>;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        self.map(|value| value.into_inner())
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        inner.map(|inner| T::from_inner(inner))
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Conv<T: FromGuard>(T);
 

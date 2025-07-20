@@ -5,12 +5,15 @@ use std::{marker::PhantomData, usize};
 use ash::vk::{self, Extent2D};
 
 use crate::context::{
-    device::{AttachmentProperties, Device},
+    device::{
+        raw::resources::image::{Image, Image2D},
+        AttachmentProperties, Device,
+    },
     error::VkResult,
 };
 use type_kit::{Cons, Nil};
 
-use super::{memory::DeviceLocal, render_pass::RenderPassConfig, resources::image::Image2D};
+use super::{memory::DeviceLocal, render_pass::RenderPassConfig};
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -153,10 +156,10 @@ pub struct InputAttachment {
     pub image_view: vk::ImageView,
 }
 
-impl From<Image2D<DeviceLocal>> for InputAttachment {
-    fn from(image: Image2D<DeviceLocal>) -> Self {
+impl From<&Image<Image2D, DeviceLocal>> for InputAttachment {
+    fn from(image: &Image<Image2D, DeviceLocal>) -> Self {
         Self {
-            image_view: image.image_view,
+            image_view: image.get_image_view().get_vk_image_view(),
         }
     }
 }

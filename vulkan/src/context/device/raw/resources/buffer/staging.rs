@@ -20,13 +20,15 @@ use crate::context::{
         raw::{
             allocator::AllocatorIndex,
             range::{ByteRange, Range},
-            resources::buffer::{BufferInfoBuilder, BufferPartial, PersistentBuffer},
+            resources::{
+                buffer::{BufferInfoBuilder, BufferPartial, PersistentBuffer},
+                image::{Image, ImageType},
+            },
             Partial,
         },
-        resources::image::Image2D,
         Device,
     },
-    error::{ResourceError, VkError, VkResult},
+    error::{AshResult, ResourceError, ResourceResult, VkResult},
     Context,
 };
 
@@ -171,41 +173,37 @@ impl StagingBuffer {
         Ok(())
     }
 
-    pub fn transfer_image_data<'b>(
+    pub fn transfer_image_data<'b, V: ImageType>(
         &self,
         context: &Device,
-        dst: impl Into<&'b mut Image2D<DeviceLocal>>,
+        dst: &mut Image<V, DeviceLocal>,
         dst_array_layer: u32,
         dst_final_layout: vk::ImageLayout,
-    ) -> VkResult<()> {
-        let dst: &mut _ = dst.into();
-        debug_assert!(
-            dst.array_layers > dst_array_layer,
-            "Invalid dst_array_layer for image data transfer!"
-        );
-        let dst_mip_levels = dst.mip_levels;
-        let dst_old_layout = dst.layout;
+    ) -> AshResult<()> {
+        let image_info = dst.get_image_info();
+        let mip_info = image_info.mip_info.unwrap_or_default();
+        let old_layout = dst.get_vk_layout();
         let command = context
             .begin_primary_command(context.allocate_transient_command::<operation::Graphics>()?)?;
         let command = context.record_command(command, |command| {
             command
                 .change_layout(
-                    dst.borrow_mut(),
-                    dst_old_layout,
+                    dst,
+                    old_layout,
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                     dst_array_layer,
                     0,
                     1,
                 )
-                .copy_image(self, dst.borrow_mut(), dst_array_layer)
-                .generate_mip(dst.borrow_mut(), dst_array_layer)
+                .copy_image(self, dst, dst_array_layer)
+                .generate_mip(dst, dst_array_layer)
                 .change_layout(
                     dst.borrow_mut(),
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                     dst_final_layout,
                     dst_array_layer,
                     0,
-                    dst_mip_levels,
+                    mip_info.level_count,
                 )
         });
 
@@ -258,7 +256,7 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
 
 impl Create for StagingBuffer {
     type Config<'a> = (StagingBufferPartial, AllocatorIndex);
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {

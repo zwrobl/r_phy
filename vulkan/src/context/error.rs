@@ -10,7 +10,7 @@ use png::{BitDepth, ColorType};
 use type_kit::{GenCollectionError, GuardCollectionError, TypeGuardConversionError};
 use winit::raw_window_handle::HandleError;
 
-use super::device::resources::image::ImageCubeFace;
+use crate::context::device::raw::resources::image::ImageCubeFace;
 
 #[derive(Debug, Clone, Copy)]
 pub enum AllocatorError {
@@ -365,3 +365,5 @@ impl From<AllocatorError> for VkError {
 }
 
 pub type VkResult<T> = Result<T, VkError>;
+
+pub type AshResult<T> = Result<T, vk::Result>;

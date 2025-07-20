@@ -12,29 +12,28 @@ use crate::context::{
         pipeline::{
             GraphicsPipeline, GraphicsPipelineConfig, PipelineLayoutBuilder, ShaderDirectory,
         },
-        raw::{allocator::AllocatorIndex, Partial},
-        resources::{image::Texture2DPartial, MeshPackPartial},
+        raw::{
+            allocator::AllocatorIndex,
+            resources::image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
+            Partial,
+        },
+        resources::{MeshPack, MeshPackPartial},
     },
     error::{ResourceError, VkError},
     Context,
 };
 use type_kit::{Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
 
-use super::{
-    image::{ImageReader, Texture2D},
-    MeshPack,
-};
-
 pub type LayoutSkybox =
     PipelineLayoutBuilder<Cons<TextureDescriptorSet, Nil>, Cons<CameraMatrices, Nil>>;
 
-pub struct SkyboxPartial<'a> {
-    cubemap: Texture2DPartial<'a>,
+pub struct SkyboxPartial {
+    cubemap: TexturePartial<ImageCube, ImageCubeReader>,
     cube: MeshPackPartial<'static, CommonVertex>,
 }
 
 pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
-    cubemap: DropGuard<Texture2D>,
+    cubemap: DropGuard<Texture<ImageCube>>,
     pub mesh_pack: DropGuard<MeshPack<CommonVertex>>,
     pub descriptor: DropGuard<DescriptorPool<TextureDescriptorSet>>,
     pub pipeline: DropGuard<GraphicsPipeline<L>>,
@@ -55,7 +54,7 @@ fn get_skybox_meshes() -> &'static [Mesh<CommonVertex>] {
     }
 }
 
-impl<'c> Create for SkyboxPartial<'c> {
+impl Create for SkyboxPartial {
     type Config<'a> = &'a Path;
 
     type CreateError = ResourceError;
@@ -65,13 +64,13 @@ impl<'c> Create for SkyboxPartial<'c> {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         Ok(SkyboxPartial {
-            cubemap: Texture2DPartial::create(ImageReader::cube(config)?, context)?,
+            cubemap: TexturePartial::create(ImageCubeReader::new(config)?, context)?,
             cube: MeshPackPartial::create(get_skybox_meshes(), context)?,
         })
     }
 }
 
-impl<'a> Partial for SkyboxPartial<'a> {
+impl Partial for SkyboxPartial {
     #[inline]
     fn register_memory_requirements<B: crate::context::device::raw::allocator::AllocatorBuilder>(
         &self,
@@ -82,7 +81,7 @@ impl<'a> Partial for SkyboxPartial<'a> {
     }
 }
 
-impl<'b> Destroy for SkyboxPartial<'b> {
+impl Destroy for SkyboxPartial {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
@@ -94,7 +93,7 @@ impl<'b> Destroy for SkyboxPartial<'b> {
 }
 
 impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
-    type Config<'a> = (SkyboxPartial<'a>, AllocatorIndex);
+    type Config<'a> = (SkyboxPartial, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
@@ -102,10 +101,10 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let (SkyboxPartial { cubemap, cube }, allocator) = config;
-        let cubemap = Texture2D::create((cubemap, allocator), context)?;
+        let cubemap = Texture::create((cubemap, allocator), context)?;
         let descriptor = DescriptorPool::create(
             DescriptorSetWriter::<TextureDescriptorSet>::new(1)
-                .write_images::<Texture2D, _>(std::slice::from_ref(&cubemap)),
+                .write_images::<Texture<Image2D>, _>(std::slice::from_ref(&cubemap)),
             context,
         )?;
         let layout = context.get_pipeline_layout::<L::Layout>()?;
