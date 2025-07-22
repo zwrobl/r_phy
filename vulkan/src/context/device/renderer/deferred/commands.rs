@@ -8,12 +8,15 @@ use crate::context::device::{
         operation::Graphics,
         BeginCommand, FinishedCommand, Persistent,
     },
-    descriptor::{CameraDescriptorSet, Descriptor},
+    descriptor::Descriptor,
     framebuffer::{
         presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
     },
     pipeline::GraphicsPipelinePackList,
-    render_pass::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
+    raw::unique::{
+        layout::presets::CameraDescriptorSet,
+        render_pass::presets::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
+    },
     swapchain::SwapchainFrame,
     Device,
 };

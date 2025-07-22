@@ -5,7 +5,6 @@ pub mod framebuffer;
 pub mod memory;
 pub mod pipeline;
 pub mod raw;
-pub mod render_pass;
 pub mod renderer;
 pub mod resources;
 pub mod swapchain;
@@ -435,9 +434,6 @@ impl Destroy for Device {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.destroy_render_passes();
-        self.destroy_pipeline_layouts();
-        self.destroy_descriptor_set_layouts();
         unsafe {
             self.command_pools.destroy(&self.device);
             self.device.destroy_device(None);

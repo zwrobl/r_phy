@@ -4,10 +4,15 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::context::device::{
-    command::operation::Operation, raw::resources::buffer::UniformBuffer, Device,
+    command::operation::Operation,
+    raw::{
+        resources::buffer::UniformBuffer,
+        unique::layout::{DescriptorBinding, DescriptorLayout},
+    },
+    Device,
 };
 
-use super::{Descriptor, DescriptorBinding, DescriptorLayout};
+use super::Descriptor;
 
 #[derive(Debug)]
 enum SetWrite {

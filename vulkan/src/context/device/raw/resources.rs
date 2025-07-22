@@ -78,6 +78,13 @@ pub struct ResourceStorage {
     storage: ResourceStorageList,
 }
 
+impl Default for ResourceStorage {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResourceStorage {
     #[inline]
     pub fn new() -> Self {

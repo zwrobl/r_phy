@@ -4,14 +4,15 @@ use ash::vk;
 use bytemuck::{Pod, Zeroable};
 
 use crate::context::device::{
-    descriptor::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
+    raw::unique::layout::{
+        presets::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
+        PipelineLayoutBuilder, PushConstant,
+    },
     resources::Material,
 };
 use graphics::renderer::camera::CameraMatrices;
 use math::types::{Matrix3, Matrix4};
 use type_kit::{Cons, Nil};
-
-use super::{PipelineLayoutBuilder, PushConstant};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]

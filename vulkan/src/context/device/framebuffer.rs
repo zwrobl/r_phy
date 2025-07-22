@@ -6,14 +6,18 @@ use ash::vk::{self, Extent2D};
 
 use crate::context::{
     device::{
-        raw::resources::image::{Image, Image2D},
-        AttachmentProperties, Device,
+        raw::{
+            resources::image::{Image, Image2D},
+            unique::render_pass::{RenderPass, RenderPassConfig},
+        },
+        AttachmentProperties,
     },
     error::VkResult,
+    Context,
 };
 use type_kit::{Cons, Nil};
 
-use super::{memory::DeviceLocal, render_pass::RenderPassConfig};
+use super::memory::DeviceLocal;
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -621,13 +625,13 @@ impl<A: AttachmentList> From<&Framebuffer<A>> for FramebufferHandle<A> {
 
 impl<A: AttachmentList> Copy for FramebufferHandle<A> {}
 
-impl Device {
+impl Context {
     pub fn build_framebuffer<C: RenderPassConfig>(
         &self,
         builder: Builder<C::Attachments>,
         extent: Extent2D,
     ) -> VkResult<Framebuffer<C::Attachments>> {
-        let render_pass = self.get_render_pass::<C>()?;
+        let render_pass = self.get_or_create_unique_resource::<RenderPass<C>, _>()?;
         let attachments = builder.get_attachments();
         let create_info = vk::FramebufferCreateInfo::builder()
             .attachments(&attachments)

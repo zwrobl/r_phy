@@ -18,7 +18,7 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuar
 
 use crate::context::{
     device::{
-        descriptor::{DescriptorPool, DescriptorSetWriter, GBufferDescriptorSet},
+        descriptor::{DescriptorPool, DescriptorSetWriter},
         frame::{CameraUniformPartial, Frame, FrameContext, FrameData, FramePool},
         framebuffer::{
             presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
@@ -28,16 +28,20 @@ use crate::context::{
         pipeline::{
             GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
             GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
-            GraphicsPipelinePackList, ModuleLoader, Modules, PipelineLayoutMaterial,
-            ShaderDirectory, StatesDepthWriteDisabled,
+            GraphicsPipelinePackList, ModuleLoader, Modules, ShaderDirectory,
+            StatesDepthWriteDisabled,
         },
         raw::{
             allocator::AllocatorIndex,
             resources::image::{Image, Image2D, ImagePartial},
+            unique::{
+                layout::presets::{GBufferDescriptorSet, PipelineLayoutMaterial},
+                render_pass::{
+                    presets::{DeferedRenderPass, GBufferShadingPass, GBufferWritePass},
+                    RenderPass, Subpass,
+                },
+            },
             Partial,
-        },
-        render_pass::{
-            DeferedRenderPass, GBufferShadingPass, GBufferWritePass, RenderPass, Subpass,
         },
         resources::{
             MaterialPackList, MeshPack, MeshPackList, MeshPackPartial, Skybox, SkyboxPartial,
@@ -166,7 +170,7 @@ impl Frame for Rc<RefCell<DropGuard<DeferredRenderer>>> {
     type Context<P: GraphicsPipelinePackList> = DeferredRendererContext<P>;
     type Partial = CameraUniformPartial;
 
-    fn load_context<P: GraphicsPipelinePackList>(
+    fn load_context<'a, P: GraphicsPipelinePackList>(
         &self,
         context: &Context,
         allocator: AllocatorIndex,
@@ -359,9 +363,8 @@ impl Create for DeferredRendererFrameData {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let g_buffer = GBuffer::create(config, context)?;
-        let device: &Device = &*context.device;
         let framebuffer_builder = |swapchain_image, extent| {
-            device.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
+            context.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
                 g_buffer.get_framebuffer_builder(swapchain_image),
                 extent,
             )
@@ -372,7 +375,7 @@ impl Create for DeferredRendererFrameData {
                 &GBufferShadingPass::<AttachmentsGBuffer>::references()
                     .get_input_attachments(&swapchain.framebuffers[0]),
             ),
-            device,
+            context,
         )?;
         Ok(DeferredRendererFrameData {
             g_buffer: DropGuard::new(g_buffer),
@@ -436,17 +439,11 @@ impl<P: GraphicsPipelinePackList> Create for DeferredRendererPipelines<P> {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let depth_prepass = GraphicsPipeline::create(
-            (
-                context.get_pipeline_layout()?,
-                &ShaderDirectory::new(Path::new("_resources/shaders/spv/deferred/depth_prepass")),
-            ),
+            &ShaderDirectory::new(Path::new("_resources/shaders/spv/deferred/depth_prepass")),
             context,
         )?;
         let shading_pass = GraphicsPipeline::create(
-            (
-                context.get_pipeline_layout()?,
-                &ShaderDirectory::new(Path::new("_resources/shaders/spv/deferred/gbuffer_combine")),
-            ),
+            &ShaderDirectory::new(Path::new("_resources/shaders/spv/deferred/gbuffer_combine")),
             context,
         )?;
         Ok(DeferredRendererPipelines {
@@ -523,7 +520,7 @@ impl Create for DeferredRenderer {
             },
             allocator,
         ) = config;
-        let render_pass = context.get_render_pass()?;
+        let render_pass = context.get_or_create_unique_resource()?;
         let frame_data = DeferredRendererFrameData::create((g_buffer, allocator), context)?;
         let resources = DeferredRendererResources::create((skybox, meshes, allocator), context)?;
         Ok(DeferredRenderer {

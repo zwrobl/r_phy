@@ -10,14 +10,14 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        pipeline::{
-            get_pipeline_states_info, Layout, ModuleLoader, PipelineBindData, PipelineLayout,
-            PushConstant, PushConstantDataRef,
+        pipeline::{get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantDataRef},
+        raw::unique::{
+            layout::{Layout, PipelineLayout, PushConstant},
+            render_pass::{RenderPass, RenderPassConfig},
         },
-        render_pass::RenderPassConfig,
-        Device,
     },
     error::{VkError, VkResult},
+    Context,
 };
 
 use super::GraphicsPipelineConfig;
@@ -42,20 +42,22 @@ pub struct GraphicsPipeline<T: GraphicsPipelineConfig> {
 }
 
 impl<T: GraphicsPipelineConfig> Create for GraphicsPipeline<T> {
-    type Config<'a> = (PipelineLayout<T::Layout>, &'a dyn ModuleLoader);
+    type Config<'a> = &'a dyn ModuleLoader;
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (layout, modules) = config;
+        let modules = config;
+        let layout = context.get_or_create_unique_resource::<PipelineLayout<T::Layout>, _>()?;
         let extent = context
             .physical_device
             .surface_properties
             .get_current_extent();
         let layout = layout.into();
-        let render_pass = context.get_render_pass::<T::RenderPass>()?;
+        let render_pass =
+            context.get_or_create_unique_resource::<RenderPass<T::RenderPass>, _>()?;
         let states = get_pipeline_states_info::<T::Attachments, T::Subpass, T::PipelineStates>(
             &context.physical_device,
             extent,
@@ -100,7 +102,7 @@ impl<T: GraphicsPipelineConfig> Create for GraphicsPipeline<T> {
 }
 
 impl<T: GraphicsPipelineConfig> Destroy for GraphicsPipeline<T> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
@@ -128,10 +130,7 @@ impl<C: GraphicsPipelineConfig> From<&mut GraphicsPipeline<C>> for vk::Pipeline 
 
 impl<C: GraphicsPipelineConfig> GraphicsPipeline<C> {
     pub fn layout(&self) -> PipelineLayout<C::Layout> {
-        PipelineLayout {
-            layout: self.layout,
-            _phantom: PhantomData,
-        }
+        unsafe { PipelineLayout::wrap(self.layout) }
     }
 
     pub fn get_push_range<'a, P: PushConstant + AnyBitPattern>(
@@ -154,10 +153,7 @@ impl<C: GraphicsPipelineConfig> GraphicsPipeline<C> {
 
 impl<T: GraphicsPipelineConfig> PipelinePack<T> {
     pub fn layout(&self) -> PipelineLayout<T::Layout> {
-        PipelineLayout {
-            layout: self.data.layout,
-            _phantom: PhantomData,
-        }
+        unsafe { PipelineLayout::wrap(self.data.layout) }
     }
 
     pub fn len(&self) -> usize {
@@ -202,10 +198,7 @@ impl<'a, T: GraphicsPipelineConfig, N: GraphicsPipelineConfig> TryFrom<&'a Pipel
 
 impl<'a, T: GraphicsPipelineConfig> PipelinePackRef<'a, T> {
     pub fn layout(&self) -> PipelineLayout<T::Layout> {
-        PipelineLayout {
-            layout: self.data.layout,
-            _phantom: PhantomData,
-        }
+        unsafe { PipelineLayout::wrap(self.data.layout) }
     }
 
     pub fn len(&self) -> usize {
@@ -246,10 +239,7 @@ impl<'a, T: GraphicsPipelineConfig, N: GraphicsPipelineConfig> TryFrom<&'a mut P
 
 impl<'a, T: GraphicsPipelineConfig> PipelinePackRefMut<'a, T> {
     pub fn layout(&self) -> PipelineLayout<T::Layout> {
-        PipelineLayout {
-            layout: self.data.layout,
-            _phantom: PhantomData,
-        }
+        unsafe { PipelineLayout::wrap(self.data.layout) }
     }
 
     pub fn len(&self) -> usize {
@@ -269,14 +259,14 @@ impl<'a, T: GraphicsPipelineConfig> PipelinePackRefMut<'a, T> {
     }
 }
 
-impl Device {
+impl Context {
     pub fn load_pipelines<S: GraphicsPipelineConfig + ModuleLoader>(
         &self,
         pack: &mut PipelinePack<S>,
         pipelines: &[S],
     ) -> VkResult<()> {
         for pipeline in pipelines.iter() {
-            pack.insert(GraphicsPipeline::create((pack.layout(), pipeline), self)?);
+            pack.insert(GraphicsPipeline::create(pipeline, self)?);
         }
         Ok(())
     }
@@ -287,10 +277,10 @@ impl<T: GraphicsPipelineConfig> Create for PipelinePack<T> {
     type CreateError = VkError;
 
     fn create<'a, 'b>(_: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let layout = context.get_pipeline_layout::<T::Layout>()?.into();
+        let layout = context.get_or_create_unique_resource::<PipelineLayout<T::Layout>, _>()?;
         let data = PipelinePackData {
             pipelines: Vec::new(),
-            layout,
+            layout: layout.get_vk_layout(),
         };
         Ok(PipelinePack {
             data,
@@ -300,7 +290,7 @@ impl<T: GraphicsPipelineConfig> Create for PipelinePack<T> {
 }
 
 impl<T: GraphicsPipelineConfig> Destroy for PipelinePack<T> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

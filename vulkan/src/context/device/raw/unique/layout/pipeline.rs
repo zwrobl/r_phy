@@ -1,38 +1,16 @@
-mod presets;
-
-pub use presets::*;
-
-use std::{
-    any::TypeId,
-    collections::HashMap,
-    marker::PhantomData,
-    sync::{Once, RwLock},
-};
+use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
 use ash::vk;
 
 use crate::context::{
-    device::{
-        descriptor::{DescriptorBinding, DescriptorLayout},
-        Device,
+    device::raw::unique::{
+        layout::{DescriptorBinding, DescriptorLayout, DescriptorSetLayout},
+        TypeUniqueResource,
     },
-    error::VkResult,
+    error::{ResourceError, ResourceResult},
+    Context,
 };
-use type_kit::{Cons, Nil};
-
-// TODO: Create macro to avoid code repetition
-fn get_pipeline_layout_map() -> &'static RwLock<HashMap<std::any::TypeId, vk::PipelineLayout>> {
-    static mut LAYOUTS: Option<RwLock<HashMap<std::any::TypeId, vk::PipelineLayout>>> = None;
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| {
-            if LAYOUTS.is_none() {
-                LAYOUTS.replace(RwLock::new(HashMap::new()));
-            }
-        });
-        LAYOUTS.as_ref().unwrap()
-    }
-}
+use type_kit::{Cons, Create, Destroy, FromGuard, Nil};
 
 pub trait Layout: 'static {
     type Descriptors: DescriptorLayoutList;
@@ -281,7 +259,7 @@ impl<T: DescriptorLayoutList, P: PushConstantList> Layout for PipelineLayoutBuil
 
 #[derive(Debug, Clone, Copy)]
 pub struct PipelineLayoutRaw {
-    pub layout: vk::PipelineLayout,
+    layout: vk::PipelineLayout,
 }
 
 impl<L: Layout> From<PipelineLayout<L>> for PipelineLayoutRaw {
@@ -303,8 +281,23 @@ impl<L: Layout> From<PipelineLayoutRaw> for PipelineLayout<L> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PipelineLayout<L: Layout> {
-    pub layout: vk::PipelineLayout,
-    pub _phantom: PhantomData<L>,
+    layout: vk::PipelineLayout,
+    _phantom: PhantomData<L>,
+}
+
+impl<L: Layout> PipelineLayout<L> {
+    #[inline]
+    pub unsafe fn wrap(layout: vk::PipelineLayout) -> Self {
+        Self {
+            layout,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn get_vk_layout(&self) -> vk::PipelineLayout {
+        self.layout
+    }
 }
 
 impl<L: Layout> From<PipelineLayout<L>> for vk::PipelineLayout {
@@ -313,14 +306,93 @@ impl<L: Layout> From<PipelineLayout<L>> for vk::PipelineLayout {
     }
 }
 
-impl Device {
+impl<L: Layout> TypeUniqueResource for PipelineLayout<L> {
+    type RawType = PipelineLayoutRaw;
+}
+
+impl<L: Layout> FromGuard for PipelineLayout<L> {
+    type Inner = PipelineLayoutRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner {
+            layout: self.layout,
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            layout: inner.layout,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<L: Layout> Create for PipelineLayout<L> {
+    type Config<'a> = ();
+
+    type CreateError = ResourceError;
+
+    #[inline]
+    fn create<'a, 'b>(
+        _config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let push_ranges = PushConstantRanges::<L::PushConstants>::get_ranges();
+        let layout = unsafe {
+            context.create_pipeline_layout(
+                &vk::PipelineLayoutCreateInfo::builder()
+                    .push_constant_ranges(&push_ranges)
+                    .set_layouts(&context.get_descriptor_layouts::<L::Descriptors>()?),
+                None,
+            )?
+        };
+        Ok(Self {
+            layout,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<L: Layout> Destroy for PipelineLayout<L> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
+        unsafe {
+            context.destroy_pipeline_layout(self.layout, None);
+        }
+        Ok(())
+    }
+}
+
+impl Destroy for PipelineLayoutRaw {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
+        unsafe {
+            context.destroy_pipeline_layout(self.layout, None);
+        }
+        Ok(())
+    }
+}
+
+impl Context {
     fn get_descriptor_list_entry<'a, T: DescriptorLayoutList>(
         &self,
         mut iter: impl Iterator<Item = &'a mut vk::DescriptorSetLayout>,
-    ) -> VkResult<()> {
+    ) -> ResourceResult<()> {
         if !T::exhausted() {
             if let Some(entry) = iter.next() {
-                *entry = self.get_descriptor_set_layout::<T::Item>()?.layout;
+                *entry = self
+                    .get_or_create_unique_resource::<DescriptorSetLayout<T::Item>, _>()?
+                    .layout;
             }
             self.get_descriptor_list_entry::<T::Next>(iter)
         } else {
@@ -328,48 +400,11 @@ impl Device {
         }
     }
 
-    pub fn get_descriptor_layouts<T: DescriptorLayoutList>(
+    fn get_descriptor_layouts<T: DescriptorLayoutList>(
         &self,
-    ) -> VkResult<Vec<vk::DescriptorSetLayout>> {
+    ) -> ResourceResult<Vec<vk::DescriptorSetLayout>> {
         let mut layouts = vec![vk::DescriptorSetLayout::null(); T::len()];
         self.get_descriptor_list_entry::<T>(layouts.iter_mut().rev())?;
         Ok(layouts)
-    }
-
-    pub fn get_pipeline_layout<L: Layout>(&self) -> VkResult<PipelineLayout<L>> {
-        let push_ranges = PushConstantRanges::<L::PushConstants>::get_ranges();
-        let layout_map = get_pipeline_layout_map();
-        let layout = if let Some(layout) = {
-            let reader = layout_map.read()?;
-            reader.get(&TypeId::of::<L>()).copied()
-        } {
-            layout
-        } else {
-            let layout = unsafe {
-                self.device.create_pipeline_layout(
-                    &vk::PipelineLayoutCreateInfo::builder()
-                        .push_constant_ranges(&push_ranges)
-                        .set_layouts(&self.get_descriptor_layouts::<L::Descriptors>()?),
-                    None,
-                )?
-            };
-            let mut layout_map_witer = layout_map.write()?;
-            layout_map_witer.insert(TypeId::of::<L>(), layout);
-            layout
-        };
-        Ok(PipelineLayout {
-            layout,
-            _phantom: PhantomData,
-        })
-    }
-
-    pub fn destroy_pipeline_layouts(&self) {
-        let layout_map = get_pipeline_layout_map();
-        let exclusive_lock = layout_map.write().unwrap();
-        for (_, &layout) in exclusive_lock.iter() {
-            unsafe {
-                self.device.destroy_pipeline_layout(layout, None);
-            }
-        }
     }
 }

@@ -1,29 +1,9 @@
-use std::{
-    any::TypeId,
-    collections::HashMap,
-    marker::PhantomData,
-    sync::{Once, RwLock},
-};
+use std::{any::TypeId, collections::HashMap, convert::Infallible, marker::PhantomData};
 
 use ash::vk;
 
-use crate::context::{device::Device, error::VkResult};
-use type_kit::{Cons, Nil};
-
-// Check out once_cell and lazy_static crates to improve the implementation
-fn get_descriptor_set_layout_map(
-) -> &'static RwLock<HashMap<std::any::TypeId, vk::DescriptorSetLayout>> {
-    static mut LAYOUTS: Option<RwLock<HashMap<std::any::TypeId, vk::DescriptorSetLayout>>> = None;
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| {
-            if LAYOUTS.is_none() {
-                LAYOUTS.replace(RwLock::new(HashMap::new()));
-            }
-        });
-        LAYOUTS.as_ref().unwrap()
-    }
-}
+use crate::context::{device::raw::unique::TypeUniqueResource, error::ResourceError, Context};
+use type_kit::{Cons, Create, Destroy, FromGuard, Nil};
 
 pub trait DescriptorBinding: 'static {
     fn has_data() -> bool;
@@ -198,46 +178,88 @@ impl<B: DescriptorBindingList> DescriptorLayout for DescriptorLayoutBuilder<B> {
     }
 }
 
+#[derive(Debug)]
 pub struct DescriptorSetLayout<T: DescriptorLayout> {
     pub layout: vk::DescriptorSetLayout,
     _phantom: PhantomData<T>,
 }
 
-impl Device {
-    pub fn get_descriptor_set_layout<T: DescriptorLayout>(
-        &self,
-    ) -> VkResult<DescriptorSetLayout<T>> {
-        let layout_map = get_descriptor_set_layout_map();
-        let layout = if let Some(layout) = {
-            let layout_map_reader = layout_map.read()?;
-            layout_map_reader.get(&TypeId::of::<T>()).copied()
-        } {
-            layout
-        } else {
-            let mut layout_map_writer = layout_map.write()?;
-            let layout = unsafe {
-                self.device.create_descriptor_set_layout(
-                    &vk::DescriptorSetLayoutCreateInfo::builder()
-                        .bindings(&T::get_descriptor_set_bindings()),
-                    None,
-                )?
-            };
-            layout_map_writer.insert(TypeId::of::<T>(), layout);
-            layout
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorSetLayoutRaw {
+    layout: vk::DescriptorSetLayout,
+}
+
+impl<T: DescriptorLayout> TypeUniqueResource for DescriptorSetLayout<T> {
+    type RawType = DescriptorSetLayoutRaw;
+}
+
+impl<T: DescriptorLayout> FromGuard for DescriptorSetLayout<T> {
+    type Inner = DescriptorSetLayoutRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner {
+            layout: self.layout,
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            layout: inner.layout,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: DescriptorLayout> Create for DescriptorSetLayout<T> {
+    type Config<'a> = ();
+
+    type CreateError = ResourceError;
+
+    #[inline]
+    fn create<'a, 'b>(
+        _config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let layout = unsafe {
+            context.create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo::builder()
+                    .bindings(&T::get_descriptor_set_bindings()),
+                None,
+            )?
         };
-        Ok(DescriptorSetLayout {
+        Ok(Self {
             layout,
             _phantom: PhantomData,
         })
     }
+}
 
-    pub fn destroy_descriptor_set_layouts(&self) {
-        let layout_map = get_descriptor_set_layout_map();
-        let exclusive_lock = layout_map.write().unwrap();
-        for (_, &layout) in exclusive_lock.iter() {
-            unsafe {
-                self.device.destroy_descriptor_set_layout(layout, None);
-            }
+impl<T: DescriptorLayout> Destroy for DescriptorSetLayout<T> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
+        unsafe {
+            context.destroy_descriptor_set_layout(self.layout, None);
         }
+        Ok(())
+    }
+}
+
+impl Destroy for DescriptorSetLayoutRaw {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
+        unsafe {
+            context.destroy_descriptor_set_layout(self.layout, None);
+        }
+        Ok(())
     }
 }

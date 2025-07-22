@@ -349,28 +349,40 @@ impl<T: Destroy> Destroy for Option<T> {
     }
 }
 
-pub struct VecDestoryError<T: Destroy> {
+pub struct CollectionDestroyError<T: Destroy> {
     _err_item: T,
     err: T::DestroyError,
 }
 
+impl<T: Destroy> From<(T, T::DestroyError)> for CollectionDestroyError<T> {
+    #[inline]
+    fn from(value: (T, T::DestroyError)) -> Self {
+        let (err_item, err) = value;
+        CollectionDestroyError {
+            _err_item: err_item,
+            err,
+        }
+    }
+}
+
 // TODO: It is reasonable to require for Destory: Debug,
 // as printing the type for destory failure could be common
-impl<T: Destroy> Debug for VecDestoryError<T> {
+impl<T: Destroy> Debug for CollectionDestroyError<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VecDestoryError")
+        f.debug_struct("CollectionDestroyError")
+            .field("err_item: {}", &type_name::<T>())
             .field("err", &self.err)
             .finish()
     }
 }
 
-impl<T: Destroy> Display for VecDestoryError<T> {
+impl<T: Destroy> Display for CollectionDestroyError<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.err)
     }
 }
 
-impl<T: Destroy> Error for VecDestoryError<T> {
+impl<T: Destroy> Error for CollectionDestroyError<T> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.err.source()
     }
@@ -382,7 +394,7 @@ where
 {
     type Context<'a> = T::Context<'a>;
 
-    type DestroyError = VecDestoryError<T>;
+    type DestroyError = CollectionDestroyError<T>;
 
     // TODO: Error handling in this case is only viable for aborting the application,
     // as some iterm for which .destory(..) returns error is kept in the collection
@@ -398,7 +410,7 @@ where
         {
             let err_item = self.swap_remove(index);
             self.truncate(index);
-            Err(VecDestoryError {
+            Err(CollectionDestroyError {
                 _err_item: err_item,
                 err,
             })

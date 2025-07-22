@@ -9,13 +9,18 @@ use graphics::{
 };
 
 use crate::context::device::{
-    descriptor::{Descriptor, DescriptorBindingData, DescriptorLayout},
+    descriptor::{Descriptor, DescriptorBindingData},
     framebuffer::presets::AttachmentsGBuffer,
     pipeline::{
-        GraphicsPipeline, GraphicsPipelinePackList, ModelMatrix, ModelNormalMatrix,
-        PipelineBindData, PushConstantRangeMapper,
+        GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
     },
-    render_pass::GBufferWritePass,
+    raw::unique::{
+        layout::{
+            presets::{ModelMatrix, ModelNormalMatrix},
+            DescriptorLayout,
+        },
+        render_pass::presets::GBufferWritePass,
+    },
     resources::{MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData},
     swapchain::SwapchainFrame,
     Device,

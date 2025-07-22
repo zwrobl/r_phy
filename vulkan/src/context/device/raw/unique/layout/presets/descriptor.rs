@@ -5,12 +5,13 @@ use bytemuck::{AnyBitPattern, Zeroable};
 
 use crate::context::device::{
     framebuffer::InputAttachment,
-    raw::resources::image::{Image2D, Texture},
+    raw::{
+        resources::image::{Image2D, Texture},
+        unique::layout::{DescriptorBinding, DescriptorLayoutBuilder},
+    },
 };
 use graphics::renderer::camera::CameraMatrices;
 use type_kit::{Cons, Nil};
-
-use super::{DescriptorBinding, DescriptorLayoutBuilder};
 
 pub trait PipelineStage: 'static {
     const STAGE: vk::ShaderStageFlags;

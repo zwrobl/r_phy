@@ -11,10 +11,17 @@ use type_kit::{
 };
 
 use crate::context::{
-    device::raw::{
-        allocator::AllocatorIndex,
-        resources::buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-        Partial,
+    device::{
+        pipeline::{
+            GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
+            ModuleLoader,
+        },
+        raw::{
+            allocator::AllocatorIndex,
+            resources::buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+            unique::layout::presets::CameraDescriptorSet,
+            Partial,
+        },
     },
     error::{VkError, VkResult},
     Context,
@@ -32,11 +39,8 @@ use super::{
         operation::Graphics,
         BeginCommand, Persistent, PersistentCommandPool,
     },
-    descriptor::{CameraDescriptorSet, Descriptor, DescriptorPool, DescriptorSetWriter},
+    descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
     framebuffer::AttachmentList,
-    pipeline::{
-        GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList, ModuleLoader,
-    },
     resources::{MaterialPackList, MeshPackList},
     swapchain::{SwapchainFrame, SwapchainImageSync},
     Device,

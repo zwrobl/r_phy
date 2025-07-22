@@ -5,7 +5,13 @@ mod surface;
 
 use crate::context::device::{
     memory::{AllocReqTyped, MemoryProperties},
-    raw::allocator::{Allocator, Unpooled},
+    raw::{
+        allocator::{Allocator, Unpooled},
+        unique::{
+            TypeUniqueRawCollection, TypeUniqueResource, TypeUniqueResourceStorage,
+            TypeUniqueResourceStorageList,
+        },
+    },
 };
 
 use self::{
@@ -173,6 +179,7 @@ pub struct Context {
     default_allocator: Option<AllocatorIndex>,
     allocators: Box<RefCell<DropGuard<AllocatorStorage>>>,
     storage: Box<RefCell<DropGuard<ResourceStorage>>>,
+    unique_storage: Box<RefCell<DropGuard<TypeUniqueResourceStorage>>>,
     device: DropGuard<Device>,
     surface: DropGuard<Surface>,
     #[cfg(debug_assertions)]
@@ -200,10 +207,14 @@ impl Context {
         let device = Device::create(&surface, &instance)?;
         let allocators = Box::new(RefCell::new(DropGuard::new(AllocatorStorage::new())));
         let storage = Box::new(RefCell::new(DropGuard::new(ResourceStorage::new())));
+        let unique_storage = Box::new(RefCell::new(DropGuard::new(
+            TypeUniqueResourceStorage::new(),
+        )));
         let mut context = Self {
             default_allocator: None,
             allocators,
             storage,
+            unique_storage,
             device: DropGuard::new(device),
             surface: DropGuard::new(surface),
             #[cfg(debug_assertions)]
@@ -231,6 +242,7 @@ impl Drop for Context {
         let _ = self.device.wait_idle();
         let _ = self.storage.borrow_mut().destroy(&self);
         let _ = self.allocators.borrow_mut().destroy(&self);
+        let _ = self.unique_storage.borrow_mut().destroy(&self);
         let _ = self.device.destroy(&self.instance);
         let _ = self.surface.destroy(&self.instance);
         #[cfg(debug_assertions)]
@@ -305,5 +317,17 @@ impl Context {
     #[inline]
     pub fn free<M: MemoryProperties>(&self, index: AllocationEntry<M>) -> ResourceResult<()> {
         self.allocators.borrow_mut().free(self, index)
+    }
+
+    #[inline]
+    pub fn get_or_create_unique_resource<'a, R: TypeUniqueResource, M: Marker>(
+        &self,
+    ) -> ResourceResult<R>
+    where
+        TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
+    {
+        self.unique_storage
+            .borrow()
+            .get_or_create_type_unique_resource(&self)
     }
 }

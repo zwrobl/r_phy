@@ -1,4 +1,4 @@
-use std::{convert::Infallible, ops::Deref, path::Path, sync::Once};
+use std::{convert::Infallible, path::Path, sync::Once};
 
 use graphics::{
     model::{CommonVertex, Mesh},
@@ -8,13 +8,12 @@ use physics::shape;
 
 use crate::context::{
     device::{
-        descriptor::{DescriptorPool, DescriptorSetWriter, TextureDescriptorSet},
-        pipeline::{
-            GraphicsPipeline, GraphicsPipelineConfig, PipelineLayoutBuilder, ShaderDirectory,
-        },
+        descriptor::{DescriptorPool, DescriptorSetWriter},
+        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ShaderDirectory},
         raw::{
             allocator::AllocatorIndex,
             resources::image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
+            unique::layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
             Partial,
         },
         resources::{MeshPack, MeshPackPartial},
@@ -107,9 +106,8 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
                 .write_images::<Texture<Image2D>, _>(std::slice::from_ref(&cubemap)),
             context,
         )?;
-        let layout = context.get_pipeline_layout::<L::Layout>()?;
         let modules = ShaderDirectory::new(Path::new(SKYBOX_SHADER));
-        let pipeline = GraphicsPipeline::create((layout, &modules), context)?;
+        let pipeline = GraphicsPipeline::create(&modules, context)?;
         let mesh_pack = MeshPack::create((cube, allocator), context)?;
         Ok(Skybox {
             cubemap: DropGuard::new(cubemap),
@@ -125,10 +123,10 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Destroy for Skybox<L> {
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.descriptor.destroy(context.device.deref())?;
+        self.descriptor.destroy(context)?;
         self.mesh_pack.destroy(context)?;
         self.cubemap.destroy(context)?;
-        self.pipeline.destroy(context.device.deref())?;
+        self.pipeline.destroy(context)?;
         Ok(())
     }
 }

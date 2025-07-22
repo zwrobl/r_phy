@@ -1,5 +1,3 @@
-mod layout;
-mod presets;
 mod writer;
 
 use std::{
@@ -9,24 +7,38 @@ use std::{
     marker::PhantomData,
 };
 
-pub use layout::*;
-pub use presets::*;
-use type_kit::{Create, Destroy, DestroyResult};
+use type_kit::{Create, Destroy, DestroyResult, FromGuard};
 pub use writer::*;
 
 use ash::vk;
 
-use crate::context::error::VkError;
-
-use super::{
-    pipeline::{GraphicsPipeline, GraphicsPipelineConfig, Layout},
-    Device,
+use crate::context::{
+    device::{
+        pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
+        raw::unique::layout::{DescriptorLayout, DescriptorSetLayout, Layout},
+    },
+    error::ResourceError,
+    Context,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DescriptorPoolData {
     pool: vk::DescriptorPool,
     sets: Vec<vk::DescriptorSet>,
+}
+
+impl Destroy for DescriptorPoolData {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        unsafe {
+            context.destroy_descriptor_pool(self.pool, None);
+        };
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -139,9 +151,30 @@ impl<T: DescriptorLayout> Descriptor<T> {
     }
 }
 
+// impl<L: DescriptorLayout> Resource for DescriptorPool<L> {
+//     type RawType = DescriptorPoolData;
+// }
+
+impl<L: DescriptorLayout> FromGuard for DescriptorPool<L> {
+    type Inner = DescriptorPoolData;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        self.data
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            data: inner,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<L: DescriptorLayout> Create for DescriptorPool<L> {
     type Config<'a> = DescriptorSetWriter<L>;
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
@@ -156,7 +189,7 @@ impl<L: DescriptorLayout> Create for DescriptorPool<L> {
                 .device
                 .create_descriptor_pool(&pool_create_info, None)?
         };
-        let layout = context.get_descriptor_set_layout::<L>()?;
+        let layout = context.get_or_create_unique_resource::<DescriptorSetLayout<L>, _>()?;
         let sets = unsafe {
             context.device.allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::builder()
@@ -177,7 +210,7 @@ impl<L: DescriptorLayout> Create for DescriptorPool<L> {
 }
 
 impl<L: DescriptorLayout> Destroy for DescriptorPool<L> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {

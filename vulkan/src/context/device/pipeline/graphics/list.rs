@@ -1,7 +1,4 @@
-use crate::context::{
-    device::{pipeline::ModuleLoader, Device},
-    error::VkResult,
-};
+use crate::context::{device::pipeline::ModuleLoader, error::VkResult, Context};
 use graphics::shader::ShaderType;
 use type_kit::{Cons, Create, Destroy, Nil, TypeList};
 
@@ -10,13 +7,13 @@ use super::{GraphicsPipelineConfig, PipelinePack, PipelinePackRef, PipelinePackR
 pub trait GraphicsPipelineListBuilder: TypeList {
     type Pack: GraphicsPipelinePackList;
 
-    fn build(&self, device: &Device) -> VkResult<Self::Pack>;
+    fn build(&self, context: &Context) -> VkResult<Self::Pack>;
 }
 
 impl GraphicsPipelineListBuilder for Nil {
     type Pack = Nil;
 
-    fn build(&self, _device: &Device) -> VkResult<Self::Pack> {
+    fn build(&self, _context: &Context) -> VkResult<Self::Pack> {
         Ok(Nil::new())
     }
 }
@@ -26,18 +23,18 @@ impl<T: GraphicsPipelineConfig + ModuleLoader + ShaderType, N: GraphicsPipelineL
 {
     type Pack = Cons<PipelinePack<T>, N::Pack>;
 
-    fn build(&self, device: &Device) -> VkResult<Self::Pack> {
-        let mut pack = PipelinePack::create((), device)?;
-        device.load_pipelines(&mut pack, &self.head)?;
+    fn build(&self, context: &Context) -> VkResult<Self::Pack> {
+        let mut pack = PipelinePack::create((), context)?;
+        context.load_pipelines(&mut pack, &self.head)?;
         Ok(Cons {
             head: pack,
-            tail: self.tail.build(device)?,
+            tail: self.tail.build(context)?,
         })
     }
 }
 
 pub trait GraphicsPipelinePackList: TypeList + 'static {
-    fn destroy(&mut self, device: &Device);
+    fn destroy(&mut self, _context: &Context);
 
     fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>>;
 
@@ -45,7 +42,7 @@ pub trait GraphicsPipelinePackList: TypeList + 'static {
 }
 
 impl GraphicsPipelinePackList for Nil {
-    fn destroy(&mut self, _device: &Device) {}
+    fn destroy(&mut self, _context: &Context) {}
 
     fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>> {
         None
@@ -59,9 +56,9 @@ impl GraphicsPipelinePackList for Nil {
 impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> GraphicsPipelinePackList
     for Cons<PipelinePack<T>, N>
 {
-    fn destroy(&mut self, device: &Device) {
-        let _ = self.head.destroy(device);
-        self.tail.destroy(device);
+    fn destroy(&mut self, context: &Context) {
+        let _ = self.head.destroy(context);
+        self.tail.destroy(context);
     }
 
     fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>> {

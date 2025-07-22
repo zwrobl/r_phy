@@ -10,10 +10,13 @@ use std::marker::PhantomData;
 
 use crate::context::device::{
     framebuffer::AttachmentList,
-    render_pass::{RenderPassConfig, Subpass},
+    raw::unique::{
+        layout::Layout,
+        render_pass::{RenderPassConfig, Subpass},
+    },
 };
 
-use super::{layout::Layout, PipelineStates};
+use super::PipelineStates;
 
 pub trait GraphicsPipelineConfig: 'static {
     type Attachments: AttachmentList;

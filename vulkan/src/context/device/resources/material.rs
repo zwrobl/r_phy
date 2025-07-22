@@ -10,8 +10,9 @@ use ash::vk;
 use graphics::model::Material as MaterialBase;
 use type_kit::{Cons, Nil};
 
-use crate::context::device::descriptor::{
-    DescriptorBinding, DescriptorLayout, DescriptorLayoutBuilder, FragmentStage, PodUniform,
+use crate::context::device::raw::unique::layout::{
+    presets::{FragmentStage, PodUniform},
+    DescriptorBinding, DescriptorLayout, DescriptorLayoutBuilder,
 };
 
 pub struct TextureSamplers<M: Material> {

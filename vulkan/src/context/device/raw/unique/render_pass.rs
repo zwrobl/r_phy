@@ -1,36 +1,23 @@
-mod presets;
+pub mod presets;
 
-pub use presets::*;
-
-use std::{
-    any::TypeId,
-    collections::HashMap,
-    marker::PhantomData,
-    sync::{Once, RwLock},
-};
+use std::{any::TypeId, collections::HashMap, convert::Infallible, marker::PhantomData};
 
 use ash::vk;
 
 use crate::context::{
-    device::{framebuffer::AttachmentList, AttachmentProperties, Device},
-    error::VkResult,
+    device::{
+        framebuffer::{
+            AttachmentFormatInfo, AttachmentList, AttachmentListFormats, AttachmentReference,
+            AttachmentReferences, AttachmentTarget, AttachmentTransistions, AttachmentTransition,
+            IndexedAttachmentReference, References, Transitions,
+        },
+        raw::unique::TypeUniqueResource,
+        AttachmentProperties,
+    },
+    error::ResourceError,
+    Context,
 };
-use type_kit::{Cons, TypedNil};
-
-use super::framebuffer::{
-    AttachmentFormatInfo, AttachmentListFormats, AttachmentReference, AttachmentReferences,
-    AttachmentTarget, AttachmentTransistions, AttachmentTransition, IndexedAttachmentReference,
-    References, Transitions,
-};
-
-fn get_render_pass_map() -> &'static RwLock<HashMap<TypeId, vk::RenderPass>> {
-    static mut RENDER_PASSES: Option<RwLock<HashMap<TypeId, vk::RenderPass>>> = None;
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| RENDER_PASSES = Some(RwLock::new(HashMap::new())));
-        RENDER_PASSES.as_ref().unwrap()
-    }
-}
+use type_kit::{Cons, Create, Destroy, FromGuard, TypedNil};
 
 fn get_descriptions(
     formats: Vec<AttachmentFormatInfo>,
@@ -477,48 +464,85 @@ impl<C: RenderPassConfig> Clone for RenderPass<C> {
 
 impl<C: RenderPassConfig> Copy for RenderPass<C> {}
 
-impl Device {
-    fn create_render_pass_raw<C: RenderPassConfig>(&self) -> VkResult<vk::RenderPass> {
+#[derive(Debug, Clone, Copy)]
+pub struct RenderPassRaw {
+    pub handle: vk::RenderPass,
+}
+
+impl<C: RenderPassConfig> TypeUniqueResource for RenderPass<C> {
+    type RawType = RenderPassRaw;
+}
+
+impl<C: RenderPassConfig> FromGuard for RenderPass<C> {
+    type Inner = RenderPassRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner {
+            handle: self.handle,
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            handle: inner.handle,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<C: RenderPassConfig> Create for RenderPass<C> {
+    type Config<'a> = ();
+
+    type CreateError = ResourceError;
+
+    fn create<'a, 'b>(
+        _config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
         let attachments =
-            C::get_attachment_descriptions(&self.physical_device.attachment_properties);
+            C::get_attachment_descriptions(&context.physical_device.attachment_properties);
         let subpasses = C::get_subpass_descriptions();
         let vk_subpasses = subpasses
             .iter()
             .map(|description| description.description)
             .collect::<Vec<_>>();
         let dependencies = C::get_subpass_dependencies();
-
         let create_info = vk::RenderPassCreateInfo::builder()
             .attachments(&attachments)
             .subpasses(&vk_subpasses)
             .dependencies(&dependencies);
-        let handle = unsafe { self.device.create_render_pass(&create_info, None)? };
-        Ok(handle)
-    }
-
-    pub fn get_render_pass<C: RenderPassConfig>(&self) -> VkResult<RenderPass<C>> {
-        let render_pass_map = get_render_pass_map();
-        let render_pass = if let Some(render_pass) = {
-            let reader = render_pass_map.read()?;
-            reader.get(&TypeId::of::<C>()).copied()
-        } {
-            render_pass
-        } else {
-            let mut writer = render_pass_map.write()?;
-            let render_pass = self.create_render_pass_raw::<C>()?;
-            writer.insert(TypeId::of::<C>(), render_pass);
-            render_pass
-        };
-        Ok(RenderPass {
-            handle: render_pass,
+        let handle = unsafe { context.create_render_pass(&create_info, None)? };
+        Ok(Self {
+            handle,
             _phantom: PhantomData,
         })
     }
+}
 
-    pub fn destroy_render_passes(&self) {
-        let exclusive_lock = get_render_pass_map().write().unwrap();
-        exclusive_lock.iter().for_each(|(_, &render_pass)| {
-            unsafe { self.device.destroy_render_pass(render_pass, None) };
-        })
+impl<C: RenderPassConfig> Destroy for RenderPass<C> {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
+        unsafe {
+            context.destroy_render_pass(self.handle, None);
+        }
+        Ok(())
+    }
+}
+
+impl Destroy for RenderPassRaw {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
+        unsafe {
+            context.destroy_render_pass(self.handle, None);
+        }
+        Ok(())
     }
 }
