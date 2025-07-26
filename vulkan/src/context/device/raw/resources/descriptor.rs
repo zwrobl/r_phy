@@ -16,11 +16,11 @@ use ash::vk;
 
 use crate::context::{
     device::raw::{
+        resources::layout::{DescriptorLayout, DescriptorSetLayout, Layout},
         resources::{
             pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
             Resource,
         },
-        unique::layout::{DescriptorLayout, DescriptorSetLayout, Layout},
     },
     error::ResourceError,
     Context,

@@ -4,7 +4,7 @@ use ash::vk;
 use bytemuck::{Pod, Zeroable};
 
 use crate::context::device::{
-    raw::unique::layout::{
+    raw::resources::layout::{
         presets::{CameraDescriptorSet, GBufferDescriptorSet, TextureDescriptorSet},
         PipelineLayoutBuilder, PushConstant,
     },

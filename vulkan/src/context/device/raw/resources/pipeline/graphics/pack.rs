@@ -11,14 +11,14 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 use crate::context::{
     device::raw::{
         resources::{
+            layout::{Layout, PipelineLayout, PushConstant},
+            render_pass::{RenderPass, RenderPassConfig},
+        },
+        resources::{
             pipeline::{
                 get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantDataRef,
             },
             Resource,
-        },
-        unique::{
-            layout::{Layout, PipelineLayout, PushConstant},
-            render_pass::{RenderPass, RenderPassConfig},
         },
     },
     error::{ResourceError, VkError, VkResult},

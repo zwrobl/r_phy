@@ -19,7 +19,7 @@ use crate::context::{
         raw::{
             allocator::AllocatorIndex,
             resources::buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-            unique::layout::presets::CameraDescriptorSet,
+            resources::layout::presets::CameraDescriptorSet,
             Partial,
         },
     },

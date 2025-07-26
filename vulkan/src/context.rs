@@ -7,7 +7,7 @@ use crate::context::device::{
     memory::{AllocReqTyped, MemoryProperties},
     raw::{
         allocator::{Allocator, Unpooled},
-        unique::{
+        resources::{
             TypeUniqueRawCollection, TypeUniqueResource, TypeUniqueResourceStorage,
             TypeUniqueResourceStorageList,
         },

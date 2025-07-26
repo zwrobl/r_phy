@@ -10,7 +10,7 @@ use crate::context::device::{
         AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
         References,
     },
-    raw::unique::render_pass::Subpass,
+    raw::resources::render_pass::Subpass,
     AttachmentProperties, PhysicalDevice, PhysicalDeviceProperties,
 };
 use graphics::model::{Vertex, VertexNone};

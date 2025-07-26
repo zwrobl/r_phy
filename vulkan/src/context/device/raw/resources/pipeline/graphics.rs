@@ -10,7 +10,7 @@ use std::marker::PhantomData;
 
 use crate::context::device::{
     framebuffer::AttachmentList,
-    raw::unique::{
+    raw::resources::{
         layout::Layout,
         render_pass::{RenderPassConfig, Subpass},
     },

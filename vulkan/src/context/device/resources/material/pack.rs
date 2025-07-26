@@ -7,12 +7,12 @@ use crate::context::{
         raw::resources::command::operation::Graphics,
         raw::{
             allocator::AllocatorIndex,
+            resources::layout::presets::{FragmentStage, PodUniform},
             resources::{
                 buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
                 descriptor::{Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter},
                 image::{Image2D, Image2DReader, ImageReader, Texture, TexturePartial},
             },
-            unique::layout::presets::{FragmentStage, PodUniform},
             Partial,
         },
     },

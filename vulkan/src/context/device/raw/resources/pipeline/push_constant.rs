@@ -4,7 +4,7 @@ use bytemuck::{AnyBitPattern, Pod};
 
 use ash::vk;
 
-use crate::context::device::raw::unique::layout::{Layout, PushConstant, PushConstantList};
+use crate::context::device::raw::resources::layout::{Layout, PushConstant, PushConstantList};
 
 use super::{GraphicsPipeline, GraphicsPipelineConfig};
 

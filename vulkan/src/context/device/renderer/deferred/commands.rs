@@ -13,7 +13,7 @@ use crate::context::device::{
     },
     raw::resources::descriptor::Descriptor,
     raw::resources::pipeline::GraphicsPipelinePackList,
-    raw::unique::{
+    raw::resources::{
         layout::presets::CameraDescriptorSet,
         render_pass::presets::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
     },

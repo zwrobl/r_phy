@@ -10,7 +10,7 @@ use ash::vk;
 use graphics::model::Material as MaterialBase;
 use type_kit::{Cons, Nil};
 
-use crate::context::device::raw::unique::layout::{
+use crate::context::device::raw::resources::layout::{
     presets::{FragmentStage, PodUniform},
     DescriptorBinding, DescriptorLayout, DescriptorLayoutBuilder,
 };

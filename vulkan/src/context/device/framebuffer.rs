@@ -8,7 +8,7 @@ use crate::context::{
     device::{
         raw::{
             resources::image::{Image, Image2D},
-            unique::render_pass::{RenderPass, RenderPassConfig},
+            resources::render_pass::{RenderPass, RenderPassConfig},
         },
         AttachmentProperties,
     },

@@ -2,7 +2,7 @@ use graphics::model::CommonVertex;
 
 use crate::context::device::{
     raw::resources::pipeline::{StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox},
-    raw::unique::{
+    raw::resources::{
         layout::presets::{PipelineLayoutGBuffer, PipelineLayoutNoMaterial, PipelineLayoutSkybox},
         render_pass::presets::{
             DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,

@@ -13,7 +13,7 @@ use crate::context::{
         raw::{
             allocator::AllocatorIndex,
             resources::image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
-            unique::layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
+            resources::layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
             Partial,
         },
         resources::{MeshPack, MeshPackPartial},

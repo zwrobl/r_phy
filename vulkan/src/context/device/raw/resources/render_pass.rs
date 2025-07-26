@@ -11,7 +11,7 @@ use crate::context::{
             AttachmentReferences, AttachmentTarget, AttachmentTransistions, AttachmentTransition,
             IndexedAttachmentReference, References, Transitions,
         },
-        raw::unique::TypeUniqueResource,
+        raw::resources::TypeUniqueResource,
         AttachmentProperties,
     },
     error::ResourceError,

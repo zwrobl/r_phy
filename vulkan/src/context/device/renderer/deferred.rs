@@ -34,7 +34,7 @@ use crate::context::{
         raw::{
             allocator::AllocatorIndex,
             resources::image::{Image, Image2D, ImagePartial},
-            unique::{
+            resources::{
                 layout::presets::{GBufferDescriptorSet, PipelineLayoutMaterial},
                 render_pass::{
                     presets::{DeferedRenderPass, GBufferShadingPass, GBufferWritePass},

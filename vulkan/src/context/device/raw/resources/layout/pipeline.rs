@@ -3,7 +3,7 @@ use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 use ash::vk;
 
 use crate::context::{
-    device::raw::unique::{
+    device::raw::resources::{
         layout::{DescriptorBinding, DescriptorLayout, DescriptorSetLayout},
         TypeUniqueResource,
     },

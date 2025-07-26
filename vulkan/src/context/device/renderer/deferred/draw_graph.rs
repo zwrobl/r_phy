@@ -14,7 +14,7 @@ use crate::context::device::{
     raw::resources::pipeline::{
         GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
     },
-    raw::unique::{
+    raw::resources::{
         layout::{
             presets::{ModelMatrix, ModelNormalMatrix},
             DescriptorLayout,

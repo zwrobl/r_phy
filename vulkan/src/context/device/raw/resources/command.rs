@@ -14,7 +14,7 @@ use crate::context::{
                 pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstantDataRef},
                 Resource,
             },
-            unique::{
+            resources::{
                 layout::PushConstant,
                 render_pass::{RenderPass, RenderPassConfig, Subpass},
                 TypeUniqueResource,

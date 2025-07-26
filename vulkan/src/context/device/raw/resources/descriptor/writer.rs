@@ -7,7 +7,7 @@ use crate::context::device::{
     raw::resources::command::operation::Operation,
     raw::{
         resources::buffer::UniformBuffer,
-        unique::layout::{DescriptorBinding, DescriptorLayout},
+        resources::layout::{DescriptorBinding, DescriptorLayout},
     },
     Device,
 };

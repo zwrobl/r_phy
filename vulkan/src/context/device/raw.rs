@@ -5,7 +5,6 @@ use crate::context::{device::raw::allocator::AllocatorBuilder, Context};
 pub mod allocator;
 pub mod range;
 pub mod resources;
-pub mod unique;
 
 pub trait Partial
 where

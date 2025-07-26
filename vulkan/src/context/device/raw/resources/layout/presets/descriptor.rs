@@ -7,7 +7,7 @@ use crate::context::device::{
     framebuffer::InputAttachment,
     raw::{
         resources::image::{Image2D, Texture},
-        unique::layout::{DescriptorBinding, DescriptorLayoutBuilder},
+        resources::layout::{DescriptorBinding, DescriptorLayoutBuilder},
     },
 };
 use graphics::renderer::camera::CameraMatrices;
