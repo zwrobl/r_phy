@@ -9,12 +9,12 @@ use crate::context::{
 };
 
 use super::{
-    command::{
+    framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
+    raw::resources::command::{
         level::Primary,
         operation::{Graphics, Operation},
         FinishedCommand, Persistent, SubmitSemaphoreState,
     },
-    framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
     Device,
 };
 #[derive(Debug, Clone, Copy)]

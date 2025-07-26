@@ -5,8 +5,8 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        command::operation::{self, Operation},
         memory::DeviceLocal,
+        raw::resources::command::operation::{self, Operation},
         raw::{
             allocator::{AllocatorBuilder, AllocatorIndex},
             range::Range,

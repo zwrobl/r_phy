@@ -2,7 +2,7 @@ use std::any::type_name;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::mem::MaybeUninit;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 
 #[cfg(test)]
@@ -990,7 +990,7 @@ impl<T: 'static> IntoIterator for GenCollection<T> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ScopedEntry<'a, T: FromGuard> {
-    resource: T,
+    resource: ManuallyDrop<T>,
     _raw: &'a T::Inner,
 }
 
@@ -1165,7 +1165,7 @@ impl<I: Clone + Copy> TypeGuardCollection<I> {
         let TypedIndex { index } = index;
         let guard = self.get(index)?;
         Ok(ScopedEntry {
-            resource: T::try_from_guard(*guard).map_err(|(_, err)| err)?,
+            resource: ManuallyDrop::new(T::try_from_guard(*guard).map_err(|(_, err)| err)?),
             _raw: guard.inner(),
         })
     }

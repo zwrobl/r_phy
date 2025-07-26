@@ -9,8 +9,8 @@ use graphics::{
 };
 
 use crate::context::device::{
-    descriptor::{Descriptor, DescriptorBindingData},
     framebuffer::presets::AttachmentsGBuffer,
+    raw::resources::descriptor::{Descriptor, DescriptorBindingData},
     raw::resources::pipeline::{
         GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
     },

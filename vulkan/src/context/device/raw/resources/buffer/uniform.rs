@@ -10,8 +10,8 @@ use type_kit::{Create, Destroy, DestroyResult, FromGuard};
 
 use crate::context::{
     device::{
-        command::operation::Operation,
         memory::HostCoherent,
+        raw::resources::command::operation::Operation,
         raw::{
             allocator::AllocatorIndex,
             resources::buffer::{

@@ -3,15 +3,15 @@ use std::{error::Error, marker::PhantomData};
 use ash::vk;
 
 use crate::context::device::{
-    command::{
+    framebuffer::{
+        presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
+    },
+    raw::resources::command::{
         level::{Primary, Secondary},
         operation::Graphics,
         BeginCommand, FinishedCommand, Persistent,
     },
-    descriptor::Descriptor,
-    framebuffer::{
-        presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
-    },
+    raw::resources::descriptor::Descriptor,
     raw::resources::pipeline::GraphicsPipelinePackList,
     raw::unique::{
         layout::presets::CameraDescriptorSet,

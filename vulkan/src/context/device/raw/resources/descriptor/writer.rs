@@ -4,7 +4,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::context::device::{
-    command::operation::Operation,
+    raw::resources::command::operation::Operation,
     raw::{
         resources::buffer::UniformBuffer,
         unique::layout::{DescriptorBinding, DescriptorLayout},

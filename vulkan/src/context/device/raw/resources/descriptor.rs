@@ -5,6 +5,8 @@ use std::{
     convert::Infallible,
     error::Error,
     marker::PhantomData,
+    ops::{Deref, DerefMut},
+    ptr::NonNull,
 };
 
 use type_kit::{Create, Destroy, DestroyResult, FromGuard};
@@ -13,32 +15,27 @@ pub use writer::*;
 use ash::vk;
 
 use crate::context::{
-    device::{
-        raw::resources::pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
-        raw::unique::layout::{DescriptorLayout, DescriptorSetLayout, Layout},
+    device::raw::{
+        resources::{
+            pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
+            Resource,
+        },
+        unique::layout::{DescriptorLayout, DescriptorSetLayout, Layout},
     },
     error::ResourceError,
     Context,
 };
 
-#[derive(Debug, Clone)]
-pub struct DescriptorPoolData {
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorPoolDataRaw {
     pool: vk::DescriptorPool,
-    sets: Vec<vk::DescriptorSet>,
+    sets: Option<NonNull<[vk::DescriptorSet]>>,
 }
 
-impl Destroy for DescriptorPoolData {
-    type Context<'a> = &'a Context;
-
-    type DestroyError = Infallible;
-
-    #[inline]
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        unsafe {
-            context.destroy_descriptor_pool(self.pool, None);
-        };
-        Ok(())
-    }
+#[derive(Debug)]
+pub struct DescriptorPoolData {
+    pool: vk::DescriptorPool,
+    sets: Box<[vk::DescriptorSet]>,
 }
 
 #[derive(Debug)]
@@ -47,15 +44,19 @@ pub struct DescriptorPool<T: DescriptorLayout> {
     _phantom: PhantomData<T>,
 }
 
-impl<'a, T: DescriptorLayout> From<&'a DescriptorPool<T>> for &'a DescriptorPoolData {
-    fn from(pool: &'a DescriptorPool<T>) -> Self {
-        &pool.data
+impl<T: DescriptorLayout> Deref for DescriptorPool<T> {
+    type Target = DescriptorPoolData;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.data
     }
 }
 
-impl<'a, T: DescriptorLayout> From<&'a mut DescriptorPool<T>> for &'a mut DescriptorPoolData {
-    fn from(pool: &'a mut DescriptorPool<T>) -> Self {
-        &mut pool.data
+impl<T: DescriptorLayout> DerefMut for DescriptorPool<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
     }
 }
 
@@ -82,17 +83,16 @@ impl<T: DescriptorLayout> From<Descriptor<T>> for vk::DescriptorSet {
 impl<T: DescriptorLayout> DescriptorPool<T> {
     pub fn get(&self, index: usize) -> Descriptor<T> {
         Descriptor {
-            set: self.data.sets[index],
+            set: self.sets[index],
             _phantom: PhantomData,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.data.sets.len()
+        self.sets.len()
     }
 }
 
-#[derive(Debug)]
 pub struct DescriptorPoolRef<'a, T: DescriptorLayout> {
     data: &'a DescriptorPoolData,
     _phantom: PhantomData<T>,
@@ -151,22 +151,28 @@ impl<T: DescriptorLayout> Descriptor<T> {
     }
 }
 
-// impl<L: DescriptorLayout> Resource for DescriptorPool<L> {
-//     type RawType = DescriptorPoolData;
-// }
+impl<L: DescriptorLayout> Resource for DescriptorPool<L> {
+    type RawType = DescriptorPoolDataRaw;
+}
 
 impl<L: DescriptorLayout> FromGuard for DescriptorPool<L> {
-    type Inner = DescriptorPoolData;
+    type Inner = DescriptorPoolDataRaw;
 
     #[inline]
     fn into_inner(self) -> Self::Inner {
-        self.data
+        Self::Inner {
+            pool: self.data.pool,
+            sets: NonNull::new(Box::leak(self.data.sets)),
+        }
     }
 
     #[inline]
-    unsafe fn from_inner(inner: Self::Inner) -> Self {
+    unsafe fn from_inner(mut inner: Self::Inner) -> Self {
         Self {
-            data: inner,
+            data: DescriptorPoolData {
+                pool: inner.pool,
+                sets: unsafe { Box::from_raw(inner.sets.take().unwrap().as_mut()) },
+            },
             _phantom: PhantomData,
         }
     }
@@ -215,8 +221,25 @@ impl<L: DescriptorLayout> Destroy for DescriptorPool<L> {
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
-            context.destroy_descriptor_pool(self.data.pool, None);
+            context.destroy_descriptor_pool(self.pool, None);
         };
+        Ok(())
+    }
+}
+
+impl Destroy for DescriptorPoolDataRaw {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        unsafe {
+            context.destroy_descriptor_pool(self.pool, None);
+        };
+        self.sets
+            .take()
+            .map(|mut sets| drop(unsafe { Box::from_raw(sets.as_mut()) }));
         Ok(())
     }
 }

@@ -3,6 +3,8 @@ pub mod render_pass;
 
 use std::{cell::RefCell, convert::Infallible};
 
+use super::resources::command::TransientCommandPoolRaw;
+
 use type_kit::{
     list_type, CollectionDestroyError, Cons, Contains, Create, Destroy, DestroyResult, FromGuard,
     Marker, Nil, TypeMap,
@@ -22,6 +24,7 @@ pub type TypeUniqueResourceStorageList = list_type![
     RefCell<TypeMap<RenderPassRaw>>,
     RefCell<TypeMap<DescriptorSetLayoutRaw>>,
     RefCell<TypeMap<PipelineLayoutRaw>>,
+    RefCell<TypeMap<TransientCommandPoolRaw>>,
     Nil
 ];
 
@@ -127,6 +130,7 @@ impl Destroy for TypeUniqueResourceStorage {
         let _ = self.destroy_type_unique_resource_storage::<RenderPassRaw, _>(context);
         let _ = self.destroy_type_unique_resource_storage::<PipelineLayoutRaw, _>(context);
         let _ = self.destroy_type_unique_resource_storage::<DescriptorSetLayoutRaw, _>(context);
+        let _ = self.destroy_type_unique_resource_storage::<TransientCommandPoolRaw, _>(context);
         Ok(())
     }
 }

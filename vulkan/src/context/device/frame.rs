@@ -34,13 +34,13 @@ use graphics::{
 use math::types::Matrix4;
 
 use super::{
-    command::{
+    framebuffer::AttachmentList,
+    raw::resources::command::{
         level::{Primary, Secondary},
         operation::Graphics,
         BeginCommand, Persistent, PersistentCommandPool,
     },
-    descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
-    framebuffer::AttachmentList,
+    raw::resources::descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
     resources::{MaterialPackList, MeshPackList},
     swapchain::{SwapchainFrame, SwapchainImageSync},
     Device,

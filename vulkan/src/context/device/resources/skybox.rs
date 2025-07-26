@@ -8,7 +8,7 @@ use physics::shape;
 
 use crate::context::{
     device::{
-        descriptor::{DescriptorPool, DescriptorSetWriter},
+        raw::resources::descriptor::{DescriptorPool, DescriptorSetWriter},
         raw::resources::pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ShaderDirectory},
         raw::{
             allocator::AllocatorIndex,

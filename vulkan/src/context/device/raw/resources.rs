@@ -1,4 +1,6 @@
 pub mod buffer;
+pub mod command;
+pub mod descriptor;
 pub mod image;
 pub mod memory;
 pub mod pipeline;
@@ -6,6 +8,8 @@ pub mod pipeline;
 use std::{convert::Infallible, fmt::Debug};
 
 use buffer::BufferRaw;
+use command::PersistentCommandPoolRaw;
+use descriptor::DescriptorPoolDataRaw;
 use image::{ImageRaw, TextureRaw};
 use pipeline::GraphicsPipelineRaw;
 use type_kit::{
@@ -73,6 +77,8 @@ pub type ResourceStorageList = list_type![
     TypeGuardCollection<ImageRaw>,
     TypeGuardCollection<TextureRaw>,
     TypeGuardCollection<GraphicsPipelineRaw>,
+    TypeGuardCollection<DescriptorPoolDataRaw>,
+    TypeGuardCollection<PersistentCommandPoolRaw>,
     Nil
 ];
 
@@ -213,6 +219,8 @@ impl Destroy for ResourceStorage {
         self.destroy_resource_storage::<BufferRaw, _>(context)?;
         self.destroy_resource_storage::<MemoryRaw, _>(context)?;
         self.destroy_resource_storage::<GraphicsPipelineRaw, _>(context)?;
+        self.destroy_resource_storage::<DescriptorPoolDataRaw, _>(context)?;
+        self.destroy_resource_storage::<PersistentCommandPoolRaw, _>(context)?;
         Ok(())
     }
 }

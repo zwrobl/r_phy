@@ -2,23 +2,27 @@ use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
 use graphics::renderer::camera::CameraMatrices;
 use math::types::Vector4;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 
 use crate::context::{
     device::{
-        raw::resources::pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstantDataRef},
+        raw::resources::command::level::{PersistentAllocator, PersistentAllocatorRaw},
         raw::{
             resources::{
                 buffer::Buffer,
                 image::{Image, ImageType},
+                pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstantDataRef},
+                Resource,
             },
             unique::{
                 layout::PushConstant,
                 render_pass::{RenderPass, RenderPassConfig, Subpass},
+                TypeUniqueResource,
             },
         },
     },
-    error::AshResult,
+    error::{AshResult, ResourceError},
+    Context,
 };
 
 use self::{
@@ -26,13 +30,13 @@ use self::{
     operation::Operation,
 };
 
-use super::{
-    descriptor::DescriptorBindingData,
+use crate::context::device::{
     framebuffer::{AttachmentList, Clear, FramebufferHandle},
     memory::MemoryProperties,
+    raw::resources::descriptor::DescriptorBindingData,
     resources::{BufferType, LayoutSkybox, MeshPackBinding, MeshRangeBindData, Skybox},
     swapchain::SwapchainFrame,
-    Device, QueueFamilies,
+    Device,
 };
 use std::{any::type_name, convert::Infallible, error::Error, marker::PhantomData};
 
@@ -40,14 +44,62 @@ pub struct Transient;
 pub struct Persistent;
 
 pub mod level {
+    use std::{convert::Infallible, ptr::NonNull};
+
     use ash::vk;
+    use type_kit::{Destroy, DestroyResult};
 
-    use crate::context::{device::Device, error::AshResult};
+    use crate::context::{device::Device, error::AshResult, Context};
 
-    pub trait Level {
+    #[derive(Debug, Clone, Copy)]
+    pub enum PersistentAllocatorRaw {
+        Primary(PrimaryPersistenAllocatorRaw),
+        Secondary(SecondaryPersistentAllocatorRaw),
+    }
+
+    impl Destroy for PersistentAllocatorRaw {
+        type Context<'a> = &'a Context;
+        type DestroyError = Infallible;
+
+        #[inline]
+        fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+            match self {
+                Self::Primary(allocator) => allocator.destroy(context),
+                Self::Secondary(allocator) => allocator.destroy(()),
+            }
+        }
+    }
+
+    impl From<PersistentAllocator> for PersistentAllocatorRaw {
+        #[inline]
+        fn from(value: PersistentAllocator) -> Self {
+            match value {
+                PersistentAllocator::Primary(allocator) => Self::Primary(allocator.into()),
+                PersistentAllocator::Secondary(allocator) => Self::Secondary(allocator.into()),
+            }
+        }
+    }
+
+    impl From<PersistentAllocatorRaw> for PersistentAllocator {
+        #[inline]
+        fn from(value: PersistentAllocatorRaw) -> Self {
+            match value {
+                PersistentAllocatorRaw::Primary(allocator) => Self::Primary(allocator.into()),
+                PersistentAllocatorRaw::Secondary(allocator) => Self::Secondary(allocator.into()),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum PersistentAllocator {
+        Primary(PrimaryPersistenAllocator),
+        Secondary(SecondaryPersistentAllocator),
+    }
+
+    pub trait Level: 'static {
         const LEVEL: vk::CommandBufferLevel;
         type CommandData;
-        type PersistentAllocator;
+        type Allocator;
 
         fn buffer(command: &Self::CommandData) -> vk::CommandBuffer;
 
@@ -55,21 +107,94 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> AshResult<Self::PersistentAllocator>;
+        ) -> AshResult<PersistentAllocator>;
 
-        fn destory_persistent_alocator(device: &Device, allocator: &mut Self::PersistentAllocator);
+        fn destory_persistent_alocator(device: &Device, allocator: &mut PersistentAllocator);
 
         fn allocate_persistent_command_buffer(
-            allocator: &mut Self::PersistentAllocator,
+            allocator: &mut PersistentAllocator,
         ) -> (usize, Self::CommandData);
     }
 
-    pub struct PrimaryPersistenAllocator {
+    #[derive(Debug, Clone, Copy)]
+    pub struct PrimaryPersistenAllocatorRaw {
         index: usize,
-        buffers: Vec<vk::CommandBuffer>,
-        fences: Vec<vk::Fence>,
+        buffers: Option<NonNull<[vk::CommandBuffer]>>,
+        fences: Option<NonNull<[vk::Fence]>>,
     }
 
+    impl Destroy for PrimaryPersistenAllocatorRaw {
+        type Context<'a> = &'a Context;
+
+        type DestroyError = Infallible;
+
+        fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+            self.buffers
+                .take()
+                .map(|mut buffers| drop(unsafe { Box::from_raw(buffers.as_mut()) }));
+            self.fences.take().map(|mut fences| {
+                unsafe { Box::from_raw(fences.as_mut()) }
+                    .iter()
+                    .for_each(|&fence| unsafe {
+                        context.destroy_fence(fence, None);
+                    })
+            });
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct PrimaryPersistenAllocator {
+        index: usize,
+        buffers: Box<[vk::CommandBuffer]>,
+        fences: Box<[vk::Fence]>,
+    }
+
+    impl From<PrimaryPersistenAllocatorRaw> for PrimaryPersistenAllocator {
+        #[inline]
+        fn from(mut value: PrimaryPersistenAllocatorRaw) -> Self {
+            Self {
+                index: value.index,
+                buffers: unsafe { Box::from_raw(value.buffers.take().unwrap().as_mut()) },
+                fences: unsafe { Box::from_raw(value.fences.take().unwrap().as_mut()) },
+            }
+        }
+    }
+
+    impl From<PrimaryPersistenAllocator> for PrimaryPersistenAllocatorRaw {
+        #[inline]
+        fn from(value: PrimaryPersistenAllocator) -> Self {
+            Self {
+                index: value.index,
+                buffers: NonNull::new(Box::leak(value.buffers)),
+                fences: NonNull::new(Box::leak(value.fences)),
+            }
+        }
+    }
+
+    impl<'a> TryFrom<&'a PersistentAllocator> for &'a PrimaryPersistenAllocator {
+        type Error = ();
+
+        #[inline]
+        fn try_from(value: &'a PersistentAllocator) -> Result<Self, Self::Error> {
+            match value {
+                PersistentAllocator::Primary(allocator) => Ok(allocator),
+                _ => Err(()),
+            }
+        }
+    }
+
+    impl<'a> TryFrom<&'a mut PersistentAllocator> for &'a mut PrimaryPersistenAllocator {
+        type Error = ();
+
+        #[inline]
+        fn try_from(value: &'a mut PersistentAllocator) -> Result<Self, Self::Error> {
+            match value {
+                PersistentAllocator::Primary(allocator) => Ok(allocator),
+                _ => Err(()),
+            }
+        }
+    }
     pub struct Primary {
         pub buffer: vk::CommandBuffer,
         pub fence: vk::Fence,
@@ -78,11 +203,12 @@ pub mod level {
     impl Level for Primary {
         const LEVEL: vk::CommandBufferLevel = vk::CommandBufferLevel::PRIMARY;
         type CommandData = Self;
-        type PersistentAllocator = PrimaryPersistenAllocator;
+        type Allocator = PrimaryPersistenAllocator;
 
         fn allocate_persistent_command_buffer(
-            allocator: &mut Self::PersistentAllocator,
+            allocator: &mut PersistentAllocator,
         ) -> (usize, Self::CommandData) {
+            let allocator: &mut Self::Allocator = allocator.try_into().unwrap();
             let index = allocator.index;
             allocator.index = (allocator.index + 1) % allocator.buffers.len();
             (
@@ -98,7 +224,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> AshResult<Self::PersistentAllocator> {
+        ) -> AshResult<PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -120,14 +246,15 @@ pub mod level {
                     .collect::<Result<Vec<_>, _>>()?;
                 (buffers, fences)
             };
-            Ok(PrimaryPersistenAllocator {
-                buffers,
-                fences,
+            Ok(PersistentAllocator::Primary(PrimaryPersistenAllocator {
+                buffers: buffers.into_boxed_slice(),
+                fences: fences.into_boxed_slice(),
                 index: 0,
-            })
+            }))
         }
 
-        fn destory_persistent_alocator(device: &Device, allocator: &mut Self::PersistentAllocator) {
+        fn destory_persistent_alocator(device: &Device, allocator: &mut PersistentAllocator) {
+            let allocator: &mut Self::Allocator = allocator.try_into().unwrap();
             unsafe {
                 allocator
                     .fences
@@ -141,9 +268,73 @@ pub mod level {
         }
     }
 
+    #[derive(Debug, Clone, Copy)]
+    pub struct SecondaryPersistentAllocatorRaw {
+        index: usize,
+        buffers: Option<NonNull<[vk::CommandBuffer]>>,
+    }
+
+    impl Destroy for SecondaryPersistentAllocatorRaw {
+        type Context<'a> = ();
+
+        type DestroyError = Infallible;
+
+        fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
+            self.buffers
+                .take()
+                .map(|mut buffers| drop(unsafe { Box::from_raw(buffers.as_mut()) }));
+            Ok(())
+        }
+    }
+
+    impl From<SecondaryPersistentAllocatorRaw> for SecondaryPersistentAllocator {
+        #[inline]
+        fn from(mut value: SecondaryPersistentAllocatorRaw) -> Self {
+            Self {
+                index: value.index,
+                buffers: unsafe { Box::from_raw(value.buffers.take().unwrap().as_mut()) },
+            }
+        }
+    }
+
+    impl From<SecondaryPersistentAllocator> for SecondaryPersistentAllocatorRaw {
+        #[inline]
+        fn from(value: SecondaryPersistentAllocator) -> Self {
+            Self {
+                index: value.index,
+                buffers: NonNull::new(Box::leak(value.buffers)),
+            }
+        }
+    }
+
+    #[derive(Debug)]
     pub struct SecondaryPersistentAllocator {
         index: usize,
-        buffers: Vec<vk::CommandBuffer>,
+        buffers: Box<[vk::CommandBuffer]>,
+    }
+
+    impl<'a> TryFrom<&'a PersistentAllocator> for &'a SecondaryPersistentAllocator {
+        type Error = ();
+
+        #[inline]
+        fn try_from(value: &'a PersistentAllocator) -> Result<Self, Self::Error> {
+            match value {
+                PersistentAllocator::Secondary(allocator) => Ok(allocator),
+                _ => Err(()),
+            }
+        }
+    }
+
+    impl<'a> TryFrom<&'a mut PersistentAllocator> for &'a mut SecondaryPersistentAllocator {
+        type Error = ();
+
+        #[inline]
+        fn try_from(value: &'a mut PersistentAllocator) -> Result<Self, Self::Error> {
+            match value {
+                PersistentAllocator::Secondary(allocator) => Ok(allocator),
+                _ => Err(()),
+            }
+        }
     }
 
     pub struct Secondary {
@@ -153,11 +344,12 @@ pub mod level {
     impl Level for Secondary {
         const LEVEL: vk::CommandBufferLevel = vk::CommandBufferLevel::SECONDARY;
         type CommandData = Self;
-        type PersistentAllocator = SecondaryPersistentAllocator;
+        type Allocator = SecondaryPersistentAllocator;
 
         fn allocate_persistent_command_buffer(
-            allocator: &mut Self::PersistentAllocator,
+            allocator: &mut PersistentAllocator,
         ) -> (usize, Self::CommandData) {
+            let allocator: &mut Self::Allocator = allocator.try_into().unwrap();
             let index = allocator.index;
             allocator.index = (allocator.index + 1) % allocator.buffers.len();
             (
@@ -172,7 +364,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> AshResult<Self::PersistentAllocator> {
+        ) -> AshResult<PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -180,13 +372,15 @@ pub mod level {
                 ..Default::default()
             };
             let buffers = unsafe { device.allocate_command_buffers(&allocate_info)? };
-            Ok(SecondaryPersistentAllocator { buffers, index: 0 })
+            Ok(PersistentAllocator::Secondary(
+                SecondaryPersistentAllocator {
+                    buffers: buffers.into_boxed_slice(),
+                    index: 0,
+                },
+            ))
         }
 
-        fn destory_persistent_alocator(
-            _device: &Device,
-            _allocator: &mut Self::PersistentAllocator,
-        ) {
+        fn destory_persistent_alocator(_device: &Device, _allocator: &mut PersistentAllocator) {
             // Buffers are destroyed with the command pool
         }
 
@@ -199,10 +393,16 @@ pub mod level {
 pub mod operation {
     use ash::vk;
 
-    use crate::context::device::Device;
+    use crate::context::{
+        device::{raw::resources::command::TransientCommandPool, Device},
+        Context,
+    };
 
+    #[derive(Debug)]
     pub struct Graphics;
+    #[derive(Debug)]
     pub struct Transfer;
+    #[derive(Debug)]
     pub struct Compute;
 
     // Lots of pub(in path) syntax in this module
@@ -211,7 +411,7 @@ pub mod operation {
     pub trait Operation: 'static {
         fn get_queue(device: &Device) -> vk::Queue;
         fn get_queue_family_index(device: &Device) -> u32;
-        fn get_transient_command_pool(device: &Device) -> vk::CommandPool;
+        fn get_transient_command_pool(context: &Context) -> TransientCommandPool<Self>;
     }
 
     impl Operation for Graphics {
@@ -221,8 +421,10 @@ pub mod operation {
         fn get_queue_family_index(device: &Device) -> u32 {
             device.physical_device.queue_families.graphics
         }
-        fn get_transient_command_pool(device: &Device) -> vk::CommandPool {
-            device.command_pools.graphics
+        fn get_transient_command_pool(context: &Context) -> TransientCommandPool<Self> {
+            context
+                .get_or_create_unique_resource::<TransientCommandPool<Self>, _>()
+                .unwrap()
         }
     }
     impl Operation for Compute {
@@ -232,8 +434,10 @@ pub mod operation {
         fn get_queue_family_index(device: &Device) -> u32 {
             device.physical_device.queue_families.compute
         }
-        fn get_transient_command_pool(_device: &Device) -> vk::CommandPool {
-            unimplemented!()
+        fn get_transient_command_pool(context: &Context) -> TransientCommandPool<Self> {
+            context
+                .get_or_create_unique_resource::<TransientCommandPool<Self>, _>()
+                .unwrap()
         }
     }
     impl Operation for Transfer {
@@ -243,8 +447,10 @@ pub mod operation {
         fn get_queue_family_index(device: &Device) -> u32 {
             device.physical_device.queue_families.transfer
         }
-        fn get_transient_command_pool(device: &Device) -> vk::CommandPool {
-            device.command_pools.transfer
+        fn get_transient_command_pool(context: &Context) -> TransientCommandPool<Self> {
+            context
+                .get_or_create_unique_resource::<TransientCommandPool<Self>, _>()
+                .unwrap()
         }
     }
 }
@@ -254,9 +460,55 @@ pub struct Command<T, L: Level, O: Operation> {
     _phantom: PhantomData<(T, O)>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PersistentCommandPoolRaw {
+    command_pool: vk::CommandPool,
+    allocator: PersistentAllocatorRaw,
+}
+
+impl<L: Level, O: Operation> Resource for PersistentCommandPool<L, O> {
+    type RawType = PersistentCommandPoolRaw;
+}
+
+impl<L: Level, O: Operation> FromGuard for PersistentCommandPool<L, O> {
+    type Inner = PersistentCommandPoolRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner {
+            command_pool: self.command_pool,
+            allocator: self.allocator.into(),
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            command_pool: inner.command_pool,
+            allocator: inner.allocator.into(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl Destroy for PersistentCommandPoolRaw {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let _ = self.allocator.destroy(context);
+        unsafe {
+            context.destroy_command_pool(self.command_pool, None);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct PersistentCommandPool<L: Level, O: Operation> {
     command_pool: vk::CommandPool,
-    allocator: L::PersistentAllocator,
+    allocator: PersistentAllocator,
     _phantom: PhantomData<(L, O)>,
 }
 
@@ -273,7 +525,7 @@ impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
 
 impl<L: Level, O: Operation> Create for PersistentCommandPool<L, O> {
     type Config<'a> = usize;
-    type CreateError = vk::Result;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let command_pool = unsafe {
@@ -294,7 +546,7 @@ impl<L: Level, O: Operation> Create for PersistentCommandPool<L, O> {
 }
 
 impl<L: Level, O: Operation> Destroy for PersistentCommandPool<L, O> {
-    type Context<'a> = &'a Device;
+    type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
@@ -878,51 +1130,96 @@ impl<'a, O: Operation> SubmitedCommand<'a, Persistent, Primary, O> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TransientCommandPoolRaw {
+    pool: vk::CommandPool,
+}
+
 #[derive(Debug)]
-pub(super) struct TransientCommandPools {
-    transfer: vk::CommandPool,
-    graphics: vk::CommandPool,
+pub struct TransientCommandPool<O: Operation + ?Sized> {
+    pool: vk::CommandPool,
+    _phantom: PhantomData<O>,
 }
 
-impl TransientCommandPools {
-    pub fn create(device: &ash::Device, queue_families: QueueFamilies) -> AshResult<Self> {
-        let transfer = unsafe {
-            device.create_command_pool(
-                &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(queue_families.transfer)
-                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
-                None,
-            )?
-        };
-        let graphics = unsafe {
-            device.create_command_pool(
-                &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(queue_families.graphics)
-                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
-                None,
-            )?
-        };
-        Ok(Self { transfer, graphics })
+impl<O: Operation> TypeUniqueResource for TransientCommandPool<O> {
+    type RawType = TransientCommandPoolRaw;
+}
+
+impl<O: Operation> FromGuard for TransientCommandPool<O> {
+    type Inner = TransientCommandPoolRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner { pool: self.pool }
     }
 
-    pub fn destroy(&mut self, device: &ash::Device) {
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            pool: inner.pool,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<O: Operation> Create for TransientCommandPool<O> {
+    type Config<'a> = ();
+
+    type CreateError = ResourceError;
+
+    #[inline]
+    fn create<'a, 'b>(_config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let pool = unsafe {
+            context.create_command_pool(
+                &vk::CommandPoolCreateInfo::builder()
+                    .queue_family_index(O::get_queue_family_index(&context))
+                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
+                None,
+            )?
+        };
+        Ok(Self {
+            pool,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<O: Operation> Destroy for TransientCommandPool<O> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        unsafe { context.destroy_command_pool(self.pool, None) };
+        Ok(())
+    }
+}
+
+impl Destroy for TransientCommandPoolRaw {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
-            device.destroy_command_pool(self.transfer, None);
-            device.destroy_command_pool(self.graphics, None)
-        };
+            context.destroy_command_pool(self.pool, None);
+        }
+        Ok(())
     }
 }
 
-impl Device {
+impl Context {
     pub fn allocate_transient_command<O: Operation>(
         &self,
     ) -> AshResult<NewCommand<Transient, Primary, O>> {
+        let pool = O::get_transient_command_pool(self);
         let &buffer = unsafe {
             self.device
                 .allocate_command_buffers(
                     &vk::CommandBufferAllocateInfo::builder()
                         .level(Primary::LEVEL)
-                        .command_pool(O::get_transient_command_pool(self))
+                        .command_pool(pool.pool)
                         .command_buffer_count(1),
                 )?
                 .first()
@@ -942,17 +1239,18 @@ impl Device {
             _phantom: PhantomData,
         }))
     }
-    pub fn free_command<'a, T: 'static, O: 'static + Operation>(
+
+    pub fn free_transient_command<'a, O: 'static + Operation>(
         &self,
-        command: impl Into<&'a Command<T, Primary, O>>,
+        command: impl Into<&'a Command<Transient, Primary, O>>,
     ) {
         let &Command {
             data: Primary { buffer, fence },
             ..
         } = command.into();
+        let pool = O::get_transient_command_pool(self);
         unsafe {
-            self.device
-                .free_command_buffers(O::get_transient_command_pool(self), &[buffer]);
+            self.device.free_command_buffers(pool.pool, &[buffer]);
             self.device.destroy_fence(fence, None);
         }
     }

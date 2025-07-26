@@ -4,12 +4,12 @@ use type_kit::{Create, Destroy, DestroyResult, DropGuard};
 
 use crate::context::{
     device::{
-        command::operation::Graphics,
-        descriptor::{Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter},
+        raw::resources::command::operation::Graphics,
         raw::{
             allocator::AllocatorIndex,
             resources::{
                 buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+                descriptor::{Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter},
                 image::{Image2D, Image2DReader, ImageReader, Texture, TexturePartial},
             },
             unique::layout::presets::{FragmentStage, PodUniform},

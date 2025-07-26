@@ -12,11 +12,11 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        command::{
+        memory::{DeviceLocal, HostCoherent},
+        raw::resources::command::{
             operation::{self, Operation},
             SubmitSemaphoreState,
         },
-        memory::{DeviceLocal, HostCoherent},
         raw::{
             allocator::AllocatorIndex,
             range::{ByteRange, Range},
@@ -26,7 +26,6 @@ use crate::context::{
             },
             Partial,
         },
-        Device,
     },
     error::{AshResult, ResourceError, VkResult},
     Context,
@@ -169,13 +168,13 @@ impl StagingBuffer {
                 &[],
             )?
             .wait()?;
-        context.free_command(&command);
+        context.free_transient_command(&command);
         Ok(())
     }
 
     pub fn transfer_image_data<'b, V: ImageType>(
         &self,
-        context: &Device,
+        context: &Context,
         dst: &mut Image<V, DeviceLocal>,
         dst_array_layer: u32,
         dst_final_layout: vk::ImageLayout,
@@ -217,7 +216,7 @@ impl StagingBuffer {
                 &[],
             )?
             .wait()?;
-        context.free_command(&command);
+        context.free_transient_command(&command);
         Ok(())
     }
 

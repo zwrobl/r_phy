@@ -18,13 +18,13 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuar
 
 use crate::context::{
     device::{
-        descriptor::{DescriptorPool, DescriptorSetWriter},
         frame::{CameraUniformPartial, Frame, FrameContext, FrameData, FramePool},
         framebuffer::{
             presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
             InputAttachment,
         },
         memory::DeviceLocal,
+        raw::resources::descriptor::{DescriptorPool, DescriptorSetWriter},
         raw::resources::pipeline::{
             GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
             GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,

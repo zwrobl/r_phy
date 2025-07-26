@@ -1,5 +1,3 @@
-pub mod command;
-pub mod descriptor;
 pub mod frame;
 pub mod framebuffer;
 pub mod memory;
@@ -13,7 +11,6 @@ use super::{
     Instance,
 };
 
-use self::command::TransientCommandPools;
 use super::surface::{PhysicalDeviceSurfaceProperties, Surface};
 use ash::{self, vk};
 use colored::Colorize;
@@ -309,7 +306,6 @@ struct DeviceQueues {
 
 pub struct Device {
     physical_device: PhysicalDevice,
-    command_pools: TransientCommandPools,
     device_queues: DeviceQueues,
     device: ash::Device,
 }
@@ -324,7 +320,6 @@ impl Debug for Device {
             .green();
         f.debug_struct("Device")
             .field("physical_device", &self.physical_device)
-            .field("command_pools", &self.command_pools)
             .field("device_queues", &self.device_queues)
             .field("device", &device_name)
             .finish()
@@ -418,10 +413,8 @@ impl Create for Device {
             )?
         };
         let device_queues = queue_builder.get_device_queues(&device);
-        let command_pools = TransientCommandPools::create(&device, physical_device.queue_families)?;
         Ok(Self {
             physical_device,
-            command_pools,
             device_queues,
             device,
         })
@@ -434,7 +427,6 @@ impl Destroy for Device {
 
     fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
-            self.command_pools.destroy(&self.device);
             self.device.destroy_device(None);
         }
         Ok(())
