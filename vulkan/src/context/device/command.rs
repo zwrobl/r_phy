@@ -6,7 +6,7 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
     device::{
-        pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstantDataRef},
+        raw::resources::pipeline::{GraphicsPipelineConfig, PipelineBindData, PushConstantDataRef},
         raw::{
             resources::{
                 buffer::Buffer,

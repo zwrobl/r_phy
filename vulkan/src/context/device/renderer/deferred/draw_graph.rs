@@ -11,7 +11,7 @@ use graphics::{
 use crate::context::device::{
     descriptor::{Descriptor, DescriptorBindingData},
     framebuffer::presets::AttachmentsGBuffer,
-    pipeline::{
+    raw::resources::pipeline::{
         GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
     },
     raw::unique::{

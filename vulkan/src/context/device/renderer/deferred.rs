@@ -25,7 +25,7 @@ use crate::context::{
             InputAttachment,
         },
         memory::DeviceLocal,
-        pipeline::{
+        raw::resources::pipeline::{
             GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
             GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
             GraphicsPipelinePackList, ModuleLoader, Modules, ShaderDirectory,
@@ -103,8 +103,8 @@ impl<S: ShaderType> From<S> for DeferredShader<S> {
 }
 
 impl<S: ShaderType> ModuleLoader for DeferredShader<S> {
-    fn load<'a>(&self, device: &'a Device) -> ShaderResult<Modules<'a>> {
-        ShaderDirectory::new(self.shader.source()).load(device)
+    fn load<'a>(&self, context: &'a Context) -> ShaderResult<Modules<'a>> {
+        ShaderDirectory::new(self.shader.source()).load(context)
     }
 }
 

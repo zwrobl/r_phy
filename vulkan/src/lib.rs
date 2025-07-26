@@ -11,7 +11,7 @@ use type_kit::{Cons, Contains, Create, Destroy, DestroyResult, DropGuard, Marker
 
 use context::device::{
     frame::{Frame, FrameContext},
-    pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
+    raw::resources::pipeline::{GraphicsPipelineListBuilder, GraphicsPipelinePackList},
 };
 use graphics::renderer::{
     camera::Camera, ContextBuilder, Renderer, RendererBuilder, RendererContext,

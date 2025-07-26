@@ -12,7 +12,7 @@ use crate::context::device::{
     framebuffer::{
         presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
     },
-    pipeline::GraphicsPipelinePackList,
+    raw::resources::pipeline::GraphicsPipelinePackList,
     raw::unique::{
         layout::presets::CameraDescriptorSet,
         render_pass::presets::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},

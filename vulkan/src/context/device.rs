@@ -3,7 +3,6 @@ pub mod descriptor;
 pub mod frame;
 pub mod framebuffer;
 pub mod memory;
-pub mod pipeline;
 pub mod raw;
 pub mod renderer;
 pub mod resources;

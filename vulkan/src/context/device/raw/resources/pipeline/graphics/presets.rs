@@ -1,7 +1,7 @@
 use graphics::model::CommonVertex;
 
 use crate::context::device::{
-    pipeline::{StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox},
+    raw::resources::pipeline::{StatesDepthTestEnabled, StatesDepthWriteDisabled, StatesSkybox},
     raw::unique::{
         layout::presets::{PipelineLayoutGBuffer, PipelineLayoutNoMaterial, PipelineLayoutSkybox},
         render_pass::presets::{
@@ -11,13 +11,6 @@ use crate::context::device::{
 };
 
 use super::GraphicsPipelineBuilder;
-
-// pub type EmptyPipeline = GraphicsPipelineBuilder<
-//     PipelineLayoutNoMaterial,
-//     StatesDepthWriteDisabled<VertexNone>,
-//     EmptyRenderPass,
-//     EmptySubpass,
-// >;
 
 pub type GBufferSkyboxPipeline<At> = GraphicsPipelineBuilder<
     PipelineLayoutSkybox,

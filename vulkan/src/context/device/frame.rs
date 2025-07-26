@@ -12,7 +12,7 @@ use type_kit::{
 
 use crate::context::{
     device::{
-        pipeline::{
+        raw::resources::pipeline::{
             GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
             ModuleLoader,
         },

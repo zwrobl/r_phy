@@ -9,7 +9,7 @@ use physics::shape;
 use crate::context::{
     device::{
         descriptor::{DescriptorPool, DescriptorSetWriter},
-        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ShaderDirectory},
+        raw::resources::pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ShaderDirectory},
         raw::{
             allocator::AllocatorIndex,
             resources::image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},

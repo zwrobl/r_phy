@@ -64,6 +64,7 @@ pub enum ResourceError {
     TypeConversion(TypeGuardConversionError),
     CollectionError(CollectionError),
     ImageError(ImageError),
+    ShaderError(ShaderError),
     VkError(vk::Result),
 }
 
@@ -75,11 +76,18 @@ impl Display for ResourceError {
             ResourceError::CollectionError(error) => write!(f, "{}", error),
             ResourceError::ImageError(error) => write!(f, "{}", error),
             ResourceError::VkError(error) => write!(f, "Vulkan error: {:?}", error),
+            ResourceError::ShaderError(error) => write!(f, "{}", error),
         }
     }
 }
 
 impl Error for ResourceError {}
+
+impl From<ShaderError> for ResourceError {
+    fn from(error: ShaderError) -> Self {
+        ResourceError::ShaderError(error)
+    }
+}
 
 impl From<AllocatorError> for ResourceError {
     fn from(error: AllocatorError) -> Self {

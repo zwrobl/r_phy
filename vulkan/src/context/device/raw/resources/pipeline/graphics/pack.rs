@@ -6,17 +6,22 @@ use std::{
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 
 use crate::context::{
-    device::{
-        pipeline::{get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantDataRef},
-        raw::unique::{
+    device::raw::{
+        resources::{
+            pipeline::{
+                get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantDataRef,
+            },
+            Resource,
+        },
+        unique::{
             layout::{Layout, PipelineLayout, PushConstant},
             render_pass::{RenderPass, RenderPassConfig},
         },
     },
-    error::{VkError, VkResult},
+    error::{ResourceError, VkError, VkResult},
     Context,
 };
 
@@ -41,9 +46,40 @@ pub struct GraphicsPipeline<T: GraphicsPipelineConfig> {
     _phantom: PhantomData<T>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GraphicsPipelineRaw {
+    handle: vk::Pipeline,
+    layout: vk::PipelineLayout,
+}
+
+impl<T: GraphicsPipelineConfig> Resource for GraphicsPipeline<T> {
+    type RawType = GraphicsPipelineRaw;
+}
+
+impl<T: GraphicsPipelineConfig> FromGuard for GraphicsPipeline<T> {
+    type Inner = GraphicsPipelineRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner {
+            handle: self.handle,
+            layout: self.layout,
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            handle: inner.handle,
+            layout: inner.layout,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<T: GraphicsPipelineConfig> Create for GraphicsPipeline<T> {
     type Config<'a> = &'a dyn ModuleLoader;
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
@@ -105,6 +141,20 @@ impl<T: GraphicsPipelineConfig> Destroy for GraphicsPipeline<T> {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        unsafe {
+            context.destroy_pipeline(self.handle, None);
+        }
+        Ok(())
+    }
+}
+
+impl Destroy for GraphicsPipelineRaw {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
             context.destroy_pipeline(self.handle, None);

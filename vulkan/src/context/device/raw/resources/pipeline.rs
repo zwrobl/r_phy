@@ -9,9 +9,10 @@ pub use states::*;
 use ash::{self, vk};
 use std::{ffi::CStr, marker::PhantomData, path::Path};
 
-use crate::context::error::{ShaderError, ShaderResult};
-
-use super::Device;
+use crate::context::{
+    error::{ShaderError, ShaderResult},
+    Context,
+};
 
 struct ShaderModule {
     module: vk::ShaderModule,
@@ -44,7 +45,7 @@ impl ShaderModule {
 
 pub struct Modules<'a> {
     modules: Vec<ShaderModule>,
-    device: &'a ash::Device,
+    context: &'a Context,
 }
 
 impl<'a> Drop for Modules<'a> {
@@ -52,7 +53,7 @@ impl<'a> Drop for Modules<'a> {
         unsafe {
             self.modules
                 .iter()
-                .for_each(|module| self.device.destroy_shader_module(module.module, None));
+                .for_each(|module| self.context.destroy_shader_module(module.module, None));
         }
     }
 }
@@ -76,7 +77,7 @@ impl<'a> Modules<'a> {
 }
 
 pub trait ModuleLoader {
-    fn load<'a>(&self, device: &'a Device) -> ShaderResult<Modules<'a>>;
+    fn load<'a>(&self, context: &'a Context) -> ShaderResult<Modules<'a>>;
 }
 
 pub struct ShaderDirectory<'a> {
@@ -90,7 +91,7 @@ impl<'a> ShaderDirectory<'a> {
 }
 
 impl<'b> ModuleLoader for ShaderDirectory<'b> {
-    fn load<'a>(&self, device: &'a Device) -> ShaderResult<Modules<'a>> {
+    fn load<'a>(&self, context: &'a Context) -> ShaderResult<Modules<'a>> {
         let modules = Modules {
             modules: self
                 .path
@@ -100,16 +101,16 @@ impl<'b> ModuleLoader for ShaderDirectory<'b> {
                     entry
                         .file_type()
                         .is_ok_and(|f| f.is_file())
-                        .then_some(device.load_shader_module(&entry.path()))
+                        .then_some(context.load_shader_module(&entry.path()))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
-            device,
+            context,
         };
         Ok(modules)
     }
 }
 
-impl Device {
+impl Context {
     fn load_shader_module(&self, path: &Path) -> ShaderResult<ShaderModule> {
         let code = std::fs::read(path)?;
         let stage = ShaderModule::get_shader_stage(path)?;
@@ -123,6 +124,7 @@ impl Device {
     }
 }
 
+#[derive(Debug)]
 pub struct PipelineBindData {
     pub bind_point: vk::PipelineBindPoint,
     pub pipeline: vk::Pipeline,

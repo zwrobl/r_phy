@@ -1,4 +1,4 @@
-use crate::context::{device::pipeline::ModuleLoader, error::VkResult, Context};
+use crate::context::{device::raw::resources::pipeline::ModuleLoader, error::VkResult, Context};
 use graphics::shader::ShaderType;
 use type_kit::{Cons, Create, Destroy, Nil, TypeList};
 

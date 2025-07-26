@@ -14,7 +14,7 @@ use ash::vk;
 
 use crate::context::{
     device::{
-        pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
+        raw::resources::pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
         raw::unique::layout::{DescriptorLayout, DescriptorSetLayout, Layout},
     },
     error::ResourceError,
