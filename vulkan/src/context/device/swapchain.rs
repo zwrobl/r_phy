@@ -3,18 +3,19 @@ use std::{convert::Infallible, error::Error, ffi::CStr};
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use crate::context::{
-    error::{VkError, VkResult},
+    device::raw::resources::render_pass::RenderPassConfig,
+    error::{ResourceResult, VkError, VkResult},
     surface::PhysicalDeviceSurfaceProperties,
     Context,
 };
 
 use super::{
-    framebuffer::{AttachmentList, Framebuffer, FramebufferHandle},
     raw::resources::command::{
         level::Primary,
         operation::{Graphics, Operation},
         FinishedCommand, Persistent, SubmitSemaphoreState,
     },
+    raw::resources::framebuffer::{Framebuffer, FramebufferHandle},
     Device,
 };
 #[derive(Debug, Clone, Copy)]
@@ -23,8 +24,8 @@ pub struct SwapchainImageSync {
     draw_finished: vk::Semaphore,
 }
 
-pub struct SwapchainFrame<A: AttachmentList> {
-    pub framebuffer: FramebufferHandle<A>,
+pub struct SwapchainFrame<C: RenderPassConfig> {
+    pub framebuffer: FramebufferHandle<C>,
     pub render_area: vk::Rect2D,
     image_index: u32,
     image_sync: SwapchainImageSync,
@@ -35,10 +36,10 @@ struct SwapchainImage {
     view: vk::ImageView,
 }
 
-pub struct Swapchain<A: AttachmentList> {
+pub struct Swapchain<C: RenderPassConfig> {
     pub num_images: usize,
     pub extent: vk::Extent2D,
-    pub framebuffers: Vec<Framebuffer<A>>,
+    pub framebuffers: Vec<Framebuffer<C>>,
     images: Vec<SwapchainImage>,
     handle: vk::SwapchainKHR,
     loader: khr::Swapchain,
@@ -49,11 +50,11 @@ pub const fn required_extensions() -> &'static [&'static CStr; 1] {
     REQUIRED_DEVICE_EXTENSIONS
 }
 
-impl<A: AttachmentList> Swapchain<A> {
+impl<C: RenderPassConfig> Swapchain<C> {
     pub fn get_frame(
         &self,
         image_sync: SwapchainImageSync,
-    ) -> Result<SwapchainFrame<A>, Box<dyn Error>> {
+    ) -> Result<SwapchainFrame<C>, Box<dyn Error>> {
         let (image_index, _) = unsafe {
             self.loader.acquire_next_image(
                 self.handle,
@@ -77,11 +78,11 @@ impl<A: AttachmentList> Swapchain<A> {
 }
 
 impl Device {
-    pub fn present_frame<A: AttachmentList>(
+    pub fn present_frame<C: RenderPassConfig>(
         &self,
-        swapchain: &Swapchain<A>,
+        swapchain: &Swapchain<C>,
         command: FinishedCommand<Persistent, Primary, Graphics>,
-        frame: SwapchainFrame<A>,
+        frame: SwapchainFrame<C>,
     ) -> Result<(), Box<dyn Error>> {
         let SwapchainFrame {
             image_index,
@@ -174,22 +175,30 @@ impl Destroy for SwapchainImageSync {
     }
 }
 
-pub trait FramebufferBuilder<A: AttachmentList> {
-    fn build(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> VkResult<Framebuffer<A>>;
+pub trait FramebufferBuilder<C: RenderPassConfig> {
+    fn build(
+        &self,
+        image_view: vk::ImageView,
+        extent: vk::Extent2D,
+    ) -> ResourceResult<Framebuffer<C>>;
 }
 
-impl<A: AttachmentList, F> FramebufferBuilder<A> for F
+impl<C: RenderPassConfig, F> FramebufferBuilder<C> for F
 where
-    F: Fn(vk::ImageView, vk::Extent2D) -> VkResult<Framebuffer<A>>,
+    F: Fn(vk::ImageView, vk::Extent2D) -> ResourceResult<Framebuffer<C>>,
 {
     #[inline]
-    fn build(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> VkResult<Framebuffer<A>> {
+    fn build(
+        &self,
+        image_view: vk::ImageView,
+        extent: vk::Extent2D,
+    ) -> ResourceResult<Framebuffer<C>> {
         self(image_view, extent)
     }
 }
 
-impl<A: AttachmentList> Create for Swapchain<A> {
-    type Config<'a> = &'a dyn FramebufferBuilder<A>;
+impl<C: RenderPassConfig> Create for Swapchain<C> {
+    type Config<'a> = &'a dyn FramebufferBuilder<C>;
     type CreateError = VkError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
@@ -245,13 +254,13 @@ impl<A: AttachmentList> Create for Swapchain<A> {
     }
 }
 
-impl<A: AttachmentList> Destroy for Swapchain<A> {
+impl<C: RenderPassConfig> Destroy for Swapchain<C> {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.framebuffers.iter_mut().for_each(|framebuffer| {
-            context.destroy_framebuffer(framebuffer);
+            let _ = framebuffer.destroy(context);
         });
         unsafe {
             self.images

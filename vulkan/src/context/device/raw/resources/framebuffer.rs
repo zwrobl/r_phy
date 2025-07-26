@@ -1,23 +1,24 @@
 pub mod presets;
 
-use std::{marker::PhantomData, usize};
+use std::{convert::Infallible, marker::PhantomData, ptr::NonNull, usize};
 
 use ash::vk::{self, Extent2D};
 
 use crate::context::{
     device::{
-        raw::{
-            resources::image::{Image, Image2D},
-            resources::render_pass::{RenderPass, RenderPassConfig},
+        raw::resources::{
+            image::{Image, Image2D},
+            render_pass::{RenderPass, RenderPassConfig},
+            Resource,
         },
         AttachmentProperties,
     },
-    error::VkResult,
+    error::ResourceError,
     Context,
 };
-use type_kit::{Cons, Nil};
+use type_kit::{Cons, Create, Destroy, FromGuard, Nil};
 
-use super::memory::DeviceLocal;
+use crate::context::device::memory::DeviceLocal;
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -290,9 +291,9 @@ pub trait AttachmentReferences {
     type Attachments: AttachmentList;
 
     fn get_references(&self) -> Vec<Option<IndexedAttachmentReference>>;
-    fn get_input_attachments(
+    fn get_input_attachments<C: RenderPassConfig<Attachments = Self::Attachments>>(
         &self,
-        framebuffer: &Framebuffer<Self::Attachments>,
+        framebuffer: &Framebuffer<C>,
     ) -> Vec<InputAttachment>;
 }
 
@@ -306,9 +307,9 @@ impl<A: AttachmentList> AttachmentReferences for AttachmentReferenceBuilder<A> {
             .collect()
     }
 
-    fn get_input_attachments(
+    fn get_input_attachments<C: RenderPassConfig<Attachments = Self::Attachments>>(
         &self,
-        framebuffer: &Framebuffer<Self::Attachments>,
+        framebuffer: &Framebuffer<C>,
     ) -> Vec<InputAttachment> {
         self.get_references()
             .into_iter()
@@ -546,6 +547,7 @@ impl<A: Attachment, N: AttachmentList> AttachmentList for Cons<AttachmentImage<A
     }
 }
 
+#[derive(Debug)]
 pub struct AttachmentsBuilder<A: AttachmentList> {
     attachments: A,
 }
@@ -587,7 +589,20 @@ impl<A: AttachmentList> AttachmentsBuilder<A> {
     }
 }
 
-pub type Builder<A> = AttachmentsBuilder<A>;
+#[derive(Debug)]
+pub struct FramebufferBuilder<C: RenderPassConfig> {
+    extent: Extent2D,
+    attachments: AttachmentsBuilder<C::Attachments>,
+}
+
+impl<C: RenderPassConfig> FramebufferBuilder<C> {
+    pub fn new(extent: Extent2D, attachments: AttachmentsBuilder<C::Attachments>) -> Self {
+        Self {
+            extent,
+            attachments,
+        }
+    }
+}
 
 pub type References<A> = AttachmentReferenceBuilder<A>;
 
@@ -595,27 +610,33 @@ pub type Transitions<A> = AttachmentTransitionBuilder<<A as AttachmentList>::Tra
 
 pub type Clear<A> = ClearValueBuilder<<A as AttachmentList>::ClearListType>;
 
-#[derive(Debug)]
-pub struct Framebuffer<A: AttachmentList> {
+#[derive(Debug, Clone, Copy)]
+pub struct FramebufferRaw {
     pub framebuffer: vk::Framebuffer,
-    pub attachments: Vec<vk::ImageView>,
-    _phantom: PhantomData<A>,
+    pub attachments: Option<NonNull<[vk::ImageView]>>,
 }
 
 #[derive(Debug)]
-pub struct FramebufferHandle<A: AttachmentList> {
+pub struct Framebuffer<C: RenderPassConfig> {
     pub framebuffer: vk::Framebuffer,
-    _phantom: PhantomData<A>,
+    pub attachments: Box<[vk::ImageView]>,
+    _phantom: PhantomData<C>,
 }
 
-impl<A: AttachmentList> Clone for FramebufferHandle<A> {
+#[derive(Debug)]
+pub struct FramebufferHandle<C: RenderPassConfig> {
+    pub framebuffer: vk::Framebuffer,
+    _phantom: PhantomData<C>,
+}
+
+impl<C: RenderPassConfig> Clone for FramebufferHandle<C> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<A: AttachmentList> From<&Framebuffer<A>> for FramebufferHandle<A> {
-    fn from(framebuffer: &Framebuffer<A>) -> Self {
+impl<C: RenderPassConfig> From<&Framebuffer<C>> for FramebufferHandle<C> {
+    fn from(framebuffer: &Framebuffer<C>) -> Self {
         Self {
             framebuffer: framebuffer.framebuffer,
             _phantom: PhantomData,
@@ -623,34 +644,90 @@ impl<A: AttachmentList> From<&Framebuffer<A>> for FramebufferHandle<A> {
     }
 }
 
-impl<A: AttachmentList> Copy for FramebufferHandle<A> {}
+impl<C: RenderPassConfig> Copy for FramebufferHandle<C> {}
 
-impl Context {
-    pub fn build_framebuffer<C: RenderPassConfig>(
-        &self,
-        builder: Builder<C::Attachments>,
-        extent: Extent2D,
-    ) -> VkResult<Framebuffer<C::Attachments>> {
-        let render_pass = self.get_or_create_unique_resource::<RenderPass<C>, _>()?;
-        let attachments = builder.get_attachments();
+impl<C: RenderPassConfig> Resource for Framebuffer<C> {
+    type RawType = FramebufferRaw;
+}
+
+impl<C: RenderPassConfig> FromGuard for Framebuffer<C> {
+    type Inner = FramebufferRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner {
+            framebuffer: self.framebuffer,
+            attachments: NonNull::new(Box::leak(self.attachments)),
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(mut inner: Self::Inner) -> Self {
+        Self {
+            framebuffer: inner.framebuffer,
+            attachments: unsafe { Box::from_raw(inner.attachments.take().unwrap().as_mut()) },
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<C: RenderPassConfig> Create for Framebuffer<C> {
+    type Config<'a> = FramebufferBuilder<C>;
+
+    type CreateError = ResourceError;
+
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let FramebufferBuilder {
+            extent,
+            attachments,
+        } = config;
+        let render_pass = context.get_or_create_unique_resource::<RenderPass<C>, _>()?;
+        let attachments = attachments.get_attachments().into_boxed_slice();
         let create_info = vk::FramebufferCreateInfo::builder()
             .attachments(&attachments)
             .render_pass(render_pass.handle)
             .width(extent.width)
             .height(extent.height)
             .layers(1);
-        let framebuffer = unsafe { self.device.create_framebuffer(&create_info, None)? };
+        let framebuffer = unsafe { context.create_framebuffer(&create_info, None)? };
         Ok(Framebuffer {
             framebuffer,
             attachments,
             _phantom: PhantomData,
         })
     }
+}
 
-    pub fn destroy_framebuffer<A: AttachmentList>(&self, framebuffer: &mut Framebuffer<A>) {
+impl<C: RenderPassConfig> Destroy for Framebuffer<C> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
         unsafe {
-            self.device
-                .destroy_framebuffer(framebuffer.framebuffer, None);
+            context.destroy_framebuffer(self.framebuffer, None);
         }
+        Ok(())
+    }
+}
+
+impl Destroy for FramebufferRaw {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> type_kit::DestroyResult<Self> {
+        unsafe {
+            context.destroy_framebuffer(self.framebuffer, None);
+        }
+        self.attachments
+            .take()
+            .map(|mut attachments| drop(unsafe { Box::from_raw(attachments.as_mut()) }));
+        Ok(())
     }
 }

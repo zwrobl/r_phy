@@ -9,17 +9,17 @@ use graphics::{
 };
 
 use crate::context::device::{
-    framebuffer::presets::AttachmentsGBuffer,
-    raw::resources::descriptor::{Descriptor, DescriptorBindingData},
-    raw::resources::pipeline::{
-        GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
-    },
     raw::resources::{
+        descriptor::{Descriptor, DescriptorBindingData},
+        framebuffer::presets::AttachmentsGBuffer,
         layout::{
             presets::{ModelMatrix, ModelNormalMatrix},
             DescriptorLayout,
         },
-        render_pass::presets::GBufferWritePass,
+        pipeline::{
+            GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
+        },
+        render_pass::presets::{DeferedRenderPass, GBufferWritePass},
     },
     resources::{MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData},
     swapchain::SwapchainFrame,
@@ -184,7 +184,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
         &mut self,
         device: &Device,
         state: DeferredRendererFrameState<P>,
-        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
+        swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
     ) -> Result<Commands<P>, Box<dyn Error>> {
         let DeferredRendererFrameState {
             commands:

@@ -3,19 +3,21 @@ use std::{error::Error, marker::PhantomData};
 use ash::vk;
 
 use crate::context::device::{
-    framebuffer::{
-        presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
-    },
-    raw::resources::command::{
-        level::{Primary, Secondary},
-        operation::Graphics,
-        BeginCommand, FinishedCommand, Persistent,
-    },
-    raw::resources::descriptor::Descriptor,
-    raw::resources::pipeline::GraphicsPipelinePackList,
     raw::resources::{
+        command::{
+            level::{Primary, Secondary},
+            operation::Graphics,
+            BeginCommand, FinishedCommand, Persistent,
+        },
+        descriptor::Descriptor,
+        framebuffer::{
+            presets::AttachmentsGBuffer, ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder,
+        },
         layout::presets::CameraDescriptorSet,
-        render_pass::presets::{GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass},
+        pipeline::GraphicsPipelinePackList,
+        render_pass::presets::{
+            DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
+        },
     },
     swapchain::SwapchainFrame,
     Device,
@@ -36,7 +38,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
     pub(super) fn prepare_commands(
         &mut self,
         device: &Device,
-        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
+        swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         camera_matrices: &CameraMatrices,
     ) -> Result<Commands<P>, Box<dyn Error>> {
@@ -104,7 +106,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
         device: &Device,
         primary_command: BeginCommand<Persistent, Primary, Graphics>,
         commands: Commands<P>,
-        swapchain_frame: &SwapchainFrame<AttachmentsGBuffer>,
+        swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
     ) -> Result<FinishedCommand<Persistent, Primary, Graphics>, Box<dyn Error>> {
         let Commands {
             write_pass,

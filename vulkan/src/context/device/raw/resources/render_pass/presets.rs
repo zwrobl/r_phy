@@ -1,6 +1,6 @@
 use ash::vk;
 
-use crate::context::device::framebuffer::{
+use crate::context::device::raw::resources::framebuffer::{
     presets::AttachmentsGBuffer, AttachmentList, AttachmentReference, AttachmentReferenceBuilder,
     AttachmentTarget, AttachmentTransition, AttachmentTransitionBuilder, References, Transitions,
 };

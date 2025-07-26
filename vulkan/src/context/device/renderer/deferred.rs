@@ -19,23 +19,23 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuar
 use crate::context::{
     device::{
         frame::{CameraUniformPartial, Frame, FrameContext, FrameData, FramePool},
-        framebuffer::{
-            presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder, Builder,
-            InputAttachment,
-        },
         memory::DeviceLocal,
-        raw::resources::descriptor::{DescriptorPool, DescriptorSetWriter},
-        raw::resources::pipeline::{
-            GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
-            GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
-            GraphicsPipelinePackList, ModuleLoader, Modules, ShaderDirectory,
-            StatesDepthWriteDisabled,
-        },
         raw::{
             allocator::AllocatorIndex,
-            resources::image::{Image, Image2D, ImagePartial},
             resources::{
+                descriptor::{DescriptorPool, DescriptorSetWriter},
+                framebuffer::{
+                    presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder,
+                    Framebuffer, FramebufferBuilder, InputAttachment,
+                },
+                image::{Image, Image2D, ImagePartial},
                 layout::presets::{GBufferDescriptorSet, PipelineLayoutMaterial},
+                pipeline::{
+                    GBufferDepthPrepasPipeline, GBufferShadingPassPipeline, GBufferSkyboxPipeline,
+                    GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
+                    GraphicsPipelinePackList, ModuleLoader, Modules, ShaderDirectory,
+                    StatesDepthWriteDisabled,
+                },
                 render_pass::{
                     presets::{DeferedRenderPass, GBufferShadingPass, GBufferWritePass},
                     RenderPass, Subpass,
@@ -138,7 +138,7 @@ struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
 
 struct DeferredRendererFrameData {
     g_buffer: DropGuard<GBuffer>,
-    swapchain: DropGuard<Swapchain<AttachmentsGBuffer>>,
+    swapchain: DropGuard<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>>,
     descriptors: DescriptorPool<GBufferDescriptorSet>,
 }
 
@@ -189,7 +189,7 @@ impl Frame for Rc<RefCell<DropGuard<DeferredRenderer>>> {
 
 impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
     const REQUIRED_COMMANDS: usize = P::LEN + 3;
-    type Attachments = AttachmentsGBuffer;
+    type RenderPass = DeferedRenderPass<AttachmentsGBuffer>;
     type State = DeferredRendererFrameState<P>;
 
     fn begin_frame(
@@ -307,15 +307,19 @@ impl Destroy for GBufferPartial {
 impl GBuffer {
     pub fn get_framebuffer_builder(
         &self,
+        extent: vk::Extent2D,
         swapchain_image: vk::ImageView,
-    ) -> Builder<AttachmentsGBuffer> {
-        AttachmentsBuilder::new()
-            .push(swapchain_image)
-            .push(self.depth.get_image_view().get_vk_image_view())
-            .push(self.position.get_image_view().get_vk_image_view())
-            .push(self.normal.get_image_view().get_vk_image_view())
-            .push(self.albedo.get_image_view().get_vk_image_view())
-            .push(self.combined.get_image_view().get_vk_image_view())
+    ) -> FramebufferBuilder<DeferedRenderPass<AttachmentsGBuffer>> {
+        FramebufferBuilder::new(
+            extent,
+            AttachmentsBuilder::new()
+                .push(swapchain_image)
+                .push(self.depth.get_image_view().get_vk_image_view())
+                .push(self.position.get_image_view().get_vk_image_view())
+                .push(self.normal.get_image_view().get_vk_image_view())
+                .push(self.albedo.get_image_view().get_vk_image_view())
+                .push(self.combined.get_image_view().get_vk_image_view()),
+        )
     }
 }
 
@@ -364,9 +368,9 @@ impl Create for DeferredRendererFrameData {
     ) -> type_kit::CreateResult<Self> {
         let g_buffer = GBuffer::create(config, context)?;
         let framebuffer_builder = |swapchain_image, extent| {
-            context.build_framebuffer::<DeferedRenderPass<AttachmentsGBuffer>>(
-                g_buffer.get_framebuffer_builder(swapchain_image),
-                extent,
+            Framebuffer::create(
+                g_buffer.get_framebuffer_builder(extent, swapchain_image),
+                context,
             )
         };
         let swapchain = Swapchain::create(&framebuffer_builder, context)?;

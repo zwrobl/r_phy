@@ -4,7 +4,7 @@ use ash::vk;
 use bytemuck::{AnyBitPattern, Zeroable};
 
 use crate::context::device::{
-    framebuffer::InputAttachment,
+    raw::resources::framebuffer::InputAttachment,
     raw::{
         resources::image::{Image2D, Texture},
         resources::layout::{DescriptorBinding, DescriptorLayoutBuilder},

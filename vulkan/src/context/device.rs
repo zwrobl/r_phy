@@ -1,5 +1,4 @@
 pub mod frame;
-pub mod framebuffer;
 pub mod memory;
 pub mod raw;
 pub mod renderer;

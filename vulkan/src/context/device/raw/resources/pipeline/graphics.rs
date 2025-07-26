@@ -9,7 +9,7 @@ pub use presets::*;
 use std::marker::PhantomData;
 
 use crate::context::device::{
-    framebuffer::AttachmentList,
+    raw::resources::framebuffer::AttachmentList,
     raw::resources::{
         layout::Layout,
         render_pass::{RenderPassConfig, Subpass},

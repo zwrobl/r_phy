@@ -31,9 +31,9 @@ use self::{
 };
 
 use crate::context::device::{
-    framebuffer::{AttachmentList, Clear, FramebufferHandle},
     memory::MemoryProperties,
     raw::resources::descriptor::DescriptorBindingData,
+    raw::resources::framebuffer::{Clear, FramebufferHandle},
     resources::{BufferType, LayoutSkybox, MeshPackBinding, MeshRangeBindData, Skybox},
     swapchain::SwapchainFrame,
     Device,
@@ -576,7 +576,7 @@ impl Device {
         &self,
         command: NewCommand<T, Secondary, O>,
         render_pass: RenderPass<C>,
-        framebuffer: FramebufferHandle<C::Attachments>,
+        framebuffer: FramebufferHandle<C>,
     ) -> Result<BeginCommand<T, Secondary, O>, Box<dyn Error>> {
         let subpass = C::try_get_subpass_index::<S>().unwrap_or_else(|| {
             panic!(
@@ -918,9 +918,9 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn begin_render_pass<A: AttachmentList, C: RenderPassConfig<Attachments = A>>(
+    pub fn begin_render_pass<C: RenderPassConfig>(
         self,
-        frame: &SwapchainFrame<A>,
+        frame: &SwapchainFrame<C>,
         render_pass: &RenderPass<C>,
         clear_values: &Clear<C::Attachments>,
     ) -> Self {

@@ -6,7 +6,7 @@ use ash::vk::{self, Extent2D};
 pub use presets::*;
 
 use crate::context::device::{
-    framebuffer::{
+    raw::resources::framebuffer::{
         AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
         References,
     },

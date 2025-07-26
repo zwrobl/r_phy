@@ -6,7 +6,7 @@ use ash::vk;
 
 use crate::context::{
     device::{
-        framebuffer::{
+        raw::resources::framebuffer::{
             AttachmentFormatInfo, AttachmentList, AttachmentListFormats, AttachmentReference,
             AttachmentReferences, AttachmentTarget, AttachmentTransistions, AttachmentTransition,
             IndexedAttachmentReference, References, Transitions,

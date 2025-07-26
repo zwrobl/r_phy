@@ -11,17 +11,18 @@ use type_kit::{
 };
 
 use crate::context::{
-    device::{
-        raw::resources::pipeline::{
-            GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
-            ModuleLoader,
+    device::raw::{
+        allocator::AllocatorIndex,
+        resources::{
+            buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+            layout::presets::CameraDescriptorSet,
+            pipeline::{
+                GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
+                ModuleLoader,
+            },
+            render_pass::RenderPassConfig,
         },
-        raw::{
-            allocator::AllocatorIndex,
-            resources::buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-            resources::layout::presets::CameraDescriptorSet,
-            Partial,
-        },
+        Partial,
     },
     error::{VkError, VkResult},
     Context,
@@ -34,7 +35,6 @@ use graphics::{
 use math::types::Matrix4;
 
 use super::{
-    framebuffer::AttachmentList,
     raw::resources::command::{
         level::{Primary, Secondary},
         operation::Graphics,
@@ -65,7 +65,7 @@ pub trait Frame: 'static {
 
 pub trait FrameContext: Sized {
     const REQUIRED_COMMANDS: usize;
-    type Attachments: AttachmentList;
+    type RenderPass: RenderPassConfig;
     type State;
 
     fn begin_frame(
@@ -132,7 +132,7 @@ pub struct CameraUniform {
 }
 
 pub struct FrameData<C: FrameContext> {
-    pub swapchain_frame: SwapchainFrame<C::Attachments>,
+    pub swapchain_frame: SwapchainFrame<C::RenderPass>,
     pub primary_command: BeginCommand<Persistent, Primary, Graphics>,
     pub camera_descriptor: Descriptor<CameraDescriptorSet>,
     pub renderer_state: C::State,
