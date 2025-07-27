@@ -38,8 +38,8 @@ use std::error::Error;
 use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
-    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize, GuardCell,
-    Initialize, Marker, TypeGuardCollection,
+    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize, FromGuard,
+    GenCell, Initialize, Marker, TypeGuard, TypeGuardCollection,
 };
 
 use ash::vk;
@@ -183,7 +183,7 @@ pub struct Context {
     allocators: Box<RefCell<DropGuard<AllocatorStorage>>>,
     pub storage: Box<RefCell<DropGuard<ResourceStorage>>>,
     unique_storage: Box<RefCell<DropGuard<TypeUniqueResourceStorage>>>,
-    pub swapchain: Box<RefCell<GuardCell<SwapchainRaw>>>,
+    pub swapchain: Box<RefCell<GenCell<TypeGuard<SwapchainRaw>>>>,
     device: DropGuard<Device>,
     surface: DropGuard<Surface>,
     #[cfg(debug_assertions)]
@@ -214,7 +214,7 @@ impl Context {
         let unique_storage = Box::new(RefCell::new(DropGuard::new(
             TypeUniqueResourceStorage::new(),
         )));
-        let swapchain = Box::new(RefCell::new(GuardCell::new()));
+        let swapchain = Box::new(RefCell::new(GenCell::new()));
         let mut context = Self {
             default_allocator: None,
             allocators,
@@ -314,6 +314,31 @@ impl Context {
     }
 
     #[inline]
+    pub fn get_or_create_unique_resource<'a, R: TypeUniqueResource, M: Marker>(
+        &self,
+    ) -> ResourceResult<R>
+    where
+        TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
+    {
+        self.unique_storage
+            .borrow()
+            .get_or_create_type_unique_resource(&self)
+    }
+
+    #[inline]
+    pub fn create_swapchain<'a, C: RenderPassConfig>(
+        &self,
+        config: <Swapchain<C> as Create>::Config<'a>,
+    ) -> ResourceResult<ResourceIndex<Swapchain<C>>> {
+        let swapchain = Swapchain::<C>::create(config, self)?;
+        let (index, old_swapchain) = self.swapchain.borrow_mut().replace(swapchain.into_guard());
+        if let Some(mut old_swapchain) = old_swapchain {
+            let _ = old_swapchain.destroy(self);
+        }
+        Ok(ResourceIndex::wrap(index))
+    }
+
+    #[inline]
     pub fn create_allocator<'a, A: Allocator>(
         &'a self,
         config: A::Config<'a>,
@@ -340,30 +365,5 @@ impl Context {
     #[inline]
     pub fn free<M: MemoryProperties>(&self, index: AllocationEntry<M>) -> ResourceResult<()> {
         self.allocators.borrow_mut().free(self, index)
-    }
-
-    #[inline]
-    pub fn get_or_create_unique_resource<'a, R: TypeUniqueResource, M: Marker>(
-        &self,
-    ) -> ResourceResult<R>
-    where
-        TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
-    {
-        self.unique_storage
-            .borrow()
-            .get_or_create_type_unique_resource(&self)
-    }
-
-    #[inline]
-    pub fn create_swapchain<'a, C: RenderPassConfig>(
-        &self,
-        config: <Swapchain<C> as Create>::Config<'a>,
-    ) -> ResourceResult<ResourceIndex<Swapchain<C>>> {
-        let swapchain = Swapchain::<C>::create(config, self)?;
-        let (index, old_swapchain) = self.swapchain.borrow_mut().replace(swapchain);
-        if let Some(mut old_swapchain) = old_swapchain {
-            let _ = old_swapchain.destroy(self);
-        }
-        Ok(ResourceIndex::wrap(index))
     }
 }

@@ -413,7 +413,7 @@ mod cell {
 
     #[derive(Debug)]
     pub(super) struct LockedCell {
-        cell: GenCell,
+        cell: IndexCell,
         generation: usize,
     }
 
@@ -421,7 +421,7 @@ mod cell {
         #[inline]
         pub(super) fn new(item_index: usize) -> Self {
             Self {
-                cell: GenCell::Occupied(Occupied { item_index }),
+                cell: IndexCell::Occupied(Occupied { item_index }),
                 generation: 0,
             }
         }
@@ -429,7 +429,7 @@ mod cell {
         #[inline]
         pub(super) fn empty() -> Self {
             Self {
-                cell: GenCell::Empty(Empty { next_free: None }),
+                cell: IndexCell::Empty(Empty { next_free: None }),
                 generation: 0,
             }
         }
@@ -437,14 +437,14 @@ mod cell {
         #[inline]
         pub(super) fn generation(&self) -> GenCollectionResult<usize> {
             match self.cell {
-                GenCell::Occupied(_) => Ok(self.generation),
-                GenCell::Borrowed(_) => Ok(self.generation),
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
+                IndexCell::Occupied(_) => Ok(self.generation),
+                IndexCell::Borrowed(_) => Ok(self.generation),
+                IndexCell::Empty(..) => Err(GenCollectionError::CellEmpty),
             }
         }
 
         #[inline]
-        pub(super) fn unlock(&self, generation: usize) -> GenCollectionResult<&GenCell> {
+        pub(super) fn unlock(&self, generation: usize) -> GenCollectionResult<&IndexCell> {
             let cell_generation = self.generation()?;
             if cell_generation == generation {
                 Ok(&self.cell)
@@ -460,7 +460,7 @@ mod cell {
         pub(super) fn unlock_mut(
             &mut self,
             generation: usize,
-        ) -> GenCollectionResult<&mut GenCell> {
+        ) -> GenCollectionResult<&mut IndexCell> {
             let cell_generation = self.generation()?;
             if cell_generation == generation {
                 Ok(&mut self.cell)
@@ -473,7 +473,7 @@ mod cell {
         }
 
         #[inline]
-        pub(super) fn unlock_unchecked(&mut self) -> &mut GenCell {
+        pub(super) fn unlock_unchecked(&mut self) -> &mut IndexCell {
             &mut self.cell
         }
 
@@ -483,35 +483,35 @@ mod cell {
             item_index: usize,
         ) -> GenCollectionResult<(usize, Option<usize>)> {
             match self.cell {
-                GenCell::Empty(Empty { next_free }) => {
+                IndexCell::Empty(Empty { next_free }) => {
                     self.generation += 1;
-                    self.cell = GenCell::Occupied(Occupied { item_index });
+                    self.cell = IndexCell::Occupied(Occupied { item_index });
                     Ok((self.generation, next_free))
                 }
-                GenCell::Occupied(..) => Err(GenCollectionError::CellOccupied),
-                GenCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
+                IndexCell::Occupied(..) => Err(GenCollectionError::CellOccupied),
+                IndexCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
             }
         }
 
         #[inline]
         pub(super) fn update_item_index(&mut self, item_index: usize) -> GenCollectionResult<()> {
             match &mut self.cell {
-                GenCell::Occupied(cell) => {
+                IndexCell::Occupied(cell) => {
                     cell.item_index = item_index;
                     Ok(())
                 }
-                GenCell::Borrowed(cell) => {
+                IndexCell::Borrowed(cell) => {
                     cell.item_index = item_index;
                     Ok(())
                 }
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
+                IndexCell::Empty(..) => Err(GenCollectionError::CellEmpty),
             }
         }
 
         #[inline]
         pub(super) fn is_occupied(&self) -> bool {
             match &self.cell {
-                GenCell::Occupied(..) => true,
+                IndexCell::Occupied(..) => true,
                 _ => false,
             }
         }
@@ -519,61 +519,61 @@ mod cell {
 
     #[allow(private_interfaces)]
     #[derive(Debug, Clone, Copy)]
-    pub(super) enum GenCell {
+    pub(super) enum IndexCell {
         Occupied(Occupied),
         Borrowed(Occupied),
         Empty(Empty),
     }
 
-    impl GenCell {
+    impl IndexCell {
         #[inline]
         pub(super) fn pop(&mut self, next_free: Option<usize>) -> GenCollectionResult<usize> {
             match *self {
-                GenCell::Occupied(cell) => {
-                    *self = GenCell::Empty(Empty { next_free });
+                IndexCell::Occupied(cell) => {
+                    *self = IndexCell::Empty(Empty { next_free });
                     Ok(cell.item_index)
                 }
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
-                GenCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
+                IndexCell::Empty(..) => Err(GenCollectionError::CellEmpty),
+                IndexCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
             }
         }
 
         #[inline]
         pub(super) fn borrow(&mut self) -> GenCollectionResult<usize> {
             match *self {
-                GenCell::Occupied(cell) => {
-                    *self = GenCell::Borrowed(cell);
+                IndexCell::Occupied(cell) => {
+                    *self = IndexCell::Borrowed(cell);
                     Ok(cell.item_index)
                 }
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
-                GenCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
+                IndexCell::Empty(..) => Err(GenCollectionError::CellEmpty),
+                IndexCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
             }
         }
 
         #[inline]
         pub(super) fn put_back(&mut self) -> GenCollectionResult<usize> {
             match *self {
-                GenCell::Borrowed(cell) => {
-                    *self = GenCell::Occupied(cell);
+                IndexCell::Borrowed(cell) => {
+                    *self = IndexCell::Occupied(cell);
                     Ok(cell.item_index)
                 }
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
-                GenCell::Occupied(..) => Err(GenCollectionError::CellOccupied),
+                IndexCell::Empty(..) => Err(GenCollectionError::CellEmpty),
+                IndexCell::Occupied(..) => Err(GenCollectionError::CellOccupied),
             }
         }
 
         #[inline]
         pub(super) fn item_index(&self) -> GenCollectionResult<usize> {
             match self {
-                GenCell::Occupied(cell) => Ok(cell.item_index),
-                GenCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
-                GenCell::Empty(..) => Err(GenCollectionError::CellEmpty),
+                IndexCell::Occupied(cell) => Ok(cell.item_index),
+                IndexCell::Borrowed(..) => Err(GenCollectionError::CellBorrowed),
+                IndexCell::Empty(..) => Err(GenCollectionError::CellEmpty),
             }
         }
     }
 }
 
-use cell::{GenCell, LockedCell};
+use cell::{IndexCell, LockedCell};
 use std::{
     marker::PhantomData,
     ops::{Index, IndexMut},
@@ -785,7 +785,7 @@ impl<T> GenCollection<T> {
     }
 
     #[inline]
-    fn get_cell_unlocked(&self, index: GenIndex<T>) -> GenCollectionResult<&GenCell> {
+    fn get_cell_unlocked(&self, index: GenIndex<T>) -> GenCollectionResult<&IndexCell> {
         let len = self.indices.len();
         let GenIndex {
             index, generation, ..
@@ -797,7 +797,7 @@ impl<T> GenCollection<T> {
     }
 
     #[inline]
-    fn get_cell_mut_unlocked(&mut self, index: GenIndex<T>) -> GenCollectionResult<&mut GenCell> {
+    fn get_cell_mut_unlocked(&mut self, index: GenIndex<T>) -> GenCollectionResult<&mut IndexCell> {
         let len = self.indices.len();
         let GenIndex {
             index, generation, ..
@@ -846,7 +846,39 @@ impl<T> DerefMut for Borrowed<T> {
     }
 }
 
-impl<T> GenCollection<T> {
+pub trait BorrowCollection<T> {
+    fn borrow(&mut self, index: GenIndex<T>) -> GenCollectionResult<Borrowed<T>>;
+    fn put_back(&mut self, borrow: Borrowed<T>) -> GenCollectionResult<()>;
+}
+
+impl<T, C: BorrowCollection<T>, N> BorrowCollection<T> for Cons<C, N> {
+    #[inline]
+    fn borrow(&mut self, index: GenIndex<T>) -> GenCollectionResult<Borrowed<T>> {
+        self.head.borrow(index)
+    }
+
+    #[inline]
+    fn put_back(&mut self, borrow: Borrowed<T>) -> GenCollectionResult<()> {
+        self.head.put_back(borrow)
+    }
+}
+
+// impl<T, C: BorrowCollection<T>, M: Marker, L> BorrowCollection<T> for L
+// where
+//     L: Contains<C, M>,
+// {
+//     #[inline]
+//     fn borrow(&mut self, index: GenIndex<T>) -> GenCollectionResult<Borrowed<T>> {
+//         self.get_mut().borrow(index)
+//     }
+
+//     #[inline]
+//     fn put_back(&mut self, borrow: Borrowed<T>) -> GenCollectionResult<()> {
+//         self.get_mut().put_back(borrow)
+//     }
+// }
+
+impl<T> BorrowCollection<T> for GenCollection<T> {
     #[inline]
     fn borrow(&mut self, index: GenIndex<T>) -> GenCollectionResult<Borrowed<T>> {
         let item_index = self.get_cell_mut_unlocked(index.clone())?.borrow()?;
@@ -1955,25 +1987,22 @@ mod test_type_guard_borrow_list {
     }
 }
 
-pub struct GuardCell<T> {
+pub struct GenCell<T> {
     cell: LockedCell,
-    item: Option<MaybeUninit<TypeGuard<T>>>,
+    item: MaybeUninit<T>,
 }
 
-impl<T> GuardCell<T> {
+impl<T> GenCell<T> {
     #[inline]
     pub fn new() -> Self {
         Self {
             cell: LockedCell::empty(),
-            item: None,
+            item: MaybeUninit::uninit(),
         }
     }
 
     #[inline]
-    pub fn replace<I: FromGuard<Inner = T>>(
-        &mut self,
-        item: I,
-    ) -> (GuardIndex<I>, Option<TypeGuard<T>>) {
+    pub fn replace(&mut self, item: T) -> (GenIndex<T>, Option<T>) {
         // TODO: Here in failing case LockedCell couls possibly be in Borrowed state,
         // currently GuardCell doesen't allow to borrow inner item, thus following cose is correct
         // in the assuption that it is safe to unwrap() try_insert() result
@@ -1984,26 +2013,20 @@ impl<T> GuardCell<T> {
             .unlock_unchecked()
             .pop(None)
             .ok()
-            .map(|_| unsafe { self.item.take().unwrap().assume_init() });
+            .map(|_| unsafe { self.item.assume_init_read() });
         let index = self.try_insert(item).unwrap();
         (index, old)
     }
 
     #[inline]
-    pub fn try_insert<I: FromGuard<Inner = T>>(
-        &mut self,
-        item: I,
-    ) -> GuardCollectionResult<GuardIndex<I>> {
+    pub fn try_insert(&mut self, item: T) -> GenCollectionResult<GenIndex<T>> {
         let (generation, _) = self.cell.insert(0)?;
-        self.item = Some(MaybeUninit::new(item.into_guard()));
+        self.item = MaybeUninit::new(item);
         Ok(GenIndex::wrap(generation, 0))
     }
 
     #[inline]
-    pub fn try_pop<I: FromGuard<Inner = T>>(
-        &mut self,
-        index: GuardIndex<I>,
-    ) -> GuardCollectionResult<I> {
+    pub fn try_pop(&mut self, index: GenIndex<T>) -> GenCollectionResult<T> {
         match index {
             GenIndex {
                 index: 0,
@@ -2011,10 +2034,7 @@ impl<T> GuardCell<T> {
                 ..
             } => {
                 let _ = self.cell.unlock_mut(generation)?.pop(None)?;
-                let _ =
-                    unsafe { self.item.as_ref().unwrap().assume_init_ref() }.check_type::<I>()?;
-                let item = self.item.take().unwrap();
-                Ok(unsafe { I::from_inner(item.assume_init().into_inner()) })
+                Ok(unsafe { self.item.assume_init_read() })
             }
             GenIndex { index, .. } => {
                 Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
@@ -2023,13 +2043,13 @@ impl<T> GuardCell<T> {
     }
 
     #[inline]
-    pub fn pop(&mut self) -> GuardCollectionResult<TypeGuard<T>> {
+    pub fn pop(&mut self) -> GenCollectionResult<T> {
         let _ = self.cell.unlock_unchecked().pop(None)?;
-        Ok(unsafe { self.item.take().unwrap().assume_init() })
+        Ok(unsafe { self.item.assume_init_read() })
     }
 }
 
-impl<T: Clone + Copy> GuardCell<T> {
+impl<T: Clone + Copy> GenCell<TypeGuard<T>> {
     #[inline]
     pub fn entry<I: FromGuard<Inner = T>>(&self, index: GuardIndex<I>) -> ScopedEntryResult<I> {
         match index {
@@ -2039,10 +2059,7 @@ impl<T: Clone + Copy> GuardCell<T> {
                 ..
             } => {
                 let _ = self.cell.unlock(generation)?.item_index()?;
-                self.item
-                    .as_ref()
-                    .map(|item| unsafe { item.assume_init_ref() }.try_get_scoped_entry())
-                    .unwrap()
+                unsafe { self.item.assume_init_ref() }.try_get_scoped_entry()
             }
             GenIndex { index, .. } => {
                 Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
@@ -2062,14 +2079,51 @@ impl<T: Clone + Copy> GuardCell<T> {
                 ..
             } => {
                 let _ = self.cell.unlock(generation)?.item_index()?;
-                self.item
-                    .as_mut()
-                    .map(|item| unsafe { item.assume_init_mut() }.try_get_scoped_entry_mut())
-                    .unwrap()
+                unsafe { self.item.assume_init_mut() }.try_get_scoped_entry_mut()
             }
             GenIndex { index, .. } => {
                 Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
             }
+        }
+    }
+}
+
+impl<T> BorrowCollection<T> for GenCell<T> {
+    #[inline]
+    fn borrow(&mut self, index: GenIndex<T>) -> GenCollectionResult<Borrowed<T>> {
+        match index {
+            GenIndex {
+                index: 0,
+                generation,
+                ..
+            } => {
+                let _ = self.cell.unlock_mut(generation)?.borrow()?;
+                Ok(Borrowed {
+                    item: unsafe { self.item.assume_init_read() },
+                    index,
+                })
+            }
+            GenIndex { index, .. } => Err(GenCollectionError::InvalidIndex { index, len: 1 }),
+        }
+    }
+
+    // TODO: This is quite lazy implementation, what if index does not match?
+    // Err type should contain original Borrow then to allow external code
+    // to properly handle its resource dealllcation e.g. if implement Destory
+    #[inline]
+    fn put_back(&mut self, borrow: Borrowed<T>) -> GenCollectionResult<()> {
+        let Borrowed { item, index } = borrow;
+        match index {
+            GenIndex {
+                index: 0,
+                generation,
+                ..
+            } => {
+                let _ = self.cell.unlock_mut(generation)?.put_back()?;
+                self.item = MaybeUninit::new(item);
+                Ok(())
+            }
+            GenIndex { index, .. } => Err(GenCollectionError::InvalidIndex { index, len: 1 }),
         }
     }
 }
