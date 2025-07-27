@@ -378,6 +378,11 @@ impl<I> TypeGuard<I> {
     }
 
     #[inline]
+    pub fn into_inner(self) -> I {
+        self.inner
+    }
+
+    #[inline]
     pub fn check_type<F: FromGuard<Inner = I>>(&self) -> Result<(), TypeGuardConversionError> {
         #[cfg(debug_assertions)]
         self.guard_type.check_type::<F>()?;

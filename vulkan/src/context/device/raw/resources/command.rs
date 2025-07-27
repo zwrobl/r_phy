@@ -34,8 +34,8 @@ use crate::context::device::{
     memory::MemoryProperties,
     raw::resources::descriptor::DescriptorBindingData,
     raw::resources::framebuffer::{Clear, FramebufferHandle},
+    raw::resources::swapchain::SwapchainFrame,
     resources::{BufferType, LayoutSkybox, MeshPackBinding, MeshRangeBindData, Skybox},
-    swapchain::SwapchainFrame,
     Device,
 };
 use std::{any::type_name, convert::Infallible, error::Error, marker::PhantomData};

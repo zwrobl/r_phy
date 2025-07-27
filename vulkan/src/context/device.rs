@@ -3,7 +3,6 @@ pub mod memory;
 pub mod raw;
 pub mod renderer;
 pub mod resources;
-pub mod swapchain;
 
 use super::{
     error::{DeviceNotSuitable, VkError, VkResult},
@@ -173,7 +172,7 @@ impl PhysicalDeviceProperties {
     ) -> Result<Vec<*const c_char>, DeviceNotSuitable> {
         let supported_extensions =
             unsafe { instance.enumerate_device_extension_properties(physical_device)? };
-        let required_extensions = swapchain::required_extensions();
+        let required_extensions = raw::resources::swapchain::required_extensions();
         let enabled_extension_names =
             required_extensions
                 .iter()

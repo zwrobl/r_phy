@@ -427,6 +427,14 @@ mod cell {
         }
 
         #[inline]
+        pub(super) fn empty() -> Self {
+            Self {
+                cell: GenCell::Empty(Empty { next_free: None }),
+                generation: 0,
+            }
+        }
+
+        #[inline]
         pub(super) fn generation(&self) -> GenCollectionResult<usize> {
             match self.cell {
                 GenCell::Occupied(_) => Ok(self.generation),
@@ -994,12 +1002,36 @@ pub struct ScopedEntry<'a, T: FromGuard> {
     _raw: &'a T::Inner,
 }
 
+pub type ScopedEntryResult<'a, T> = Result<ScopedEntry<'a, T>, GuardCollectionError>;
+
+impl<T: Clone + Copy> TypeGuard<T> {
+    #[inline]
+    pub fn try_get_scoped_entry<I: FromGuard<Inner = T>>(&self) -> ScopedEntryResult<I> {
+        Ok(ScopedEntry {
+            resource: ManuallyDrop::new(I::try_from_guard(*self).map_err(|(_, err)| err)?),
+            _raw: self.inner(),
+        })
+    }
+}
+
 impl<'a, T: FromGuard> Deref for ScopedEntry<'a, T> {
     type Target = T;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.resource
+    }
+}
+
+pub type ScopedEntryMutResult<'a, T> = Result<ScopedEntryMut<'a, T>, GuardCollectionError>;
+
+impl<T: Clone + Copy> TypeGuard<T> {
+    #[inline]
+    pub fn try_get_scoped_entry_mut<I: FromGuard<Inner = T>>(&mut self) -> ScopedEntryMutResult<I> {
+        Ok(ScopedEntryMut {
+            resource: Some(I::try_from_guard(*self).map_err(|(_, err)| err)?),
+            raw: self.inner_mut(),
+        })
     }
 }
 
@@ -1124,8 +1156,7 @@ impl From<TypeGuardConversionError> for GuardCollectionError {
 
 impl Error for GuardCollectionError {}
 
-pub type ScopedEntryResult<'a, T> = Result<ScopedEntry<'a, T>, GuardCollectionError>;
-pub type ScopedEntryMutResult<'a, T> = Result<ScopedEntryMut<'a, T>, GuardCollectionError>;
+type GuardCollectionResult<T> = Result<T, GuardCollectionError>;
 
 #[derive(Debug)]
 pub struct TypedIndex<T: FromGuard> {
@@ -1164,10 +1195,7 @@ impl<I: Clone + Copy> TypeGuardCollection<I> {
     ) -> ScopedEntryResult<'a, T> {
         let TypedIndex { index } = index;
         let guard = self.get(index)?;
-        Ok(ScopedEntry {
-            resource: ManuallyDrop::new(T::try_from_guard(*guard).map_err(|(_, err)| err)?),
-            _raw: guard.inner(),
-        })
+        guard.try_get_scoped_entry()
     }
 
     #[inline]
@@ -1177,10 +1205,7 @@ impl<I: Clone + Copy> TypeGuardCollection<I> {
     ) -> ScopedEntryMutResult<'a, T> {
         let TypedIndex { index } = index;
         let guard = self.get_mut(index)?;
-        Ok(ScopedEntryMut {
-            resource: Some(T::try_from_guard(*guard).map_err(|(_, err)| err)?),
-            raw: guard.inner_mut(),
-        })
+        guard.try_get_scoped_entry_mut()
     }
 }
 
@@ -1927,5 +1952,124 @@ mod test_type_guard_borrow_list {
         }
         let collection_u32: &TypeGuardCollection<u32> = collection.get();
         assert_eq!(collection_u32.len(), 2);
+    }
+}
+
+pub struct GuardCell<T> {
+    cell: LockedCell,
+    item: Option<MaybeUninit<TypeGuard<T>>>,
+}
+
+impl<T> GuardCell<T> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            cell: LockedCell::empty(),
+            item: None,
+        }
+    }
+
+    #[inline]
+    pub fn replace<I: FromGuard<Inner = T>>(
+        &mut self,
+        item: I,
+    ) -> (GuardIndex<I>, Option<TypeGuard<T>>) {
+        // TODO: Here in failing case LockedCell couls possibly be in Borrowed state,
+        // currently GuardCell doesen't allow to borrow inner item, thus following cose is correct
+        // in the assuption that it is safe to unwrap() try_insert() result
+        // in case if GuardCell in future should support borrowing its inner item,
+        // handling LockedCell in Borrowed state should be considered here
+        let old = self
+            .cell
+            .unlock_unchecked()
+            .pop(None)
+            .ok()
+            .map(|_| unsafe { self.item.take().unwrap().assume_init() });
+        let index = self.try_insert(item).unwrap();
+        (index, old)
+    }
+
+    #[inline]
+    pub fn try_insert<I: FromGuard<Inner = T>>(
+        &mut self,
+        item: I,
+    ) -> GuardCollectionResult<GuardIndex<I>> {
+        let (generation, _) = self.cell.insert(0)?;
+        self.item = Some(MaybeUninit::new(item.into_guard()));
+        Ok(GenIndex::wrap(generation, 0))
+    }
+
+    #[inline]
+    pub fn try_pop<I: FromGuard<Inner = T>>(
+        &mut self,
+        index: GuardIndex<I>,
+    ) -> GuardCollectionResult<I> {
+        match index {
+            GenIndex {
+                index: 0,
+                generation,
+                ..
+            } => {
+                let _ = self.cell.unlock_mut(generation)?.pop(None)?;
+                let _ =
+                    unsafe { self.item.as_ref().unwrap().assume_init_ref() }.check_type::<I>()?;
+                let item = self.item.take().unwrap();
+                Ok(unsafe { I::from_inner(item.assume_init().into_inner()) })
+            }
+            GenIndex { index, .. } => {
+                Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
+            }
+        }
+    }
+
+    #[inline]
+    pub fn pop(&mut self) -> GuardCollectionResult<TypeGuard<T>> {
+        let _ = self.cell.unlock_unchecked().pop(None)?;
+        Ok(unsafe { self.item.take().unwrap().assume_init() })
+    }
+}
+
+impl<T: Clone + Copy> GuardCell<T> {
+    #[inline]
+    pub fn entry<I: FromGuard<Inner = T>>(&self, index: GuardIndex<I>) -> ScopedEntryResult<I> {
+        match index {
+            GenIndex {
+                index: 0,
+                generation,
+                ..
+            } => {
+                let _ = self.cell.unlock(generation)?.item_index()?;
+                self.item
+                    .as_ref()
+                    .map(|item| unsafe { item.assume_init_ref() }.try_get_scoped_entry())
+                    .unwrap()
+            }
+            GenIndex { index, .. } => {
+                Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
+            }
+        }
+    }
+
+    #[inline]
+    pub fn entry_mut<I: FromGuard<Inner = T>>(
+        &mut self,
+        index: GuardIndex<I>,
+    ) -> ScopedEntryMutResult<I> {
+        match index {
+            GenIndex {
+                index: 0,
+                generation,
+                ..
+            } => {
+                let _ = self.cell.unlock(generation)?.item_index()?;
+                self.item
+                    .as_mut()
+                    .map(|item| unsafe { item.assume_init_mut() }.try_get_scoped_entry_mut())
+                    .unwrap()
+            }
+            GenIndex { index, .. } => {
+                Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
+            }
+        }
     }
 }

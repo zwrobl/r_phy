@@ -3,6 +3,7 @@ use std::{error::Error, marker::PhantomData};
 use ash::vk;
 
 use crate::context::device::{
+    raw::resources::swapchain::SwapchainFrame,
     raw::resources::{
         command::{
             level::{Primary, Secondary},
@@ -19,7 +20,6 @@ use crate::context::device::{
             DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass, GBufferSkyboxPass,
         },
     },
-    swapchain::SwapchainFrame,
     Device,
 };
 use graphics::renderer::camera::CameraMatrices;

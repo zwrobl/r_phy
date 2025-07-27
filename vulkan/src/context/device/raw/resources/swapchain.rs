@@ -1,15 +1,22 @@
 use ash::{extensions::khr, vk};
-use std::{convert::Infallible, error::Error, ffi::CStr};
-use type_kit::{Create, CreateResult, Destroy, DestroyResult};
+use std::{
+    convert::Infallible, error::Error, ffi::CStr, fmt::Debug, marker::PhantomData, ops::Deref,
+    ptr::NonNull,
+};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, GenIndexRaw};
 
 use crate::context::{
-    device::raw::resources::render_pass::RenderPassConfig,
-    error::{ResourceResult, VkError, VkResult},
+    device::raw::resources::{
+        framebuffer::{FramebufferBuilder, FramebufferRaw},
+        render_pass::RenderPassConfig,
+        Resource, ResourceIndex,
+    },
+    error::{ResourceError, ResourceResult},
     surface::PhysicalDeviceSurfaceProperties,
     Context,
 };
 
-use super::{
+use crate::context::device::{
     raw::resources::command::{
         level::Primary,
         operation::{Graphics, Operation},
@@ -36,13 +43,64 @@ struct SwapchainImage {
     view: vk::ImageView,
 }
 
+#[derive(Clone, Copy)]
+pub struct SwapchainRaw {
+    pub num_images: usize,
+    pub extent: vk::Extent2D,
+    pub framebuffers: Option<NonNull<[GenIndexRaw]>>,
+    images: Option<NonNull<[SwapchainImage]>>,
+    loader: Option<NonNull<khr::Swapchain>>,
+    handle: vk::SwapchainKHR,
+}
+
 pub struct Swapchain<C: RenderPassConfig> {
     pub num_images: usize,
     pub extent: vk::Extent2D,
-    pub framebuffers: Vec<Framebuffer<C>>,
-    images: Vec<SwapchainImage>,
+    pub framebuffers: Box<[GenIndexRaw]>,
+    images: Box<[SwapchainImage]>,
+    loader: Box<khr::Swapchain>,
     handle: vk::SwapchainKHR,
-    loader: khr::Swapchain,
+    _phantom: PhantomData<C>,
+}
+
+impl<C: RenderPassConfig> Resource for Swapchain<C> {
+    type RawType = SwapchainRaw;
+}
+
+impl<C: RenderPassConfig> FromGuard for Swapchain<C> {
+    type Inner = SwapchainRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        Self::Inner {
+            num_images: self.num_images,
+            extent: self.extent,
+            framebuffers: NonNull::new(Box::leak(self.framebuffers)),
+            images: NonNull::new(Box::leak(self.images)),
+            loader: NonNull::new(Box::leak(self.loader)),
+            handle: self.handle,
+        }
+    }
+
+    #[inline]
+    unsafe fn from_inner(mut inner: Self::Inner) -> Self {
+        Self {
+            num_images: inner.num_images,
+            extent: inner.extent,
+            framebuffers: unsafe { Box::from_raw(inner.framebuffers.take().unwrap().as_mut()) },
+            images: unsafe { Box::from_raw(inner.images.take().unwrap().as_mut()) },
+            loader: unsafe { Box::from_raw(inner.loader.take().unwrap().as_mut()) },
+            handle: inner.handle,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<C: RenderPassConfig> Swapchain<C> {
+    #[inline]
+    pub fn get_framebuffer_index(&self, index: usize) -> ResourceIndex<Framebuffer<C>> {
+        unsafe { ResourceIndex::<Framebuffer<C>>::from_inner(self.framebuffers[index]) }
+    }
 }
 
 pub const fn required_extensions() -> &'static [&'static CStr; 1] {
@@ -50,23 +108,38 @@ pub const fn required_extensions() -> &'static [&'static CStr; 1] {
     REQUIRED_DEVICE_EXTENSIONS
 }
 
-impl<C: RenderPassConfig> Swapchain<C> {
-    pub fn get_frame(
+impl Context {
+    #[inline]
+    pub fn get_framebuffer_handle<C: RenderPassConfig>(
         &self,
+        swapchain: &Swapchain<C>,
+        index: usize,
+    ) -> FramebufferHandle<C> {
+        self.storage
+            .borrow()
+            .entry(swapchain.get_framebuffer_index(index))
+            .unwrap()
+            .deref()
+            .into()
+    }
+
+    pub fn get_frame<C: RenderPassConfig>(
+        &self,
+        swapchain: &Swapchain<C>,
         image_sync: SwapchainImageSync,
     ) -> Result<SwapchainFrame<C>, Box<dyn Error>> {
         let (image_index, _) = unsafe {
-            self.loader.acquire_next_image(
-                self.handle,
+            swapchain.loader.acquire_next_image(
+                swapchain.handle,
                 u64::MAX,
                 image_sync.draw_ready,
                 vk::Fence::null(),
             )?
         };
-        let framebuffer = (&self.framebuffers[image_index as usize]).into();
+        let framebuffer = self.get_framebuffer_handle(swapchain, image_index as usize);
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
-            extent: self.extent,
+            extent: swapchain.extent,
         };
         Ok(SwapchainFrame {
             framebuffer,
@@ -119,7 +192,7 @@ impl Context {
         &self,
         image: vk::Image,
         surface_format: vk::SurfaceFormatKHR,
-    ) -> VkResult<SwapchainImage> {
+    ) -> ResourceResult<SwapchainImage> {
         unsafe {
             let view = self.device.create_image_view(
                 &vk::ImageViewCreateInfo::builder()
@@ -147,7 +220,7 @@ impl Context {
 
 impl Create for SwapchainImageSync {
     type Config<'a> = ();
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(_: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let create_info = vk::SemaphoreCreateInfo::default();
@@ -175,31 +248,23 @@ impl Destroy for SwapchainImageSync {
     }
 }
 
-pub trait FramebufferBuilder<C: RenderPassConfig> {
-    fn build(
-        &self,
-        image_view: vk::ImageView,
-        extent: vk::Extent2D,
-    ) -> ResourceResult<Framebuffer<C>>;
+pub trait FramebufferConfigBuilder<C: RenderPassConfig> {
+    fn get(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> FramebufferBuilder<C>;
 }
 
-impl<C: RenderPassConfig, F> FramebufferBuilder<C> for F
+impl<C: RenderPassConfig, F> FramebufferConfigBuilder<C> for F
 where
-    F: Fn(vk::ImageView, vk::Extent2D) -> ResourceResult<Framebuffer<C>>,
+    F: Fn(vk::ImageView, vk::Extent2D) -> FramebufferBuilder<C>,
 {
     #[inline]
-    fn build(
-        &self,
-        image_view: vk::ImageView,
-        extent: vk::Extent2D,
-    ) -> ResourceResult<Framebuffer<C>> {
+    fn get(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> FramebufferBuilder<C> {
         self(image_view, extent)
     }
 }
 
 impl<C: RenderPassConfig> Create for Swapchain<C> {
-    type Config<'a> = &'a dyn FramebufferBuilder<C>;
-    type CreateError = VkError;
+    type Config<'a> = &'a dyn FramebufferConfigBuilder<C>;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let surface_properties = &context.physical_device.surface_properties;
@@ -237,19 +302,24 @@ impl<C: RenderPassConfig> Create for Swapchain<C> {
                 .get_swapchain_images(handle)?
                 .into_iter()
                 .map(|image| context.create_swapchain_image(image, surface_format))
-                .collect::<Result<Vec<_>, _>>()?
+                .collect::<Result<Box<_>, _>>()?
         };
         let framebuffers = images
             .iter()
-            .map(|image| config.build(image.view, image_extent))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|image| {
+                context
+                    .create_resource::<Framebuffer<C>, _>(config.get(image.view, image_extent))
+                    .map(|index| index.into_inner())
+            })
+            .collect::<Result<Box<_>, _>>()?;
         Ok(Swapchain {
             num_images: images.len(),
             extent: image_extent,
             images,
             framebuffers,
-            loader,
+            loader: Box::new(loader),
             handle,
+            _phantom: PhantomData,
         })
     }
 }
@@ -259,8 +329,8 @@ impl<C: RenderPassConfig> Destroy for Swapchain<C> {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.framebuffers.iter_mut().for_each(|framebuffer| {
-            let _ = framebuffer.destroy(context);
+        (0..self.framebuffers.len()).for_each(|index| {
+            let _ = context.destroy_resource(self.get_framebuffer_index(index));
         });
         unsafe {
             self.images
@@ -268,6 +338,34 @@ impl<C: RenderPassConfig> Destroy for Swapchain<C> {
                 .for_each(|image| context.destroy_image_view(image.view, None));
             self.loader.destroy_swapchain(self.handle, None);
         }
+        Ok(())
+    }
+}
+
+impl Destroy for SwapchainRaw {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.framebuffers.take().map(|mut framebuffers| {
+            let framebuffers = unsafe { Box::from_raw(framebuffers.as_mut()) };
+            (0..framebuffers.len()).for_each(|index| {
+                let _ = unsafe {
+                    context.destroy_raw_resource::<FramebufferRaw, _>(framebuffers[index])
+                };
+            })
+        });
+        self.images.take().map(|mut images| {
+            let images = unsafe { Box::from_raw(images.as_mut()) };
+            images
+                .iter()
+                .for_each(|image| unsafe { context.destroy_image_view(image.view, None) })
+        });
+        self.loader.take().map(|mut loader| {
+            let loader = unsafe { Box::from_raw(loader.as_mut()) };
+            unsafe { loader.destroy_swapchain(self.handle, None) }
+        });
         Ok(())
     }
 }

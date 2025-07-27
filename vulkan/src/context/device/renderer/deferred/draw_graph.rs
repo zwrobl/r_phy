@@ -9,6 +9,7 @@ use graphics::{
 };
 
 use crate::context::device::{
+    raw::resources::swapchain::SwapchainFrame,
     raw::resources::{
         descriptor::{Descriptor, DescriptorBindingData},
         framebuffer::presets::AttachmentsGBuffer,
@@ -22,7 +23,6 @@ use crate::context::device::{
         render_pass::presets::{DeferedRenderPass, GBufferWritePass},
     },
     resources::{MaterialPackList, MeshPackBinding, MeshPackList, MeshRangeBindData},
-    swapchain::SwapchainFrame,
     Device,
 };
 use math::types::Matrix4;

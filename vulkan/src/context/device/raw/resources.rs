@@ -7,6 +7,7 @@ pub mod layout;
 pub mod memory;
 pub mod pipeline;
 pub mod render_pass;
+pub mod swapchain;
 
 use std::{cell::RefCell, convert::Infallible, fmt::Debug};
 
@@ -19,8 +20,9 @@ use layout::{DescriptorSetLayoutRaw, PipelineLayoutRaw};
 use pipeline::GraphicsPipelineRaw;
 use type_kit::{
     list_type, BorrowList, CollectionDestroyError, Cons, Contains, Create, Destroy, DestroyResult,
-    DropGuardError, FromGuard, GenCollectionResult, GenIndexRaw, GuardIndex, IndexList, Marked,
-    Marker, Nil, ScopedEntryMutResult, ScopedEntryResult, TypeGuardCollection, TypeMap, TypedIndex,
+    DropGuardError, FromGuard, GenCollectionResult, GenIndex, GenIndexRaw, GuardIndex, IndexList,
+    Marked, Marker, Nil, ScopedEntryMutResult, ScopedEntryResult, TypeGuard, TypeGuardCollection,
+    TypeMap, TypedIndex,
 };
 
 use crate::context::{
@@ -41,6 +43,20 @@ pub type Raw<R> = <R as Resource>::RawType;
 pub struct ResourceIndex<R: Resource> {
     index: GuardIndex<R>,
 }
+
+impl<R: Resource> ResourceIndex<R> {
+    #[inline]
+    pub(crate) fn wrap(index: GuardIndex<R>) -> Self {
+        Self { index }
+    }
+
+    #[inline]
+    pub(crate) fn unwrap(self) -> GuardIndex<R> {
+        self.index
+    }
+}
+
+pub type RawIndex = GenIndexRaw;
 
 impl<R: Resource> Clone for ResourceIndex<R> {
     #[inline]
@@ -135,6 +151,26 @@ impl ResourceStorage {
             .storage
             .get_mut()
             .pop(index.index)?
+            .inner_mut()
+            .destroy(context);
+        Ok(())
+    }
+
+    #[inline]
+    pub unsafe fn destroy_raw_resource<R: 'static, M: Marker>(
+        &mut self,
+        context: &Context,
+        index: RawIndex,
+    ) -> ResourceResult<()>
+    where
+        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
+    {
+        let index = unsafe { GenIndex::<TypeGuard<R>>::from_inner(index) };
+        let _ = self
+            .storage
+            .get_mut()
+            .pop(index)?
             .inner_mut()
             .destroy(context);
         Ok(())

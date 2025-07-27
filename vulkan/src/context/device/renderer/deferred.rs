@@ -14,7 +14,9 @@ use graphics::{
     shader::{ShaderHandle, ShaderType},
 };
 
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuardError};
+use type_kit::{
+    Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuardError, ScopedEntry,
+};
 
 use crate::context::{
     device::{
@@ -26,7 +28,7 @@ use crate::context::{
                 descriptor::{DescriptorPool, DescriptorSetWriter},
                 framebuffer::{
                     presets::AttachmentsGBuffer, AttachmentReferences, AttachmentsBuilder,
-                    Framebuffer, FramebufferBuilder, InputAttachment,
+                    FramebufferBuilder, InputAttachment,
                 },
                 image::{Image, Image2D, ImagePartial},
                 layout::presets::{GBufferDescriptorSet, PipelineLayoutMaterial},
@@ -40,14 +42,14 @@ use crate::context::{
                     presets::{DeferedRenderPass, GBufferShadingPass, GBufferWritePass},
                     RenderPass, Subpass,
                 },
+                swapchain::Swapchain,
+                ResourceIndex,
             },
             Partial,
         },
         resources::{
             MaterialPackList, MeshPack, MeshPackList, MeshPackPartial, Skybox, SkyboxPartial,
         },
-        swapchain::Swapchain,
-        Device,
     },
     error::{ResourceError, ShaderResult, VkError},
     Context,
@@ -137,8 +139,9 @@ struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
 }
 
 struct DeferredRendererFrameData {
+    num_frames: usize,
     g_buffer: DropGuard<GBuffer>,
-    swapchain: DropGuard<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>>,
+    swapchain: ResourceIndex<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>>,
     descriptors: DescriptorPool<GBufferDescriptorSet>,
 }
 
@@ -183,7 +186,7 @@ impl Frame for Rc<RefCell<DropGuard<DeferredRenderer>>> {
     }
 
     fn get_num_frames(&self) -> usize {
-        self.borrow().frame_data.swapchain.num_images
+        self.borrow().frame_data.num_frames
     }
 }
 
@@ -194,21 +197,27 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
 
     fn begin_frame(
         &mut self,
-        device: &Device,
+        context: &Context,
         camera_matrices: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>> {
         let (index, primary_command) = self.frames.primary_commands.next();
-        let primary_command = device.begin_primary_command(primary_command)?;
-        let swapchain_frame = self
-            .renderer
-            .borrow()
-            .frame_data
-            .swapchain
-            .get_frame(self.frames.image_sync[index])?;
+        let primary_command = context.begin_primary_command(primary_command)?;
+        let swapchain_frame = {
+            let swapchain_index = self.renderer.borrow().frame_data.swapchain.unwrap();
+            let swapchain_store = context.swapchain.borrow();
+            context.get_frame(
+                &*swapchain_store.entry(swapchain_index).unwrap(),
+                self.frames.image_sync[index],
+            )?
+        };
         let camera_descriptor = self.frames.camera_uniform.descriptors.get(index);
         self.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
-        let commands =
-            self.prepare_commands(device, &swapchain_frame, camera_descriptor, camera_matrices)?;
+        let commands = self.prepare_commands(
+            context,
+            &swapchain_frame,
+            camera_descriptor,
+            camera_matrices,
+        )?;
         let draw_graph = DrawGraph::new();
         self.current_frame.replace(FrameData {
             swapchain_frame,
@@ -238,19 +247,23 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         self.append_draw_call(material_packs, mesh_packs, shader, drawable, transform);
     }
 
-    fn end_frame(&mut self, device: &Device) -> Result<(), Box<dyn Error>> {
+    fn end_frame(&mut self, context: &Context) -> Result<(), Box<dyn Error>> {
         let FrameData {
             swapchain_frame,
             primary_command,
             renderer_state,
             ..
         } = self.current_frame.take().ok_or("current_frame is None!")?;
-        let commands = self.record_draw_calls(device, renderer_state, &swapchain_frame)?;
+        let commands = self.record_draw_calls(context, renderer_state, &swapchain_frame)?;
         let primary_command =
-            self.record_primary_command(device, primary_command, commands, &swapchain_frame)?;
+            self.record_primary_command(context, primary_command, commands, &swapchain_frame)?;
         let renderer = self.renderer.borrow();
-        device.present_frame(
-            &renderer.frame_data.swapchain,
+        context.present_frame(
+            &*context
+                .swapchain
+                .borrow()
+                .entry(renderer.frame_data.swapchain.unwrap())
+                .unwrap(),
             primary_command,
             swapchain_frame,
         )?;
@@ -325,7 +338,7 @@ impl GBuffer {
 
 impl Create for GBuffer {
     type Config<'a> = (GBufferPartial, AllocatorIndex);
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let (partial, allocator) = config;
@@ -360,31 +373,39 @@ impl Destroy for GBuffer {
 
 impl Create for DeferredRendererFrameData {
     type Config<'a> = <GBuffer as Create>::Config<'a>;
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let g_buffer = GBuffer::create(config, context)?;
-        let framebuffer_builder = |swapchain_image, extent| {
-            Framebuffer::create(
-                g_buffer.get_framebuffer_builder(extent, swapchain_image),
-                context,
-            )
+        let framebuffer_builder =
+            |swapchain_image, extent| g_buffer.get_framebuffer_builder(extent, swapchain_image);
+        let swapchain = context.create_swapchain(&framebuffer_builder)?;
+        let (framebuffer_index, num_frames) = {
+            let swapchain_store = context.swapchain.borrow();
+            let swapchain: ScopedEntry<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>> =
+                swapchain_store.entry(swapchain.unwrap()).unwrap();
+            (swapchain.get_framebuffer_index(0), swapchain.num_images)
         };
-        let swapchain = Swapchain::create(&framebuffer_builder, context)?;
-        let descriptors = DescriptorPool::create(
-            DescriptorSetWriter::<GBufferDescriptorSet>::new(1).write_images::<InputAttachment, _>(
-                &GBufferShadingPass::<AttachmentsGBuffer>::references()
-                    .get_input_attachments(&swapchain.framebuffers[0]),
-            ),
-            context,
-        )?;
+        let descriptors = {
+            let storage = context.storage.borrow();
+            let framebuffer = storage.entry(framebuffer_index)?;
+            DescriptorPool::create(
+                DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
+                    .write_images::<InputAttachment, _>(
+                        &GBufferShadingPass::<AttachmentsGBuffer>::references()
+                            .get_input_attachments(&*framebuffer),
+                    ),
+                context,
+            )?
+        };
         Ok(DeferredRendererFrameData {
             g_buffer: DropGuard::new(g_buffer),
             descriptors,
-            swapchain: DropGuard::new(swapchain),
+            swapchain,
+            num_frames,
         })
     }
 }
@@ -395,7 +416,6 @@ impl Destroy for DeferredRendererFrameData {
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.descriptors.destroy(context)?;
-        self.swapchain.destroy(context)?;
         self.g_buffer.destroy(context)?;
         Ok(())
     }
