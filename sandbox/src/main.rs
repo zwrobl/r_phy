@@ -3,8 +3,8 @@ use graphics::{
     shader::Shader,
 };
 use std::{error::Error, result::Result};
-use vulkan::{
-    context::device::renderer::deferred::{DeferredRenderer, DeferredShader},
+use vulkan_high::{
+    renderer::deferred::{DeferredRenderer, DeferredShader},
     VulkanContextBuilder, VulkanRendererBuilder, VulkanRendererConfig,
 };
 use winit::{

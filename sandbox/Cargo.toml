@@ -10,4 +10,4 @@ system = { path = "../system" }
 winit = { workspace = true }
 physics = { path = "../physics" }
 graphics = { path = "../graphics" }
-vulkan = { path = "../vulkan" }
+vulkan_high = { path = "../vulkan_high" }

@@ -1,0 +1,16 @@
+[package]
+name = "vulkan_low"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ash = { workspace = true }
+winit = { workspace = true }
+colored = { workspace = true }
+bytemuck = { workspace = true }
+math = { path = "../math" }
+type_kit= { path = "../type_kit" }
+strum = { version = "0.26.1", features = ["derive"] }
+png = "0.17.13"
+physics = { path = "../physics" } 
+graphics = {path = "../graphics" }
