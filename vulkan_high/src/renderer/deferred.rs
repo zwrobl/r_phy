@@ -203,8 +203,8 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let (index, primary_command) = self.frames.primary_commands.next();
         let primary_command = context.begin_primary_command(primary_command)?;
         let swapchain_frame = {
-            let swapchain_index = self.renderer.borrow().frame_data.swapchain.unwrap();
-            let swapchain_store = context.swapchain.borrow();
+            let swapchain_index = self.renderer.borrow().frame_data.swapchain;
+            let swapchain_store = context.storage.borrow();
             context.get_frame(
                 &*swapchain_store.entry(swapchain_index).unwrap(),
                 self.frames.image_sync[index],
@@ -260,9 +260,9 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let renderer = self.renderer.borrow();
         context.present_frame(
             &*context
-                .swapchain
+                .storage
                 .borrow()
-                .entry(renderer.frame_data.swapchain.unwrap())
+                .entry(renderer.frame_data.swapchain)
                 .unwrap(),
             primary_command,
             swapchain_frame,
@@ -379,11 +379,14 @@ impl Create for DeferredRendererFrameData {
         let g_buffer = GBuffer::create(config, context)?;
         let framebuffer_builder =
             |swapchain_image, extent| g_buffer.get_framebuffer_builder(extent, swapchain_image);
-        let swapchain = context.create_swapchain(&framebuffer_builder)?;
+        let swapchain = context
+            .create_resource::<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>, _>(
+                &framebuffer_builder,
+            )?;
         let (framebuffer_index, num_frames) = {
-            let swapchain_store = context.swapchain.borrow();
+            let swapchain_store = context.storage.borrow();
             let swapchain: ScopedEntry<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>> =
-                swapchain_store.entry(swapchain.unwrap()).unwrap();
+                swapchain_store.entry(swapchain).unwrap();
             (swapchain.get_framebuffer_index(0), swapchain.num_images)
         };
         let descriptors = {

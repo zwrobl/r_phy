@@ -1,6 +1,6 @@
 use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
 
 use crate::{
     device::raw::{
@@ -461,6 +461,7 @@ pub struct PersistentCommandPoolRaw {
 
 impl<L: Level, O: Operation> Resource for PersistentCommandPool<L, O> {
     type RawType = PersistentCommandPoolRaw;
+    type RawCollection = TypeGuardCollection<Self::RawType>;
 }
 
 impl<L: Level, O: Operation> FromGuard for PersistentCommandPool<L, O> {

@@ -1,7 +1,7 @@
 use std::{convert::Infallible, ffi::c_void, fmt::Debug, marker::PhantomData, ops::Deref};
 
 use ash::{prelude::VkResult, vk};
-use type_kit::{Create, Destroy, DestroyResult, FromGuard};
+use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
 
 use crate::{
     device::memory::{AllocReqTyped, MemoryProperties},
@@ -148,4 +148,5 @@ impl<M: MemoryProperties> FromGuard for Memory<M> {
 
 impl<M: MemoryProperties> Resource for Memory<M> {
     type RawType = MemoryRaw;
+    type RawCollection = TypeGuardCollection<Self::RawType>;
 }

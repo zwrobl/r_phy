@@ -5,7 +5,7 @@ pub use reader::*;
 use std::convert::Infallible;
 
 use ash::vk;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
 
 use crate::{
     device::{
@@ -168,4 +168,5 @@ impl<V: ImageType> FromGuard for Texture<V> {
 
 impl<V: ImageType> Resource for Texture<V> {
     type RawType = TextureRaw;
+    type RawCollection = TypeGuardCollection<Self::RawType>;
 }

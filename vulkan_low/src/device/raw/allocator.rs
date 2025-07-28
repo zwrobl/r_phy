@@ -366,12 +366,12 @@ impl Context {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AllocatorIndex {
-    index: GenIndex<AllocatorInstance>,
+    index: GenIndex<AllocatorInstance, GenCollection<AllocatorInstance>>,
 }
 
 #[derive(Debug)]
 pub struct AllocationIndex<M: MemoryProperties> {
-    index: GuardIndex<Allocation<M>>,
+    index: GuardIndex<Allocation<M>, TypeGuardCollection<AllocationRaw>>,
 }
 
 impl<M: MemoryProperties> Clone for AllocationIndex<M> {
@@ -398,7 +398,7 @@ impl<M: MemoryProperties> FromGuard for AllocationIndex<M> {
 
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            index: GuardIndex::<Allocation<M>>::from_inner(inner.index),
+            index: GuardIndex::<Allocation<M>, _>::from_inner(inner.index),
         }
     }
 }

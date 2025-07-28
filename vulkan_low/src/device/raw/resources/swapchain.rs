@@ -3,7 +3,10 @@ use std::{
     convert::Infallible, error::Error, ffi::CStr, fmt::Debug, marker::PhantomData, ops::Deref,
     ptr::NonNull,
 };
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, GenIndexRaw};
+use type_kit::{
+    Create, CreateResult, Destroy, DestroyResult, FromGuard, GenCell, GenIndexRaw, TypeGuard,
+    TypeGuardCollection,
+};
 
 use crate::{
     device::raw::resources::{
@@ -65,6 +68,7 @@ pub struct Swapchain<C: RenderPassConfig> {
 
 impl<C: RenderPassConfig> Resource for Swapchain<C> {
     type RawType = SwapchainRaw;
+    type RawCollection = GenCell<TypeGuard<Self::RawType>>;
 }
 
 impl<C: RenderPassConfig> FromGuard for Swapchain<C> {

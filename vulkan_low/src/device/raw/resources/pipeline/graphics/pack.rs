@@ -6,7 +6,7 @@ use std::{
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
 
 use crate::{
     device::raw::{
@@ -54,6 +54,7 @@ pub struct GraphicsPipelineRaw {
 
 impl<T: GraphicsPipelineConfig> Resource for GraphicsPipeline<T> {
     type RawType = GraphicsPipelineRaw;
+    type RawCollection = TypeGuardCollection<Self::RawType>;
 }
 
 impl<T: GraphicsPipelineConfig> FromGuard for GraphicsPipeline<T> {
