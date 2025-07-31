@@ -2035,14 +2035,14 @@ pub struct GenCell<T> {
     item: MaybeUninit<T>,
 }
 
-impl<T> Default for GenCell<T> {
+impl<T: 'static> Default for GenCell<T> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T> GenCell<T> {
+impl<T: 'static> GenCell<T> {
     #[inline]
     pub fn new() -> Self {
         Self {
@@ -2069,10 +2069,12 @@ impl<T> GenCell<T> {
     }
 
     #[inline]
-    pub fn push(&mut self, item: T) -> GenCollectionResult<GenIndex<T, Self>> {
-        let (generation, _) = self.cell.insert(0)?;
-        self.item = MaybeUninit::new(item);
-        Ok(GenIndex::wrap(generation, 0))
+    pub fn drain(&mut self) -> Option<T> {
+        if let Ok(_) = self.cell.unlock_unchecked().pop(None) {
+            Some(unsafe { self.item.assume_init_read() })
+        } else {
+            None
+        }
     }
 }
 
@@ -2126,7 +2128,9 @@ impl<T: 'static> BorrowCollection<T> for GenCell<T> {
 
     #[inline]
     fn push(&mut self, item: T) -> GenCollectionResult<GenIndex<T, Self>> {
-        self.push(item)
+        let (generation, _) = self.cell.insert(0)?;
+        self.item = MaybeUninit::new(item);
+        Ok(GenIndex::wrap(generation, 0))
     }
 
     #[inline]

@@ -1,18 +1,15 @@
-use ash::{extensions::khr, vk};
-use std::{
-    convert::Infallible, error::Error, ffi::CStr, fmt::Debug, marker::PhantomData, ops::Deref,
-    ptr::NonNull,
-};
+use ash::vk;
+use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData, ptr::NonNull};
 use type_kit::{
-    Create, CreateResult, Destroy, DestroyResult, FromGuard, GenCell, GenIndexRaw, TypeGuard,
-    TypeGuardCollection,
+    unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, FromGuard, GenCell,
+    GenIndexRaw, TypeGuard,
 };
 
 use crate::{
     device::raw::resources::{
         framebuffer::{FramebufferBuilder, FramebufferRaw},
         render_pass::RenderPassConfig,
-        Resource, ResourceIndex,
+        Resource, ResourceIndex, ResourceIndexListBuilder,
     },
     error::{ResourceError, ResourceResult},
     surface::PhysicalDeviceSurfaceProperties,
@@ -28,6 +25,7 @@ use crate::device::{
     raw::resources::framebuffer::{Framebuffer, FramebufferHandle},
     Device,
 };
+
 #[derive(Debug, Clone, Copy)]
 pub struct SwapchainImageSync {
     draw_ready: vk::Semaphore,
@@ -52,7 +50,6 @@ pub struct SwapchainRaw {
     pub extent: vk::Extent2D,
     pub framebuffers: Option<NonNull<[GenIndexRaw]>>,
     images: Option<NonNull<[SwapchainImage]>>,
-    loader: Option<NonNull<khr::Swapchain>>,
     handle: vk::SwapchainKHR,
 }
 
@@ -61,7 +58,6 @@ pub struct Swapchain<C: RenderPassConfig> {
     pub extent: vk::Extent2D,
     pub framebuffers: Box<[GenIndexRaw]>,
     images: Box<[SwapchainImage]>,
-    loader: Box<khr::Swapchain>,
     handle: vk::SwapchainKHR,
     _phantom: PhantomData<C>,
 }
@@ -81,7 +77,6 @@ impl<C: RenderPassConfig> FromGuard for Swapchain<C> {
             extent: self.extent,
             framebuffers: NonNull::new(Box::leak(self.framebuffers)),
             images: NonNull::new(Box::leak(self.images)),
-            loader: NonNull::new(Box::leak(self.loader)),
             handle: self.handle,
         }
     }
@@ -93,7 +88,6 @@ impl<C: RenderPassConfig> FromGuard for Swapchain<C> {
             extent: inner.extent,
             framebuffers: unsafe { Box::from_raw(inner.framebuffers.take().unwrap().as_mut()) },
             images: unsafe { Box::from_raw(inner.images.take().unwrap().as_mut()) },
-            loader: unsafe { Box::from_raw(inner.loader.take().unwrap().as_mut()) },
             handle: inner.handle,
             _phantom: PhantomData,
         }
@@ -107,24 +101,23 @@ impl<C: RenderPassConfig> Swapchain<C> {
     }
 }
 
-pub const fn required_extensions() -> &'static [&'static CStr; 1] {
-    const REQUIRED_DEVICE_EXTENSIONS: &[&CStr; 1] = &[khr::Swapchain::name()];
-    REQUIRED_DEVICE_EXTENSIONS
-}
-
 impl Context {
     #[inline]
     pub fn get_framebuffer_handle<C: RenderPassConfig>(
         &self,
         swapchain: &Swapchain<C>,
         index: usize,
-    ) -> FramebufferHandle<C> {
-        self.storage
-            .borrow()
-            .entry(swapchain.get_framebuffer_index(index))
-            .unwrap()
-            .deref()
-            .into()
+    ) -> ResourceResult<FramebufferHandle<C>> {
+        let index_list = ResourceIndexListBuilder::new()
+            .push(swapchain.get_framebuffer_index(index))
+            .build();
+        let handle = self
+            .opperate_ref(index_list, |unpack_list![framebuffer, _rest]| {
+                let handle: FramebufferHandle<C> = (&***framebuffer).into();
+                Result::<_, Infallible>::Ok(handle)
+            })
+            .map(|handle| handle.unwrap())?;
+        Ok(handle)
     }
 
     pub fn get_frame<C: RenderPassConfig>(
@@ -133,14 +126,14 @@ impl Context {
         image_sync: SwapchainImageSync,
     ) -> Result<SwapchainFrame<C>, Box<dyn Error>> {
         let (image_index, _) = unsafe {
-            swapchain.loader.acquire_next_image(
+            self.get_extensions().swapchain.acquire_next_image(
                 swapchain.handle,
                 u64::MAX,
                 image_sync.draw_ready,
                 vk::Fence::null(),
             )?
         };
-        let framebuffer = self.get_framebuffer_handle(swapchain, image_index as usize);
+        let framebuffer = self.get_framebuffer_handle(swapchain, image_index as usize)?;
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: swapchain.extent,
@@ -175,7 +168,7 @@ impl Device {
                 },
                 &[image_sync.draw_finished],
             )?;
-            swapchain.loader.queue_present(
+            self.get_extensions().swapchain.queue_present(
                 self.device_queues.graphics,
                 &vk::PresentInfoKHR {
                     wait_semaphore_count: 1,
@@ -299,10 +292,10 @@ impl<C: RenderPassConfig> Create for Swapchain<C> {
             .clipped(true)
             .image_array_layers(1)
             .surface((&*context.surface).into());
-        let loader: khr::Swapchain = context.load();
-        let handle = unsafe { loader.create_swapchain(&create_info, None)? };
+        let laoder = &context.get_extensions().swapchain;
+        let handle = unsafe { laoder.create_swapchain(&create_info, None)? };
         let images = unsafe {
-            loader
+            laoder
                 .get_swapchain_images(handle)?
                 .into_iter()
                 .map(|image| context.create_swapchain_image(image, surface_format))
@@ -321,7 +314,6 @@ impl<C: RenderPassConfig> Create for Swapchain<C> {
             extent: image_extent,
             images,
             framebuffers,
-            loader: Box::new(loader),
             handle,
             _phantom: PhantomData,
         })
@@ -340,7 +332,10 @@ impl<C: RenderPassConfig> Destroy for Swapchain<C> {
             self.images
                 .iter_mut()
                 .for_each(|image| context.destroy_image_view(image.view, None));
-            self.loader.destroy_swapchain(self.handle, None);
+            context
+                .get_extensions()
+                .swapchain
+                .destroy_swapchain(self.handle, None);
         }
         Ok(())
     }
@@ -366,10 +361,12 @@ impl Destroy for SwapchainRaw {
                 .iter()
                 .for_each(|image| unsafe { context.destroy_image_view(image.view, None) })
         });
-        self.loader.take().map(|mut loader| {
-            let loader = unsafe { Box::from_raw(loader.as_mut()) };
-            unsafe { loader.destroy_swapchain(self.handle, None) }
-        });
+        unsafe {
+            context
+                .get_extensions()
+                .swapchain
+                .destroy_swapchain(self.handle, None)
+        };
         Ok(())
     }
 }

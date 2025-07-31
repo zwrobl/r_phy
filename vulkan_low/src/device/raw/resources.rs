@@ -21,9 +21,9 @@ use pipeline::GraphicsPipelineRaw;
 use swapchain::SwapchainRaw;
 use type_kit::{
     list_type, BorrowCollection, BorrowList, CollectionDestroyError, Cons, Contains, Create,
-    Destroy, DestroyResult, DropGuardError, FromGuard, GenCell, GenCollectionResult, GenIndex,
-    GenIndexRaw, GuardCollectionT, GuardIndex, IndexList, Marked, Marker, Nil,
-    ScopedEntryMutResult, ScopedEntryResult, TypeGuard, TypeGuardCollection, TypeMap, TypedIndex,
+    Destroy, DestroyResult, FromGuard, GenCell, GenCollectionResult, GenIndex, GenIndexRaw,
+    GuardCollectionT, GuardIndex, IndexList, Marked, Marker, Nil, TypeGuard, TypeGuardCollection,
+    TypeMap, TypedIndex,
 };
 
 use crate::{
@@ -48,13 +48,16 @@ pub struct ResourceIndex<R: Resource> {
 
 impl<R: Resource> ResourceIndex<R> {
     #[inline]
-    pub(crate) fn wrap(index: GuardIndex<R, R::RawCollection>) -> Self {
-        Self { index }
+    pub fn unwrap(self) -> GuardIndex<R, R::RawCollection> {
+        self.index
     }
 
     #[inline]
-    pub fn unwrap(self) -> GuardIndex<R, R::RawCollection> {
-        self.index
+    pub fn mark<L, M: Marker>(self) -> Marked<Self, M>
+    where
+        L: Contains<R::RawCollection, M>,
+    {
+        Marked::new(self)
     }
 }
 
@@ -109,7 +112,7 @@ pub type ResourceStorageList = list_type![
 
 #[derive(Debug)]
 pub struct ResourceStorage {
-    storage: ResourceStorageList,
+    storage: RefCell<ResourceStorageList>,
 }
 
 impl Default for ResourceStorage {
@@ -123,39 +126,47 @@ impl ResourceStorage {
     #[inline]
     pub fn new() -> Self {
         ResourceStorage {
-            storage: ResourceStorageList::default(),
+            storage: RefCell::new(ResourceStorageList::default()),
         }
     }
 
     #[inline]
     pub fn push_resource<'a, R: Resource, M: Marker>(
-        &mut self,
+        &self,
         resource: R,
     ) -> ResourceResult<ResourceIndex<R>>
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
-        let index = self.storage.get_mut().push(resource.into_guard())?;
+        let index = self
+            .storage
+            .borrow_mut()
+            .get_mut()
+            .push(resource.into_guard())?;
         Ok(ResourceIndex { index })
     }
 
     #[inline]
-    pub fn pop_resource<R: Resource, M: Marker>(
-        &mut self,
-        index: ResourceIndex<R>,
-    ) -> ResourceResult<R>
+    pub fn pop_resource<R: Resource, M: Marker>(&self, index: ResourceIndex<R>) -> ResourceResult<R>
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
         // TODO: Proper type guard type check should be performed here
-        let resource =
-            unsafe { R::from_inner(self.storage.get_mut().pop(index.index)?.into_inner()) };
+        let resource = unsafe {
+            R::from_inner(
+                self.storage
+                    .borrow_mut()
+                    .get_mut()
+                    .pop(index.index)?
+                    .into_inner(),
+            )
+        };
         Ok(resource)
     }
 
     #[inline]
     pub unsafe fn pop_raw_resource<R: 'static, M: Marker>(
-        &mut self,
+        &self,
         index: RawIndex,
     ) -> ResourceResult<R>
     where
@@ -163,34 +174,8 @@ impl ResourceStorage {
         ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
     {
         let index = unsafe { GenIndex::<TypeGuard<R>, _>::from_inner(index) };
-        let resource = self.storage.get_mut().pop(index)?.into_inner();
+        let resource = self.storage.borrow_mut().get_mut().pop(index)?.into_inner();
         Ok(resource)
-    }
-
-    #[inline]
-    pub fn entry<'a, R: Resource, M: Marker>(
-        &'a self,
-        index: ResourceIndex<R>,
-    ) -> ScopedEntryResult<'a, R>
-    where
-        ResourceStorageList: Contains<RawCollection<R>, M>,
-    {
-        let ResourceIndex { index } = index;
-        self.storage.get().entry(TypedIndex::<R, _>::new(index))
-    }
-
-    #[inline]
-    pub fn entry_mut<'a, R: Resource, M: Marker>(
-        &'a mut self,
-        index: ResourceIndex<R>,
-    ) -> ScopedEntryMutResult<'a, R>
-    where
-        ResourceStorageList: Contains<RawCollection<R>, M>,
-    {
-        let ResourceIndex { index } = index;
-        self.storage
-            .get_mut()
-            .entry_mut(TypedIndex::<R, _>::new(index))
     }
 
     #[inline]
@@ -200,14 +185,15 @@ impl ResourceStorage {
         E,
         F: FnOnce(&<I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
     >(
-        &mut self,
+        &self,
         index: I,
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
         let index_list = index.into_index_list();
-        let borrowed = index_list.get_borrowed(&mut self.storage)?;
+        // TODO: If f methods tries to acces the storage via external immutable Context reference, this will panic
+        let borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(&borrowed);
-        borrowed.put_back(&mut self.storage)?;
+        borrowed.put_back(&mut self.storage.borrow_mut())?;
         Ok(result)
     }
 
@@ -218,47 +204,51 @@ impl ResourceStorage {
         E,
         F: FnOnce(&mut <I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
     >(
-        &mut self,
+        &self,
         index: I,
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
         let index_list = index.into_index_list();
-        let mut borrowed = index_list.get_borrowed(&mut self.storage)?;
+        // TODO: If f methods tries to acces the storage via external immutable Context reference, this will panic
+        let mut borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(&mut borrowed);
-        borrowed.put_back(&mut self.storage)?;
+        borrowed.put_back(&mut self.storage.borrow_mut())?;
         Ok(result)
     }
 
     #[inline]
     fn destroy_vec_resource_storage<R: 'static, M: Marker>(
-        &mut self,
+        &self,
         context: &Context,
     ) -> DestroyResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context>,
         ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
     {
-        self.storage.get_mut().destroy(context)
+        let items = self.storage.borrow_mut().get_mut().drain();
+        items
+            .into_iter()
+            .try_for_each(|mut item| item.destroy(context))
     }
 
     #[inline]
     fn destroy_cell_resource_storage<R: 'static, M: Marker>(
-        &mut self,
+        &self,
         context: &Context,
     ) -> DestroyResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context>,
         ResourceStorageList: Contains<GenCell<TypeGuard<R>>, M>,
     {
-        self.storage.get_mut().destroy(context)
+        let resource = self.storage.borrow_mut().get_mut().drain();
+        if let Some(mut item) = resource {
+            item.destroy(context)?;
+        };
+        Ok(())
     }
-}
 
-impl Destroy for ResourceStorage {
-    type Context<'a> = &'a Context;
-    type DestroyError = DropGuardError<Infallible>;
-
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+    #[inline]
+    pub fn destroy_storage(&self, context: &Context) -> Result<(), Infallible> {
         self.destroy_vec_resource_storage::<TextureRaw, _>(context)?;
         self.destroy_vec_resource_storage::<ImageRaw, _>(context)?;
         self.destroy_vec_resource_storage::<BufferRaw, _>(context)?;
@@ -267,8 +257,44 @@ impl Destroy for ResourceStorage {
         self.destroy_vec_resource_storage::<DescriptorPoolDataRaw, _>(context)?;
         self.destroy_vec_resource_storage::<PersistentCommandPoolRaw, _>(context)?;
         self.destroy_vec_resource_storage::<FramebufferRaw, _>(context)?;
-        // self.destroy_cell_resource_storage::<SwapchainRaw, _>(context)?;
+        self.destroy_cell_resource_storage::<SwapchainRaw, _>(context)?;
         Ok(())
+    }
+}
+
+pub struct ResourceIndexListBuilder<I: ResourceIndexList> {
+    list: I,
+}
+
+impl ResourceIndexListBuilder<Nil> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            list: Nil::default(),
+        }
+    }
+}
+
+impl<I: ResourceIndexList> ResourceIndexListBuilder<I> {
+    #[inline]
+    pub fn push<R: Resource, M: Marker>(
+        self,
+        index: ResourceIndex<R>,
+    ) -> ResourceIndexListBuilder<Cons<Marked<ResourceIndex<R>, M>, I>>
+    where
+        ResourceStorageList: Contains<R::RawCollection, M>,
+    {
+        ResourceIndexListBuilder {
+            list: Cons {
+                head: Marked::new(index),
+                tail: self.list,
+            },
+        }
+    }
+
+    #[inline]
+    pub fn build(self) -> I {
+        self.list
     }
 }
 
@@ -312,12 +338,12 @@ where
     }
 }
 
-pub type TypeUniqueRawCollection<R> = RefCell<TypeMap<<R as TypeUniqueResource>::RawType>>;
+pub type TypeUniqueRawCollection<R> = TypeMap<<R as TypeUniqueResource>::RawType>;
 pub type TypeUniqueResourceStorageList = list_type![
-    RefCell<TypeMap<RenderPassRaw>>,
-    RefCell<TypeMap<DescriptorSetLayoutRaw>>,
-    RefCell<TypeMap<PipelineLayoutRaw>>,
-    RefCell<TypeMap<TransientCommandPoolRaw>>,
+    TypeMap<RenderPassRaw>,
+    TypeMap<DescriptorSetLayoutRaw>,
+    TypeMap<PipelineLayoutRaw>,
+    TypeMap<TransientCommandPoolRaw>,
     Nil
 ];
 
@@ -330,7 +356,7 @@ pub trait TypeUniqueResource:
 
 #[derive(Debug)]
 pub struct TypeUniqueResourceStorage {
-    storage: TypeUniqueResourceStorageList,
+    storage: RefCell<TypeUniqueResourceStorageList>,
 }
 
 impl Default for TypeUniqueResourceStorage {
@@ -344,7 +370,7 @@ impl TypeUniqueResourceStorage {
     #[inline]
     pub fn new() -> Self {
         Self {
-            storage: TypeUniqueResourceStorageList::default(),
+            storage: RefCell::new(TypeUniqueResourceStorageList::default()),
         }
     }
 
@@ -353,7 +379,7 @@ impl TypeUniqueResourceStorage {
     where
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
-        self.storage.get().borrow().get::<R>()
+        self.storage.borrow().get().get::<R>()
     }
 
     #[inline]
@@ -365,8 +391,8 @@ impl TypeUniqueResourceStorage {
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
         let item = R::create((), context)?;
-        self.storage.get().borrow_mut().insert(item);
-        Ok(self.storage.get().borrow().get::<R>().unwrap())
+        self.storage.borrow_mut().get_mut().insert(item);
+        Ok(self.storage.borrow().get().get::<R>().unwrap())
     }
 
     #[inline]
@@ -377,7 +403,7 @@ impl TypeUniqueResourceStorage {
     where
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
-        let item = self.storage.get().borrow().get::<R>();
+        let item = self.storage.borrow().get().get::<R>();
         if let Some(value) = item {
             Ok(value)
         } else {
@@ -393,31 +419,25 @@ impl TypeUniqueResourceStorage {
     where
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
-        let mut item = self.storage.get().borrow_mut().remove::<R>();
+        let mut item = self.storage.borrow_mut().get_mut().remove::<R>();
         let _ = item.destroy(context);
         Ok(())
     }
 
     #[inline]
     fn destroy_type_unique_resource_storage<R: 'static, M: Marker>(
-        &mut self,
+        &self,
         context: &Context,
     ) -> Result<(), CollectionDestroyError<R>>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context>,
-        TypeUniqueResourceStorageList: Contains<RefCell<TypeMap<R>>, M>,
+        TypeUniqueResourceStorageList: Contains<TypeMap<R>, M>,
     {
-        self.storage.get_mut().borrow_mut().destroy(context)
+        self.storage.borrow_mut().get_mut().destroy(context)
     }
-}
-
-impl Destroy for TypeUniqueResourceStorage {
-    type Context<'a> = &'a Context;
-
-    type DestroyError = Infallible;
 
     #[inline]
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+    pub fn destroy_storage(&self, context: &Context) -> Result<(), Infallible> {
         let _ = self.destroy_type_unique_resource_storage::<RenderPassRaw, _>(context);
         let _ = self.destroy_type_unique_resource_storage::<PipelineLayoutRaw, _>(context);
         let _ = self.destroy_type_unique_resource_storage::<DescriptorSetLayoutRaw, _>(context);

@@ -16,7 +16,7 @@ use graphics::{
 };
 
 use type_kit::{
-    Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuardError, ScopedEntry,
+    unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, DropGuardError,
 };
 
 use vulkan_low::{
@@ -36,7 +36,7 @@ use vulkan_low::{
                 },
                 render_pass::{RenderPass, Subpass},
                 swapchain::Swapchain,
-                ResourceIndex,
+                ResourceIndex, ResourceIndexListBuilder,
             },
             Partial,
         },
@@ -203,12 +203,12 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let (index, primary_command) = self.frames.primary_commands.next();
         let primary_command = context.begin_primary_command(primary_command)?;
         let swapchain_frame = {
-            let swapchain_index = self.renderer.borrow().frame_data.swapchain;
-            let swapchain_store = context.storage.borrow();
-            context.get_frame(
-                &*swapchain_store.entry(swapchain_index).unwrap(),
-                self.frames.image_sync[index],
-            )?
+            let index_list = ResourceIndexListBuilder::new()
+                .push(self.renderer.borrow().frame_data.swapchain)
+                .build();
+            context.opperate_ref(index_list, |unpack_list![swapchain, _rest]| {
+                context.get_frame(&***swapchain, self.frames.image_sync[index])
+            })??
         };
         let camera_descriptor = self.frames.camera_uniform.descriptors.get(index);
         self.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
@@ -258,19 +258,15 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let primary_command =
             self.record_primary_command(context, primary_command, commands, &swapchain_frame)?;
         let renderer = self.renderer.borrow();
-        context.present_frame(
-            &*context
-                .storage
-                .borrow()
-                .entry(renderer.frame_data.swapchain)
-                .unwrap(),
-            primary_command,
-            swapchain_frame,
-        )?;
+        let index_list = ResourceIndexListBuilder::new()
+            .push(renderer.frame_data.swapchain)
+            .build();
+        context.opperate_ref(index_list, |unpack_list![swapchain, _rest]| {
+            context.present_frame(&***swapchain, primary_command, swapchain_frame)
+        })??;
         Ok(())
     }
 }
-
 impl Create for GBufferPartial {
     type Config<'a> = ();
 
@@ -384,22 +380,32 @@ impl Create for DeferredRendererFrameData {
                 &framebuffer_builder,
             )?;
         let (framebuffer_index, num_frames) = {
-            let swapchain_store = context.storage.borrow();
-            let swapchain: ScopedEntry<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>> =
-                swapchain_store.entry(swapchain).unwrap();
-            (swapchain.get_framebuffer_index(0), swapchain.num_images)
+            let index_list = ResourceIndexListBuilder::new().push(swapchain).build();
+            context
+                .opperate_ref(index_list, |unpack_list![swapchain, _rest]| {
+                    let swapchain: &Swapchain<DeferedRenderPass<AttachmentsGBuffer>> =
+                        &***swapchain;
+                    Result::<_, Infallible>::Ok((
+                        swapchain.get_framebuffer_index(0),
+                        swapchain.num_images,
+                    ))
+                })?
+                .unwrap()
         };
         let descriptors = {
-            let storage = context.storage.borrow();
-            let framebuffer = storage.entry(framebuffer_index)?;
-            DescriptorPool::create(
-                DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
-                    .write_images::<InputAttachment, _>(
-                        &GBufferShadingPass::<AttachmentsGBuffer>::references()
-                            .get_input_attachments(&*framebuffer),
-                    ),
-                context,
-            )?
+            let index_list = ResourceIndexListBuilder::new()
+                .push(framebuffer_index)
+                .build();
+            context.opperate_ref(index_list, |unpack_list![framebuffer, _rest]| {
+                DescriptorPool::create(
+                    DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
+                        .write_images::<InputAttachment, _>(
+                            &GBufferShadingPass::<AttachmentsGBuffer>::references()
+                                .get_input_attachments(&*framebuffer),
+                        ),
+                    context,
+                )
+            })??
         };
         Ok(DeferredRendererFrameData {
             g_buffer: DropGuard::new(g_buffer),

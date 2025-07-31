@@ -6,11 +6,11 @@ pub use page::*;
 pub use r#static::*;
 pub use unpooled::*;
 
-use std::{collections::HashMap, convert::Infallible, ffi::c_void, fmt::Debug};
+use std::{cell::RefCell, collections::HashMap, convert::Infallible, ffi::c_void, fmt::Debug};
 
 use ash::vk;
 use type_kit::{
-    Create, Destroy, DestroyResult, DropGuardError, FromGuard, GenCollection, GenIndex,
+    unpack_list, Cons, Create, Destroy, DestroyResult, FromGuard, GenCollection, GenIndex,
     GenIndexRaw, GuardCollection, GuardIndex, TypeGuard, TypeGuardCollection,
 };
 
@@ -24,7 +24,7 @@ use crate::{
             range::ByteRange,
             resources::{
                 memory::{Memory, MemoryRaw},
-                ResourceIndex,
+                ResourceIndex, ResourceIndexListBuilder,
             },
         },
     },
@@ -303,18 +303,12 @@ impl Context {
         &self,
         allocation: AllocationEntry<M>,
     ) -> ResourceResult<*mut c_void> {
-        let AllocationEntry {
-            allocation,
-            allocator,
-        } = allocation;
-        let storage = self.allocators.borrow();
-        let Allocation { memory, range } = storage
-            .allocators
-            .get(allocator.index)?
-            .get_allocation(allocation)?;
-        let mut storage = self.storage.borrow_mut();
-        let mut memory = storage.entry_mut(memory)?;
-        let ptr = unsafe { memory.map(self)?.byte_offset(range.beg as isize) };
+        let Allocation { memory, range } = self.get_allocation(allocation)?;
+        let index_list = ResourceIndexListBuilder::new().push(memory).build();
+        let ptr = self.opperate_mut(index_list, |unpack_list![memory, _rest]| {
+            let ptr = unsafe { memory.map(self)?.byte_offset(range.beg as isize) };
+            Result::<_, ResourceError>::Ok(ptr)
+        })??;
         Ok(ptr)
     }
 
@@ -322,17 +316,13 @@ impl Context {
         &self,
         allocation: AllocationEntry<M>,
     ) -> ResourceResult<()> {
-        let AllocationEntry {
-            allocation,
-            allocator,
-        } = allocation;
-        let storage = self.allocators.borrow();
-        let Allocation { memory, .. } = storage
-            .allocators
-            .get(allocator.index)?
-            .get_allocation(allocation)?;
-        let mut storage = self.storage.borrow_mut();
-        storage.entry_mut(memory)?.unmap(self);
+        let Allocation { memory, .. } = self.get_allocation(allocation)?;
+        let index_list = ResourceIndexListBuilder::new().push(memory).build();
+        // TODO: Consider allowing for returning other types than Result for operate_* functions
+        let _ = self.opperate_mut(index_list, |unpack_list![memory, _rest]| {
+            memory.unmap(self);
+            Result::<_, Infallible>::Ok(())
+        })?;
         Ok(())
     }
 
@@ -341,25 +331,19 @@ impl Context {
         resource: R,
         allocation: AllocationEntry<M>,
     ) -> ResourceResult<()> {
-        let AllocationEntry {
-            allocation,
-            allocator,
-        } = allocation;
-        let storage = self.allocators.borrow();
-        let Allocation { memory, range } = storage
-            .allocators
-            .get(allocator.index)?
-            .get_allocation(allocation)?;
-        let storage = self.storage.borrow();
-        let memory = storage.entry(memory)?;
-        match resource.into() {
-            BindResource::Image(image) => unsafe {
-                self.bind_image_memory(image, **memory, range.beg as vk::DeviceSize)
-            },
-            BindResource::Buffer(buffer) => unsafe {
-                self.bind_buffer_memory(buffer, **memory, range.beg as vk::DeviceSize)
-            },
-        }?;
+        let Allocation { memory, range } = self.get_allocation(allocation)?;
+        let index_list = ResourceIndexListBuilder::new().push(memory).build();
+        self.opperate_ref(index_list, |unpack_list![memory, _rest]| {
+            match resource.into() {
+                // TODO: This 4x deref is quite ugly, consider refactoring
+                BindResource::Image(image) => unsafe {
+                    self.bind_image_memory(image, ****memory, range.beg as vk::DeviceSize)
+                },
+                BindResource::Buffer(buffer) => unsafe {
+                    self.bind_buffer_memory(buffer, ****memory, range.beg as vk::DeviceSize)
+                },
+            }
+        })??;
         Ok(())
     }
 }
@@ -479,47 +463,52 @@ impl Context {
 }
 
 pub struct AllocatorStorage {
-    allocators: GenCollection<AllocatorInstance>,
+    allocators: RefCell<GenCollection<AllocatorInstance>>,
 }
 
 impl AllocatorStorage {
     #[inline]
     pub fn new() -> Self {
         Self {
-            allocators: GenCollection::new(),
+            allocators: RefCell::new(GenCollection::new()),
         }
     }
 
     #[inline]
     pub fn create_allocator<'a, 'b, A: Allocator>(
-        &mut self,
+        &self,
         context: &'a Context,
         config: A::Config<'a>,
     ) -> ResourceResult<AllocatorIndex> {
         let allocator = A::create(config, context)?.into();
-        let index = self.allocators.push(allocator)?;
+        let index = self.allocators.borrow_mut().push(allocator)?;
         Ok(AllocatorIndex { index })
     }
 
     #[inline]
     pub fn destroy_allocator(
-        &mut self,
+        &self,
         context: &Context,
         index: AllocatorIndex,
     ) -> ResourceResult<()> {
-        let _ = self.allocators.pop(index.index)?.destroy(context);
+        let _ = self
+            .allocators
+            .borrow_mut()
+            .pop(index.index)?
+            .destroy(context);
         Ok(())
     }
 
     #[inline]
     pub fn allocate<M: MemoryProperties>(
-        &mut self,
+        &self,
         context: &Context,
         index: AllocatorIndex,
         req: AllocReqTyped<M>,
     ) -> ResourceResult<AllocationEntry<M>> {
         let allocation = self
             .allocators
+            .borrow_mut()
             .get_mut(index.index)?
             .allocate(context, req)?;
         let entry = AllocationEntry {
@@ -531,7 +520,7 @@ impl AllocatorStorage {
 
     #[inline]
     pub fn free<M: MemoryProperties>(
-        &mut self,
+        &self,
         context: &Context,
         index: AllocationEntry<M>,
     ) -> ResourceResult<()> {
@@ -540,17 +529,29 @@ impl AllocatorStorage {
             allocation,
         } = index;
         self.allocators
+            .borrow_mut()
             .get_mut(allocator.index)?
             .free(context, allocation)
     }
-}
 
-impl Destroy for AllocatorStorage {
-    type Context<'a> = &'a Context;
-    type DestroyError = DropGuardError<Infallible>;
+    #[inline]
+    pub fn get_allocation<M: MemoryProperties>(
+        &self,
+        index: AllocationEntry<M>,
+    ) -> ResourceResult<Allocation<M>> {
+        let AllocationEntry {
+            allocator,
+            allocation,
+        } = index;
+        self.allocators
+            .borrow()
+            .get(allocator.index)?
+            .get_allocation(allocation)
+    }
 
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.allocators.destroy(context)?;
+    #[inline]
+    pub fn destroy_storage(&self, context: &Context) -> ResourceResult<()> {
+        let _ = self.allocators.borrow_mut().destroy(context);
         Ok(())
     }
 }

@@ -7,7 +7,7 @@ use super::{
 };
 
 use super::surface::{PhysicalDeviceSurfaceProperties, Surface};
-use ash::{self, vk};
+use ash::{self, extensions::khr, vk};
 use colored::Colorize;
 use std::convert::Infallible;
 use std::ffi::c_char;
@@ -169,12 +169,10 @@ impl PhysicalDeviceProperties {
     ) -> Result<Vec<*const c_char>, DeviceNotSuitable> {
         let supported_extensions =
             unsafe { instance.enumerate_device_extension_properties(physical_device)? };
-        let required_extensions = raw::resources::swapchain::required_extensions();
-        let enabled_extension_names =
-            required_extensions
-                .iter()
-                .try_fold(Vec::new(), |mut supported, req| {
-                    supported_extensions
+        let enabled_extension_names = DeviceExtensions::required_extensions().iter().try_fold(
+            Vec::new(),
+            |mut supported, req| {
+                supported_extensions
                     .iter()
                     .any(|sup| unsafe { CStr::from_ptr(&sup.extension_name as *const _) } == *req)
                     .then(|| {
@@ -182,7 +180,8 @@ impl PhysicalDeviceProperties {
                         supported
                     })
                     .ok_or(DeviceNotSuitable::ExtensionNotSupported(req))
-                })?;
+            },
+        )?;
         Ok(enabled_extension_names)
     }
 
@@ -299,10 +298,30 @@ struct DeviceQueues {
     transfer: vk::Queue,
 }
 
+pub struct DeviceExtensions {
+    swapchain: khr::Swapchain,
+}
+
+impl DeviceExtensions {
+    #[inline]
+    pub const fn required_extensions() -> &'static [&'static CStr; 1] {
+        const REQUIRED_DEVICE_EXTENSIONS: &[&CStr; 1] = &[khr::Swapchain::name()];
+        REQUIRED_DEVICE_EXTENSIONS
+    }
+
+    #[inline]
+    fn load(instance: &Instance, device: &ash::Device) -> Self {
+        DeviceExtensions {
+            swapchain: khr::Swapchain::new(instance, device),
+        }
+    }
+}
+
 pub struct Device {
     physical_device: PhysicalDevice,
     device_queues: DeviceQueues,
     device: ash::Device,
+    extensions: DeviceExtensions,
 }
 
 impl Debug for Device {
@@ -379,11 +398,17 @@ fn pick_physical_device(instance: &ash::Instance, surface: &Surface) -> VkResult
 }
 
 impl Device {
+    #[inline]
     pub fn wait_idle(&self) -> Result<(), Box<dyn Error>> {
         unsafe {
             self.device.device_wait_idle()?;
         }
         Ok(())
+    }
+
+    #[inline]
+    pub fn get_extensions(&self) -> &DeviceExtensions {
+        &self.extensions
     }
 }
 
@@ -408,10 +433,12 @@ impl Create for Device {
             )?
         };
         let device_queues = queue_builder.get_device_queues(&device);
+        let extensions = DeviceExtensions::load(context, &device);
         Ok(Self {
             physical_device,
             device_queues,
             device,
+            extensions,
         })
     }
 }
@@ -420,6 +447,7 @@ impl Destroy for Device {
     type Context<'a> = &'a Instance;
     type DestroyError = Infallible;
 
+    #[inline]
     fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
         unsafe {
             self.device.destroy_device(None);

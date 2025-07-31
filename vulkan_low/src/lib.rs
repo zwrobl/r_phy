@@ -6,10 +6,10 @@ mod surface;
 use crate::device::{
     memory::{AllocReqTyped, MemoryProperties},
     raw::{
-        allocator::{Allocator, Unpooled},
+        allocator::{Allocation, Allocator, Unpooled},
         resources::{
-            RawIndex, TypeUniqueRawCollection, TypeUniqueResource, TypeUniqueResourceStorage,
-            TypeUniqueResourceStorageList,
+            RawIndex, ResourceIndexList, TypeUniqueRawCollection, TypeUniqueResource,
+            TypeUniqueResourceStorage, TypeUniqueResourceStorageList,
         },
     },
 };
@@ -30,14 +30,13 @@ use self::{
 use ash::extensions::{ext, khr};
 #[cfg(debug_assertions)]
 use debug::DebugUtils;
-use std::cell::RefCell;
 use std::convert::Infallible;
 use std::error::Error;
 use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
-    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize, Initialize,
-    Marker, TypeGuardCollection,
+    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize,
+    GenCollectionResult, IndexList, Initialize, Marker, TypeGuardCollection,
 };
 
 use ash::vk;
@@ -178,25 +177,14 @@ impl Destroy for Instance {
 
 pub struct Context {
     default_allocator: Option<AllocatorIndex>,
-    allocators: Box<RefCell<DropGuard<AllocatorStorage>>>,
-    pub storage: Box<RefCell<DropGuard<ResourceStorage>>>,
-    unique_storage: Box<RefCell<DropGuard<TypeUniqueResourceStorage>>>,
+    allocators: Box<AllocatorStorage>,
+    pub storage: Box<ResourceStorage>,
+    unique_storage: Box<TypeUniqueResourceStorage>,
     device: DropGuard<Device>,
     surface: DropGuard<Surface>,
     #[cfg(debug_assertions)]
     debug_utils: DropGuard<DebugUtils>,
     instance: DropGuard<Instance>,
-}
-
-pub(crate) trait DeviceExtension: Sized {
-    fn load(instance: &ash::Instance, device: &ash::Device) -> Self;
-}
-
-impl DeviceExtension for khr::Swapchain {
-    #[inline]
-    fn load(instance: &ash::Instance, device: &ash::Device) -> Self {
-        Self::new(instance, device)
-    }
 }
 
 impl Context {
@@ -206,11 +194,9 @@ impl Context {
         let debug_utils = DebugUtils::create((), &instance)?;
         let surface = Surface::create(window, &instance)?;
         let device = Device::create(&surface, &instance)?;
-        let allocators = Box::new(RefCell::new(DropGuard::new(AllocatorStorage::new())));
-        let storage = Box::new(RefCell::new(DropGuard::new(ResourceStorage::new())));
-        let unique_storage = Box::new(RefCell::new(DropGuard::new(
-            TypeUniqueResourceStorage::new(),
-        )));
+        let allocators = Box::new(AllocatorStorage::new());
+        let storage = Box::new(ResourceStorage::new());
+        let unique_storage = Box::new(TypeUniqueResourceStorage::new());
         let mut context = Self {
             default_allocator: None,
             allocators,
@@ -228,11 +214,6 @@ impl Context {
     }
 
     #[inline]
-    pub(crate) fn load<E: DeviceExtension>(&self) -> E {
-        E::load(&self.instance, &self.device)
-    }
-
-    #[inline]
     pub fn default_allocator(&self) -> AllocatorIndex {
         self.default_allocator.unwrap()
     }
@@ -241,9 +222,9 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
-        let _ = self.storage.borrow_mut().destroy(&self);
-        let _ = self.allocators.borrow_mut().destroy(&self);
-        let _ = self.unique_storage.borrow_mut().destroy(&self);
+        let _ = self.storage.destroy_storage(&self);
+        let _ = self.allocators.destroy_storage(&self);
+        let _ = self.unique_storage.destroy_storage(&self);
         let _ = self.device.destroy(&self.instance);
         let _ = self.surface.destroy(&self.instance);
         #[cfg(debug_assertions)]
@@ -278,7 +259,7 @@ impl Context {
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
         let resource = R::create(config, self)?;
-        self.storage.borrow_mut().push_resource(resource)
+        self.storage.push_resource(resource)
     }
 
     #[inline]
@@ -289,7 +270,7 @@ impl Context {
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
-        let mut resource = ResourceStorage::pop_resource(&mut *self.storage.borrow_mut(), index)?;
+        let mut resource = self.storage.pop_resource(index)?;
         // TODO: define trait bounds sot that Resource::DestoryError: Into<ResourceError>,
         // for now ingore error as all resources have Infailable DestoryError
         let _ = resource.destroy(self);
@@ -305,9 +286,7 @@ impl Context {
         for<'a> R: Destroy<Context<'a> = &'a Context>,
         ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
     {
-        let mut resource =
-            ResourceStorage::pop_raw_resource(&mut *self.storage.borrow_mut(), index)?;
-        // TODO: Same as for destroy_resource
+        let mut resource = self.storage.pop_raw_resource(index)?;
         let _ = resource.destroy(self);
         Ok(())
     }
@@ -320,7 +299,6 @@ impl Context {
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
         self.unique_storage
-            .borrow()
             .get_or_create_type_unique_resource(&self)
     }
 
@@ -329,14 +307,12 @@ impl Context {
         &'a self,
         config: A::Config<'a>,
     ) -> ResourceResult<AllocatorIndex> {
-        self.allocators
-            .borrow_mut()
-            .create_allocator::<A>(self, config)
+        self.allocators.create_allocator::<A>(self, config)
     }
 
     #[inline]
     pub fn destroy_allocator(&self, index: AllocatorIndex) -> ResourceResult<()> {
-        self.allocators.borrow_mut().destroy_allocator(self, index)
+        self.allocators.destroy_allocator(self, index)
     }
 
     #[inline]
@@ -345,11 +321,47 @@ impl Context {
         index: AllocatorIndex,
         req: AllocReqTyped<M>,
     ) -> ResourceResult<AllocationEntry<M>> {
-        self.allocators.borrow_mut().allocate(self, index, req)
+        self.allocators.allocate(self, index, req)
     }
 
     #[inline]
     pub fn free<M: MemoryProperties>(&self, index: AllocationEntry<M>) -> ResourceResult<()> {
-        self.allocators.borrow_mut().free(self, index)
+        self.allocators.free(self, index)
+    }
+
+    #[inline]
+    pub fn get_allocation<M: MemoryProperties>(
+        &self,
+        index: AllocationEntry<M>,
+    ) -> ResourceResult<Allocation<M>> {
+        self.allocators.get_allocation(index)
+    }
+
+    #[inline]
+    pub fn opperate_ref<
+        I: ResourceIndexList,
+        R,
+        E,
+        F: FnOnce(&<I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
+    >(
+        &self,
+        index: I,
+        f: F,
+    ) -> GenCollectionResult<Result<R, E>> {
+        self.storage.opperate_ref(index, f)
+    }
+
+    #[inline]
+    pub fn opperate_mut<
+        I: ResourceIndexList,
+        R,
+        E,
+        F: FnOnce(&mut <I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
+    >(
+        &self,
+        index: I,
+        f: F,
+    ) -> GenCollectionResult<Result<R, E>> {
+        self.storage.opperate_mut(index, f)
     }
 }
