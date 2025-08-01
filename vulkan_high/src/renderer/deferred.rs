@@ -125,24 +125,24 @@ pub struct DeferredRendererPartial {
 }
 
 pub struct GBuffer {
-    pub combined: DropGuard<Image<Image2D, DeviceLocal>>,
-    pub albedo: DropGuard<Image<Image2D, DeviceLocal>>,
-    pub normal: DropGuard<Image<Image2D, DeviceLocal>>,
-    pub position: DropGuard<Image<Image2D, DeviceLocal>>,
-    pub depth: DropGuard<Image<Image2D, DeviceLocal>>,
+    pub combined: ResourceIndex<Image<Image2D, DeviceLocal>>,
+    pub albedo: ResourceIndex<Image<Image2D, DeviceLocal>>,
+    pub normal: ResourceIndex<Image<Image2D, DeviceLocal>>,
+    pub position: ResourceIndex<Image<Image2D, DeviceLocal>>,
+    pub depth: ResourceIndex<Image<Image2D, DeviceLocal>>,
 }
 
 struct DeferredRendererPipelines<P: GraphicsPipelinePackList> {
     write_pass: P,
-    depth_prepass: DropGuard<GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>>,
-    shading_pass: DropGuard<GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>>,
+    depth_prepass: ResourceIndex<GraphicsPipeline<GBufferDepthPrepasPipeline<AttachmentsGBuffer>>>,
+    shading_pass: ResourceIndex<GraphicsPipeline<GBufferShadingPassPipeline<AttachmentsGBuffer>>>,
 }
 
 struct DeferredRendererFrameData {
     num_frames: usize,
     g_buffer: DropGuard<GBuffer>,
     swapchain: ResourceIndex<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>>,
-    descriptors: DescriptorPool<GBufferDescriptorSet>,
+    descriptors: ResourceIndex<DescriptorPool<GBufferDescriptorSet>>,
 }
 
 struct DeferredRendererResources {
@@ -200,18 +200,36 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         context: &Context,
         camera_matrices: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>> {
-        let (index, primary_command) = self.frames.primary_commands.next();
-        let primary_command = context.begin_primary_command(primary_command)?;
-        let swapchain_frame = {
+        let (primary_command, swapchain_frame, camera_descriptor) = {
             let index_list = ResourceIndexListBuilder::new()
                 .push(self.renderer.borrow().frame_data.swapchain)
+                .push(self.frames.camera_uniform.uniform_buffer)
+                .push(self.frames.camera_uniform.descriptors)
+                .push(self.frames.primary_commands)
                 .build();
-            context.opperate_ref(index_list, |unpack_list![swapchain, _rest]| {
-                context.get_frame(&***swapchain, self.frames.image_sync[index])
-            })??
+            context.opperate_mut(
+                index_list,
+                |unpack_list![
+                    primary_commands,
+                    descriptors,
+                    camera_uniform,
+                    swapchain,
+                    _rest
+                ]| {
+                    let (index, primary_command) = primary_commands.next();
+                    // Here begin_primary_command is required to be caled before swapchain get_frame,
+                    // as begin_command waits for the fence associated with the command execution
+                    // if the order is reversed, the acquire_next_image will get the semaphore which may have operation still pending
+                    // this violates the Vulkan spec
+                    // TODO: Try come up with a pattern that enforces correct order of operations
+                    let primary_command = context.begin_primary_command(primary_command)?;
+                    let frame = context.get_frame(&***swapchain, self.frames.image_sync[index])?;
+                    let descriptor = descriptors.get(index);
+                    camera_uniform[index] = *camera_matrices;
+                    Result::<_, Box<dyn Error>>::Ok((primary_command, frame, descriptor))
+                },
+            )??
         };
-        let camera_descriptor = self.frames.camera_uniform.descriptors.get(index);
-        self.frames.camera_uniform.uniform_buffer[index] = *camera_matrices;
         let commands = self.prepare_commands(
             context,
             &swapchain_frame,
@@ -238,13 +256,21 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         V: MeshPackList,
     >(
         &mut self,
+        context: &Context,
         shader: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
         material_packs: &M,
         mesh_packs: &V,
     ) {
-        self.append_draw_call(material_packs, mesh_packs, shader, drawable, transform);
+        self.append_draw_call(
+            context,
+            material_packs,
+            mesh_packs,
+            shader,
+            drawable,
+            transform,
+        );
     }
 
     fn end_frame(&mut self, context: &Context) -> Result<(), Box<dyn Error>> {
@@ -313,19 +339,36 @@ impl Destroy for GBufferPartial {
 impl GBuffer {
     pub fn get_framebuffer_builder(
         &self,
+        context: &Context,
         extent: vk::Extent2D,
         swapchain_image: vk::ImageView,
     ) -> FramebufferBuilder<DeferedRenderPass<AttachmentsGBuffer>> {
-        FramebufferBuilder::new(
-            extent,
-            AttachmentsBuilder::new()
-                .push(swapchain_image)
-                .push(self.depth.get_image_view().get_vk_image_view())
-                .push(self.position.get_image_view().get_vk_image_view())
-                .push(self.normal.get_image_view().get_vk_image_view())
-                .push(self.albedo.get_image_view().get_vk_image_view())
-                .push(self.combined.get_image_view().get_vk_image_view()),
-        )
+        let index_list = ResourceIndexListBuilder::new()
+            .push(self.combined)
+            .push(self.albedo)
+            .push(self.normal)
+            .push(self.position)
+            .push(self.depth)
+            .build();
+        context
+            .opperate_ref(
+                index_list,
+                |unpack_list![depth, position, normal, albedo, combined, _rest]| {
+                    let builder = FramebufferBuilder::new(
+                        extent,
+                        AttachmentsBuilder::new()
+                            .push(swapchain_image)
+                            .push(depth.get_image_view().get_vk_image_view())
+                            .push(position.get_image_view().get_vk_image_view())
+                            .push(normal.get_image_view().get_vk_image_view())
+                            .push(albedo.get_image_view().get_vk_image_view())
+                            .push(combined.get_image_view().get_vk_image_view()),
+                    );
+                    Result::<_, Infallible>::Ok(builder)
+                },
+            )
+            .unwrap()
+            .unwrap()
     }
 }
 
@@ -335,17 +378,17 @@ impl Create for GBuffer {
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let (partial, allocator) = config;
-        let combined = Image::create((partial.combined, allocator), context)?;
-        let albedo = Image::create((partial.albedo, allocator), context)?;
-        let normal = Image::create((partial.normal, allocator), context)?;
-        let position = Image::create((partial.position, allocator), context)?;
-        let depth = Image::create((partial.depth, allocator), context)?;
+        let combined = context.create_resource::<Image<_, _>, _>((partial.combined, allocator))?;
+        let albedo = context.create_resource::<Image<_, _>, _>((partial.albedo, allocator))?;
+        let normal = context.create_resource::<Image<_, _>, _>((partial.normal, allocator))?;
+        let position = context.create_resource::<Image<_, _>, _>((partial.position, allocator))?;
+        let depth = context.create_resource::<Image<_, _>, _>((partial.depth, allocator))?;
         Ok(GBuffer {
-            combined: DropGuard::new(combined),
-            albedo: DropGuard::new(albedo),
-            normal: DropGuard::new(normal),
-            position: DropGuard::new(position),
-            depth: DropGuard::new(depth),
+            combined,
+            albedo,
+            normal,
+            position,
+            depth,
         })
     }
 }
@@ -355,11 +398,11 @@ impl Destroy for GBuffer {
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.combined.destroy(context)?;
-        self.albedo.destroy(context)?;
-        self.normal.destroy(context)?;
-        self.position.destroy(context)?;
-        self.depth.destroy(context)?;
+        let _ = context.destroy_resource(self.combined);
+        let _ = context.destroy_resource(self.albedo);
+        let _ = context.destroy_resource(self.normal);
+        let _ = context.destroy_resource(self.position);
+        let _ = context.destroy_resource(self.depth);
         Ok(())
     }
 }
@@ -373,8 +416,9 @@ impl Create for DeferredRendererFrameData {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let g_buffer = GBuffer::create(config, context)?;
-        let framebuffer_builder =
-            |swapchain_image, extent| g_buffer.get_framebuffer_builder(extent, swapchain_image);
+        let framebuffer_builder = |swapchain_image, extent| {
+            g_buffer.get_framebuffer_builder(context, extent, swapchain_image)
+        };
         let swapchain = context
             .create_resource::<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>, _>(
                 &framebuffer_builder,
@@ -397,13 +441,15 @@ impl Create for DeferredRendererFrameData {
                 .push(framebuffer_index)
                 .build();
             context.opperate_ref(index_list, |unpack_list![framebuffer, _rest]| {
-                DescriptorPool::create(
+                context.create_resource::<DescriptorPool<_>, _>(
                     DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
-                        .write_images::<InputAttachment, _>(
+                        .write_images::<InputAttachment>(
                             &GBufferShadingPass::<AttachmentsGBuffer>::references()
-                                .get_input_attachments(&*framebuffer),
+                                .get_input_attachments(&*framebuffer)
+                                .iter()
+                                .map(|attachment| attachment.into())
+                                .collect::<Vec<_>>(),
                         ),
-                    context,
                 )
             })??
         };
@@ -421,7 +467,7 @@ impl Destroy for DeferredRendererFrameData {
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.descriptors.destroy(context)?;
+        let _ = context.destroy_resource(self.descriptors);
         self.g_buffer.destroy(context)?;
         Ok(())
     }
@@ -468,18 +514,16 @@ impl<P: GraphicsPipelinePackList> Create for DeferredRendererPipelines<P> {
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let depth_prepass = GraphicsPipeline::create(
-            &ShaderDirectory::new(Path::new("_resources/shaders/spv/deferred/depth_prepass")),
-            context,
-        )?;
-        let shading_pass = GraphicsPipeline::create(
-            &ShaderDirectory::new(Path::new("_resources/shaders/spv/deferred/gbuffer_combine")),
-            context,
-        )?;
+        let depth_prepass = context.create_resource(&ShaderDirectory::new(Path::new(
+            "_resources/shaders/spv/deferred/depth_prepass",
+        )) as &dyn ModuleLoader)?;
+        let shading_pass = context.create_resource(&ShaderDirectory::new(Path::new(
+            "_resources/shaders/spv/deferred/gbuffer_combine",
+        )) as &dyn ModuleLoader)?;
         Ok(DeferredRendererPipelines {
             write_pass: config,
-            depth_prepass: DropGuard::new(depth_prepass),
-            shading_pass: DropGuard::new(shading_pass),
+            depth_prepass,
+            shading_pass,
         })
     }
 }
@@ -490,8 +534,8 @@ impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererPipelines<P> {
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.write_pass.destroy(context);
-        let _ = self.depth_prepass.destroy(context);
-        let _ = self.shading_pass.destroy(context);
+        let _ = context.destroy_resource(self.depth_prepass);
+        let _ = context.destroy_resource(self.shading_pass);
         Ok(())
     }
 }

@@ -27,7 +27,7 @@ use crate::{
             Partial,
         },
     },
-    error::{AshResult, ResourceError, VkResult},
+    error::{AshResult, ResourceError},
     Context,
 };
 
@@ -144,7 +144,7 @@ impl StagingBuffer {
         context: &Context,
         dst: impl Into<&'b mut Buffer<DeviceLocal>>,
         dst_offset: vk::DeviceSize,
-    ) -> VkResult<()> {
+    ) -> AshResult<()> {
         let command = context.allocate_transient_command::<operation::Transfer>()?;
         let command = context.begin_primary_command(command)?;
         let command = context.record_command(command, |command| {

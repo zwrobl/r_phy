@@ -1,6 +1,6 @@
 use std::{
-    any::TypeId, cell::LazyCell, collections::HashMap, error::Error, hash::Hash,
-    marker::PhantomData,
+    any::TypeId, cell::LazyCell, collections::HashMap, convert::Infallible, error::Error,
+    hash::Hash, marker::PhantomData,
 };
 
 use graphics::{
@@ -9,8 +9,9 @@ use graphics::{
 };
 
 use math::types::Matrix4;
-use vulkan_low::device::{
-    raw::resources::{
+use type_kit::{unpack_list, Cons};
+use vulkan_low::{
+    device::raw::resources::{
         command::DrawIndexed,
         descriptor::{Descriptor, DescriptorBindingData},
         layout::{
@@ -21,8 +22,9 @@ use vulkan_low::device::{
             GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
         },
         swapchain::SwapchainFrame,
+        ResourceIndexListBuilder,
     },
-    Device,
+    Context,
 };
 
 use crate::{
@@ -125,6 +127,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
         V: MeshPackList,
     >(
         &mut self,
+        context: &Context,
         material_packs: &M,
         mesh_packs: &V,
         shader: ShaderHandle<S>,
@@ -146,8 +149,20 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                 .or_insert_with(|| {
                     let material_binding_data =
                         material_packs.try_get::<D::Material>().map(|pack| {
-                            let material_descriptor =
-                                pack.get_descriptor(descriptor_index.material_index as usize);
+                            let index_list = ResourceIndexListBuilder::new()
+                                .push(pack.descriptors)
+                                .build();
+                            let material_descriptor = context
+                                .opperate_ref(
+                                    index_list,
+                                    |unpack_list![material_descriptor, _rest]| {
+                                        let descriptor = material_descriptor
+                                            .get(descriptor_index.material_index as usize);
+                                        Result::<_, Infallible>::Ok(descriptor)
+                                    },
+                                )
+                                .unwrap()
+                                .unwrap();
                             self.get_descriptor_binding_data(material_descriptor, shader)
                         });
                     let camera_binding_data = Some(
@@ -185,7 +200,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
 
     pub(super) fn record_draw_calls(
         &mut self,
-        device: &Device,
+        context: &Context,
         state: DeferredRendererFrameState<P>,
         swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
     ) -> Result<Commands<P>, Box<dyn Error>> {
@@ -202,34 +217,42 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
             ..
         } = state;
         let renderer = self.renderer.borrow();
-        let depth_prepass = device.record_command(depth_prepass, |command| {
-            draw_graph
-                .pipeline_states
-                .iter()
-                .fold(command, |command, (_, pipeline_state)| {
-                    pipeline_state.descriptor_states.iter().fold(
+        let index_list = ResourceIndexListBuilder::new()
+            .push(self.pipelines.depth_prepass)
+            .build();
+        let depth_prepass =
+            context.opperate_mut(index_list, |unpack_list![pipeline, _rest]| {
+                let depth_prepass = context.record_command(depth_prepass, |command| {
+                    draw_graph.pipeline_states.iter().fold(
                         command,
-                        |command, (_, descriptor_state)| {
-                            descriptor_state.buffer_states.iter().fold(
+                        |command, (_, pipeline_state)| {
+                            pipeline_state.descriptor_states.iter().fold(
                                 command,
-                                |command, (_, buffer_state)| {
-                                    let command =
-                                        bind_mesh_pack(command, buffer_state.mesh_pack_binding);
-                                    buffer_state.model_states.iter().fold(
+                                |command, (_, descriptor_state)| {
+                                    descriptor_state.buffer_states.iter().fold(
                                         command,
-                                        |command, (_, model_state)| {
-                                            model_state.instances.iter().fold(
+                                        |command, (_, buffer_state)| {
+                                            let command = bind_mesh_pack(
+                                                context,
                                                 command,
-                                                |command, instance| {
-                                                    command
+                                                buffer_state.mesh_pack_binding,
+                                            );
+                                            buffer_state.model_states.iter().fold(
+                                                command,
+                                                |command, (_, model_state)| {
+                                                    model_state.instances.iter().fold(
+                                                        command,
+                                                        |command, instance| {
+                                                            command
                                                         .push_constants(
-                                                            self.pipelines
-                                                                .depth_prepass
+                                                            pipeline
                                                                 .get_push_range::<ModelMatrix>(
                                                                     &instance.into(),
                                                                 ),
                                                         )
                                                         .draw_indexed(model_state.mesh_bind_data)
+                                                        },
+                                                    )
                                                 },
                                             )
                                         },
@@ -238,57 +261,66 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                             )
                         },
                     )
-                })
-        });
-
+                });
+                Result::<_, Infallible>::Ok(depth_prepass)
+            })??;
+        let index_list = ResourceIndexListBuilder::new()
+            .push(self.frames.secondary_commands)
+            .build();
         for (_, pipeline_state) in draw_graph.pipeline_states {
-            let (_, command) = self.frames.secondary_commands.next();
-            let command = device.record_command(
-                device.begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
-                    command,
-                    renderer.render_pass,
-                    swapchain_frame.framebuffer,
-                )?,
-                |command| {
-                    let command = command.bind_pipeline(pipeline_state.pipeline_bind_data);
-                    pipeline_state.descriptor_states.iter().fold(
-                        command,
-                        |command, (_, descriptor_state)| {
-                            let command = descriptor_state
-                                .sets
-                                .iter()
-                                .fold(command, |c, set| c.bind_descriptor_set(set));
-                            descriptor_state.buffer_states.iter().fold(
-                                command,
-                                |command, (_, buffer_state)| {
-                                    let command =
-                                        bind_mesh_pack(command, buffer_state.mesh_pack_binding);
-                                    buffer_state.model_states.iter().fold(
-                                        command,
-                                        |command, (_, model_state)| {
-                                            model_state.instances.iter().fold(
-                                                command,
-                                                |command, instance| {
-                                                    command
+            let command = context.opperate_mut(
+                index_list,
+                |unpack_list![secondary_commands, _rest]| {
+                    let command = context
+                        .begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
+                            secondary_commands.next().1,
+                            renderer.render_pass,
+                            swapchain_frame.framebuffer,
+                        )?;
+                    let command = context.record_command(command, |command| {
+                        let command = command.bind_pipeline(pipeline_state.pipeline_bind_data);
+                        pipeline_state.descriptor_states.iter().fold(
+                            command,
+                            |command, (_, descriptor_state)| {
+                                let command = descriptor_state
+                                    .sets
+                                    .iter()
+                                    .fold(command, |c, set| c.bind_descriptor_set(set));
+                                descriptor_state.buffer_states.iter().fold(
+                                    command,
+                                    |command, (_, buffer_state)| {
+                                        let command = bind_mesh_pack(
+                                            context,
+                                            command,
+                                            buffer_state.mesh_pack_binding,
+                                        );
+                                        buffer_state.model_states.iter().fold(
+                                            command,
+                                            |command, (_, model_state)| {
+                                                model_state.instances.iter().fold(
+                                                    command,
+                                                    |command, instance| {
+                                                        command
                                                         .push_constants(pipeline_state
                                                             .push_constant_mapper
                                                             .map_push_constant::<ModelNormalMatrix>(
                                                                 &instance.into()
                                                             ).unwrap())
                                                         .draw_indexed(model_state.mesh_bind_data)
-                                                },
-                                            )
-                                        },
-                                    )
-                                },
-                            )
-                        },
-                    )
+                                                    },
+                                                )
+                                            },
+                                        )
+                                    },
+                                )
+                            },
+                        )
+                    });
+                    Result::<_, Box<dyn Error>>::Ok(command)
                 },
-            );
+            )??;
             write_pass.push(command);
         }
-
         Ok(Commands {
             depth_prepass,
             write_pass,

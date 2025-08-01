@@ -3,20 +3,25 @@ use std::{error::Error, marker::PhantomData};
 use ash::vk;
 
 use graphics::renderer::camera::CameraMatrices;
-use vulkan_low::device::{
-    raw::resources::swapchain::SwapchainFrame,
-    raw::resources::{
-        command::{
-            level::{Primary, Secondary},
-            operation::Graphics,
-            BeginCommand, FinishedCommand, Persistent,
+use type_kit::{unpack_list, Cons};
+use vulkan_low::{
+    device::{
+        raw::resources::{
+            command::{
+                level::{Primary, Secondary},
+                operation::Graphics,
+                BeginCommand, FinishedCommand, Persistent,
+            },
+            descriptor::Descriptor,
+            framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
+            layout::presets::CameraDescriptorSet,
+            pipeline::GraphicsPipelinePackList,
+            swapchain::SwapchainFrame,
+            ResourceIndexListBuilder,
         },
-        descriptor::Descriptor,
-        framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
-        layout::presets::CameraDescriptorSet,
-        pipeline::GraphicsPipelinePackList,
+        Device,
     },
-    Device,
+    Context,
 };
 
 use crate::{
@@ -40,62 +45,84 @@ pub(super) struct Commands<P: GraphicsPipelinePackList> {
 impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
     pub(super) fn prepare_commands(
         &mut self,
-        device: &Device,
+        context: &Context,
         swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         camera_matrices: &CameraMatrices,
     ) -> Result<Commands<P>, Box<dyn Error>> {
         let renderer = self.renderer.borrow();
-        let depth_prepass = {
-            let (_, command) = self.frames.secondary_commands.next();
-            device.record_command(
-                device.begin_secondary_command::<_, _, _, GBufferDepthPrepas<AttachmentsGBuffer>>(
-                    command,
-                    renderer.render_pass,
-                    swapchain_frame.framebuffer,
-                )?,
-                |command| {
-                    command
-                        .bind_pipeline(&*self.pipelines.depth_prepass)
-                        .bind_descriptor_set(
-                            &camera_descriptor
-                                .get_binding_data(&self.pipelines.depth_prepass)
-                                .unwrap(),
+        let index_list = ResourceIndexListBuilder::new()
+            .push(renderer.frame_data.descriptors)
+            .push(self.frames.secondary_commands)
+            .push(self.pipelines.depth_prepass)
+            .push(self.pipelines.shading_pass)
+            .build();
+        let (depth_prepass, shading_pass, skybox_pass) = context.opperate_mut(
+            index_list,
+            |unpack_list![
+                shading_pass_pipeline,
+                depth_prepass_pipeline,
+                secondary_commands,
+                descriptors,
+                _rest
+            ]| {
+                let depth_prepass = {
+                    let command = context
+                        .begin_secondary_command::<_, _, _, GBufferDepthPrepas<AttachmentsGBuffer>>(
+                            secondary_commands.next().1,
+                            renderer.render_pass,
+                            swapchain_frame.framebuffer,
+                        )?;
+                    context.record_command(command, |command| {
+                        command
+                            .bind_pipeline(&***depth_prepass_pipeline)
+                            .bind_descriptor_set(
+                                &camera_descriptor
+                                    .get_binding_data(&depth_prepass_pipeline)
+                                    .unwrap(),
+                            )
+                    })
+                };
+                let shading_pass = {
+                    let command = context
+                        .begin_secondary_command::<_, _, _, GBufferShadingPass<_>>(
+                            secondary_commands.next().1,
+                            renderer.render_pass,
+                            swapchain_frame.framebuffer,
+                        )?;
+                    let binding_data = descriptors
+                        .get(0)
+                        .get_binding_data(&shading_pass_pipeline)?;
+                    context.record_command(command, |command| {
+                        bind_mesh_pack(
+                            context,
+                            command
+                                .bind_pipeline(&***shading_pass_pipeline)
+                                .bind_descriptor_set(&binding_data),
+                            &*renderer.resources.mesh,
                         )
-                },
-            )
-        };
-        let (_, shading_pass) = self.frames.secondary_commands.next();
-        let shading_pass = device.begin_secondary_command::<_, _, _, GBufferShadingPass<_>>(
-            shading_pass,
-            renderer.render_pass,
-            swapchain_frame.framebuffer,
-        )?;
-        let shading_pass = device.record_command(shading_pass, |command| {
-            bind_mesh_pack(
-                command
-                    .bind_pipeline(&*self.pipelines.shading_pass)
-                    .bind_descriptor_set(
-                        &renderer
-                            .frame_data
-                            .descriptors
-                            .get(0)
-                            .get_binding_data(&self.pipelines.shading_pass)
-                            .unwrap(),
-                    ),
-                &*renderer.resources.mesh,
-            )
-            .draw_indexed(renderer.resources.mesh.get(0))
-        });
-        let (_, skybox_pass) = self.frames.secondary_commands.next();
-        let skybox_pass = device.begin_secondary_command::<_, _, _, GBufferSkyboxPass<_>>(
-            skybox_pass,
-            renderer.render_pass,
-            swapchain_frame.framebuffer,
-        )?;
-        let skybox_pass = device.record_command(skybox_pass, |command| {
-            draw_skybox(command, &renderer.resources.skybox, *camera_matrices)
-        });
+                        .draw_indexed(renderer.resources.mesh.get(0))
+                    })
+                };
+                let skybox_pass = {
+                    let command = context
+                        .begin_secondary_command::<_, _, _, GBufferSkyboxPass<_>>(
+                            secondary_commands.next().1,
+                            renderer.render_pass,
+                            swapchain_frame.framebuffer,
+                        )?;
+                    context.record_command(command, |command| {
+                        draw_skybox(
+                            context,
+                            &renderer.resources.skybox,
+                            command,
+                            *camera_matrices,
+                        )
+                    })
+                };
+                Result::<_, Box<dyn Error>>::Ok((depth_prepass, shading_pass, skybox_pass))
+            },
+        )??;
         let write_pass = Vec::with_capacity(P::LEN);
         Ok(Commands {
             write_pass,

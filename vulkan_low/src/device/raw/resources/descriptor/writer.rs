@@ -101,16 +101,15 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         self
     }
 
-    pub fn write_images<'a, B, I>(mut self, images: &'a [I]) -> Self
+    pub fn write_images<'a, B>(mut self, images: &'a [vk::DescriptorImageInfo]) -> Self
     where
         B: DescriptorBinding,
-        &'a I: Into<vk::DescriptorImageInfo>,
     {
         let writes = T::get_descriptor_writes::<B>();
         if writes.is_empty() {
             panic!(
                 "Invalid DescriptorBinding type {} for descriptor layout {}",
-                type_name::<I>(),
+                type_name::<B>(),
                 type_name::<T>()
             )
         }
@@ -125,8 +124,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
             "Not enough images for DescriptorPool write!"
         );
         let iamge_write_base_index = self.image_writes.len();
-        self.image_writes
-            .extend(images.iter().map(|image| image.into()));
+        self.image_writes.extend(images);
         self.writes.extend((0..self.num_sets).flat_map(|set_index| {
             let mut image_set_write_offset = 0;
             writes

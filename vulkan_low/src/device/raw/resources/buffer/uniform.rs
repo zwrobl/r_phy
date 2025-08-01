@@ -6,16 +6,20 @@ use std::{
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, Destroy, DestroyResult, FromGuard};
+use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
 
 use crate::{
     device::{
         memory::HostCoherent,
-        raw::resources::command::operation::Operation,
         raw::{
             allocator::AllocatorIndex,
-            resources::buffer::{
-                persistent::PersistentBuffer, Buffer, BufferInfoBuilder, BufferPartial, BufferRaw,
+            resources::{
+                buffer::{
+                    persistent::PersistentBuffer, Buffer, BufferInfoBuilder, BufferPartial,
+                    BufferRaw,
+                },
+                command::operation::Operation,
+                Resource,
             },
             Partial,
         },
@@ -194,6 +198,11 @@ impl<U: AnyBitPattern, O: Operation> Destroy for UniformBuffer<U, O> {
         let _ = self.buffer.destroy(context);
         Ok(())
     }
+}
+
+impl<U: AnyBitPattern, O: Operation> Resource for UniformBuffer<U, O> {
+    type RawType = BufferRaw;
+    type RawCollection = TypeGuardCollection<Self::RawType>;
 }
 
 impl<U: AnyBitPattern, O: Operation> FromGuard for UniformBuffer<U, O> {

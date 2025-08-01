@@ -6,8 +6,8 @@
 use std::{convert::Infallible, error::Error, marker::PhantomData};
 
 use type_kit::{
-    Create, CreateCollection, CreateResult, Destroy, DestroyCollection, DestroyResult, DropGuard,
-    DropGuardError,
+    unpack_list, Cons, Create, CreateCollection, CreateResult, Destroy, DestroyCollection,
+    DestroyResult, DropGuardError,
 };
 
 use graphics::{
@@ -27,10 +27,11 @@ use vulkan_low::{
                 ModuleLoader,
             },
             render_pass::RenderPassConfig,
+            ResourceIndex, ResourceIndexListBuilder,
         },
         Partial,
     },
-    error::{VkError, VkResult},
+    error::{ResourceError, VkError, VkResult},
     Context,
 };
 
@@ -81,6 +82,7 @@ pub trait FrameContext: Sized {
         V: MeshPackList,
     >(
         &mut self,
+        context: &Context,
         shader: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
@@ -124,8 +126,9 @@ impl CameraUniform {
 }
 
 pub struct CameraUniform {
-    pub descriptors: DropGuard<DescriptorPool<CameraDescriptorSet>>,
-    pub uniform_buffer: DropGuard<UniformBuffer<CameraMatrices, Graphics>>,
+    pub descriptors: ResourceIndex<DescriptorPool<CameraDescriptorSet>>,
+    pub uniform_buffer: ResourceIndex<UniformBuffer<CameraMatrices, Graphics>>,
+    pub len: usize,
 }
 
 pub struct FrameData<C: FrameContext> {
@@ -138,29 +141,36 @@ pub struct FrameData<C: FrameContext> {
 pub struct FramePool<F: FrameContext> {
     pub image_sync: Vec<SwapchainImageSync>,
     pub camera_uniform: CameraUniform,
-    pub primary_commands: PersistentCommandPool<Primary, Graphics>,
-    pub secondary_commands: PersistentCommandPool<Secondary, Graphics>,
+    pub primary_commands: ResourceIndex<PersistentCommandPool<Primary, Graphics>>,
+    pub secondary_commands: ResourceIndex<PersistentCommandPool<Secondary, Graphics>>,
     _phantom: PhantomData<F>,
 }
 
 impl Create for CameraUniform {
     type Config<'a> = (CameraUniformPartial, AllocatorIndex);
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let (CameraUniformPartial { buffer }, allocator) = config;
-        let uniform_buffer = UniformBuffer::create((buffer, allocator), context)?;
-        let descriptors = DescriptorPool::create(
-            DescriptorSetWriter::<CameraDescriptorSet>::new(uniform_buffer.len())
-                .write_buffer(&uniform_buffer),
-            context,
-        )?;
+        let uniform_buffer =
+            context.create_resource::<UniformBuffer<_, _>, _>((buffer, allocator))?;
+        let index_list = ResourceIndexListBuilder::new().push(uniform_buffer).build();
+        let (descriptors, len) =
+            context.opperate_ref(index_list, |unpack_list![uniform_buffer, _rest]| {
+                let len = uniform_buffer.len();
+                let descriptors = context.create_resource(
+                    DescriptorSetWriter::<CameraDescriptorSet>::new(len)
+                        .write_buffer(&uniform_buffer),
+                )?;
+                Result::<_, ResourceError>::Ok((descriptors, len))
+            })??;
         Ok(CameraUniform {
-            descriptors: DropGuard::new(descriptors),
-            uniform_buffer: DropGuard::new(uniform_buffer),
+            descriptors,
+            uniform_buffer,
+            len,
         })
     }
 }
@@ -169,9 +179,10 @@ impl Destroy for CameraUniform {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
+    #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let _ = self.descriptors.destroy(context);
-        let _ = self.uniform_buffer.destroy(context);
+        let _ = context.destroy_resource(self.descriptors);
+        let _ = context.destroy_resource(self.uniform_buffer);
         Ok(())
     }
 }
@@ -182,15 +193,13 @@ impl<F: FrameContext> Create for FramePool<F> {
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let camera_uniform = CameraUniform::create(config, context)?;
-        let frame_count = camera_uniform.descriptors.len();
-        let image_sync = (0..camera_uniform.descriptors.len())
+        let frame_count = camera_uniform.len;
+        let image_sync = (0..camera_uniform.len)
             .map(|_| ())
             .create(context)
             .collect::<Result<Vec<_>, _>>()?;
-        let primary_commands = PersistentCommandPool::create(frame_count, context)?;
-        let secondary_commands =
-            PersistentCommandPool::create(frame_count * F::REQUIRED_COMMANDS, context)?;
-
+        let primary_commands = context.create_resource(frame_count)?;
+        let secondary_commands = context.create_resource(frame_count * F::REQUIRED_COMMANDS)?;
         Ok(FramePool {
             image_sync,
             camera_uniform,
@@ -207,9 +216,9 @@ impl<F: FrameContext> Destroy for FramePool<F> {
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.image_sync.iter_mut().destroy(context)?;
-        self.primary_commands.destroy(context)?;
-        self.secondary_commands.destroy(context)?;
         self.camera_uniform.destroy(context)?;
+        let _ = context.destroy_resource(self.primary_commands);
+        let _ = context.destroy_resource(self.secondary_commands);
         Ok(())
     }
 }

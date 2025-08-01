@@ -190,7 +190,6 @@ impl ResourceStorage {
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
         let index_list = index.into_index_list();
-        // TODO: If f methods tries to acces the storage via external immutable Context reference, this will panic
         let borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(&borrowed);
         borrowed.put_back(&mut self.storage.borrow_mut())?;
@@ -209,7 +208,6 @@ impl ResourceStorage {
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
         let index_list = index.into_index_list();
-        // TODO: If f methods tries to acces the storage via external immutable Context reference, this will panic
         let mut borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(&mut borrowed);
         borrowed.put_back(&mut self.storage.borrow_mut())?;

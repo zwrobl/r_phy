@@ -4,22 +4,27 @@ mod pack;
 use ash::vk;
 pub use list::*;
 pub use pack::*;
+use type_kit::{unpack_list, Cons};
 
-use std::ops::Index;
+use std::{convert::Infallible, ops::Index};
 
 use strum::EnumCount;
 
 use graphics::model::{Mesh, Vertex};
 
-use vulkan_low::device::{
-    memory::DeviceLocal,
-    raw::{
-        range::ByteRange,
-        resources::{
-            buffer::{Buffer, BufferPartial},
-            command::{level::Level, operation::Operation, BufferBinding, RecordingCommand},
+use vulkan_low::{
+    device::{
+        memory::DeviceLocal,
+        raw::{
+            range::ByteRange,
+            resources::{
+                buffer::{Buffer, BufferPartial},
+                command::{level::Level, operation::Operation, BufferBinding, RecordingCommand},
+                ResourceIndex, ResourceIndexListBuilder,
+            },
         },
     },
+    Context,
 };
 
 #[derive(strum::EnumCount)]
@@ -86,47 +91,55 @@ pub struct MeshPackDataPartial<'a, V: Vertex> {
 
 #[derive(Debug)]
 pub struct MeshPackData {
-    buffer: Buffer<DeviceLocal>,
+    buffer: ResourceIndex<Buffer<DeviceLocal>>,
     buffer_ranges: BufferRanges,
     meshes: Vec<MeshByteRange>,
 }
 
-impl<'a> From<&'a mut MeshPackData> for &'a mut Buffer<DeviceLocal> {
-    fn from(value: &'a mut MeshPackData) -> Self {
-        (&mut value.buffer).into()
-    }
-}
+// impl<'a> From<&'a mut MeshPackData> for &'a mut Buffer<DeviceLocal> {
+//     fn from(value: &'a mut MeshPackData) -> Self {
+//         (&mut value.buffer).into()
+//     }
+// }
 
 #[derive(Debug, Clone, Copy)]
 pub struct MeshPackBinding {
-    pub buffer: vk::Buffer,
+    pub buffer: ResourceIndex<Buffer<DeviceLocal>>,
     pub buffer_ranges: BufferRanges,
 }
 
 impl<'a> From<&'a MeshPackData> for MeshPackBinding {
     fn from(value: &'a MeshPackData) -> Self {
         Self {
-            buffer: value.buffer.get_vk_buffer(),
+            buffer: value.buffer,
             buffer_ranges: value.buffer_ranges,
         }
     }
 }
 
 pub fn bind_mesh_pack<'a, T, L: Level, O: Operation>(
+    context: &Context,
     command: RecordingCommand<'a, T, L, O>,
     pack: impl Into<MeshPackBinding>,
 ) -> RecordingCommand<'a, T, L, O> {
     let pack = pack.into();
-    command
-        .bind_index_buffer(
-            BufferBinding {
-                buffer: pack.buffer,
-                range: pack.buffer_ranges[BufferType::Index],
-            },
-            vk::IndexType::UINT32,
-        )
-        .bind_vertex_buffer(BufferBinding {
-            buffer: pack.buffer,
-            range: pack.buffer_ranges[BufferType::Vertex],
+    let index_list = ResourceIndexListBuilder::new().push(pack.buffer).build();
+    context
+        .opperate_ref(index_list, |unpack_list![buffer, _allocator]| {
+            let command = command
+                .bind_index_buffer(
+                    BufferBinding {
+                        buffer: buffer.get_vk_buffer(),
+                        range: pack.buffer_ranges[BufferType::Index],
+                    },
+                    vk::IndexType::UINT32,
+                )
+                .bind_vertex_buffer(BufferBinding {
+                    buffer: buffer.get_vk_buffer(),
+                    range: pack.buffer_ranges[BufferType::Vertex],
+                });
+            Result::<_, Infallible>::Ok(command)
         })
+        .unwrap()
+        .unwrap()
 }

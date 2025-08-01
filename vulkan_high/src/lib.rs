@@ -394,6 +394,7 @@ impl<
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
         self.resources.renderer_context.draw(
+            &self.context.borrow(),
             shader,
             drawable,
             transform,

@@ -1,6 +1,7 @@
 use std::{any::TypeId, convert::Infallible, error::Error, marker::PhantomData};
 
-use type_kit::{Create, Destroy, DestroyResult, DropGuard};
+use ash::vk;
+use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, FromGuard};
 
 use vulkan_low::{
     device::raw::{
@@ -11,6 +12,7 @@ use vulkan_low::{
             descriptor::{Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter},
             image::{Image2D, Image2DReader, ImageReader, Texture, TexturePartial},
             layout::presets::{FragmentStage, PodUniform},
+            ResourceIndex, ResourceIndexListBuilder,
         },
         Partial,
     },
@@ -42,9 +44,9 @@ impl<'b, M: Material> Destroy for MaterialUniformPartial<'b, M> {
 }
 
 pub struct MaterialPackData<M: Material> {
-    textures: Option<Vec<Texture<Image2D>>>,
-    uniforms: Option<DropGuard<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>>,
-    descriptors: DropGuard<DescriptorPool<M::DescriptorLayout>>,
+    textures: Option<Vec<ResourceIndex<Texture<Image2D>>>>,
+    uniforms: Option<ResourceIndex<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>>,
+    descriptors: ResourceIndex<DescriptorPool<M::DescriptorLayout>>,
 }
 
 pub struct MaterialPackPartial<'a, M: Material, R: ImageReader<Type = Image2D>> {
@@ -89,18 +91,20 @@ impl<'a, M: Material> From<&'a mut MaterialPack<M>> for &'a mut MaterialPackData
     }
 }
 
-pub struct MaterialPackRef<'a, M: Material> {
-    descriptors: DescriptorPoolRef<'a, M::DescriptorLayout>,
+pub struct MaterialPackRef<M: Material> {
+    pub descriptors: ResourceIndex<DescriptorPool<M::DescriptorLayout>>,
     _phantom: PhantomData<M>,
 }
 
-impl<'a, M: Material, T: Material> TryFrom<&'a MaterialPack<M>> for MaterialPackRef<'a, T> {
+impl<'a, M: Material, T: Material> TryFrom<&'a MaterialPack<M>> for MaterialPackRef<T> {
     type Error = &'static str;
 
     fn try_from(value: &'a MaterialPack<M>) -> Result<Self, Self::Error> {
         if TypeId::of::<M>() == TypeId::of::<T>() {
             Ok(Self {
-                descriptors: (&*value.data.descriptors).try_into().unwrap(),
+                descriptors: unsafe {
+                    ResourceIndex::from_inner(value.data.descriptors.into_inner())
+                },
                 _phantom: PhantomData,
             })
         } else {
@@ -109,11 +113,11 @@ impl<'a, M: Material, T: Material> TryFrom<&'a MaterialPack<M>> for MaterialPack
     }
 }
 
-impl<'a, M: Material> MaterialPackRef<'a, M> {
-    pub fn get_descriptor(&self, index: usize) -> Descriptor<M::DescriptorLayout> {
-        self.descriptors.get(index)
-    }
-}
+// impl<'a, M: Material> MaterialPackRef<'a, M> {
+//     pub fn get_descriptor(&self, index: usize) -> Descriptor<M::DescriptorLayout> {
+//         self.descriptors.get(index)
+//     }
+// }
 
 fn prepare_material_pack_textures<'a, M: Material>(
     context: &Context,
@@ -138,14 +142,15 @@ fn prepare_material_pack_textures<'a, M: Material>(
     }
 }
 
+#[inline]
 fn allocate_material_pack_textures_memory<'a>(
     context: &Context,
     textures: Vec<TexturePartial<Image2D, Image2DReader>>,
     allocator: AllocatorIndex,
-) -> ResourceResult<Vec<Texture<Image2D>>> {
+) -> ResourceResult<Vec<ResourceIndex<Texture<Image2D>>>> {
     textures
         .into_iter()
-        .map(|texture| Texture::<Image2D>::create((texture, allocator), context))
+        .map(|texture| context.create_resource((texture, allocator)))
         .collect()
 }
 
@@ -172,12 +177,21 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
     context: &Context,
     partial: MaterialUniformPartial<'a, M>,
     allocator: AllocatorIndex,
-) -> Result<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>, Box<dyn Error>> {
+) -> Result<
+    ResourceIndex<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>,
+    Box<dyn Error>,
+> {
     let MaterialUniformPartial { uniform, data } = partial;
-    let mut uniform_buffer = UniformBuffer::create((uniform, allocator), context)?;
-    for (index, uniform) in data.into_iter().enumerate() {
-        *uniform_buffer[index].as_inner_mut() = *uniform;
-    }
+    let uniform_buffer = context.create_resource::<UniformBuffer<_, _>, _>((uniform, allocator))?;
+    let index_list = ResourceIndexListBuilder::new().push(uniform_buffer).build();
+    context
+        .opperate_mut(index_list, |unpack_list![uniform_buffer, _rest]| {
+            for (index, uniform) in data.into_iter().enumerate() {
+                *uniform_buffer[index].as_inner_mut() = *uniform;
+            }
+            Result::<_, Infallible>::Ok(())
+        })
+        .unwrap();
     Ok(uniform_buffer)
 }
 
@@ -212,28 +226,47 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
         None
     };
     let uniforms = if let Some(uniforms) = uniforms {
-        Some(DropGuard::new(allocate_material_pack_uniforms_memory(
+        Some(allocate_material_pack_uniforms_memory(
             context, uniforms, allocator,
-        )?))
+        )?)
     } else {
         None
     };
     let writer = DescriptorSetWriter::<M::DescriptorLayout>::new(num_materials);
     let writer = if let Some(textures) = &textures {
-        writer.write_images::<TextureSamplers<M>, _>(textures)
+        let image_infos = textures
+            .iter()
+            .map(|&texture| {
+                let index_list = ResourceIndexListBuilder::new().push(texture).build();
+                context
+                    .opperate_ref(index_list, |unpack_list![texture, _allocator]| {
+                        let image_info: vk::DescriptorImageInfo = (&***texture).into();
+                        Result::<_, Infallible>::Ok(image_info)
+                    })
+                    .unwrap()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        writer.write_images::<TextureSamplers<M>>(&image_infos)
     } else {
         writer
     };
     let writer = if let Some(uniforms) = &uniforms {
-        writer.write_buffer(uniforms)
+        let index_list = ResourceIndexListBuilder::new().push(*uniforms).build();
+        context
+            .opperate_ref(index_list, |unpack_list![uniforms, _allocator]| {
+                Result::<_, Infallible>::Ok(writer.write_buffer(uniforms))
+            })
+            .unwrap()
+            .unwrap()
     } else {
         writer
     };
-    let descriptors = DescriptorPool::create(writer, context)?;
+    let descriptors = context.create_resource(writer)?;
     let data = MaterialPackData {
         textures,
         uniforms,
-        descriptors: DropGuard::new(descriptors),
+        descriptors,
     };
     Ok(MaterialPack { data })
 }
@@ -256,12 +289,12 @@ impl<M: Material> Destroy for MaterialPack<M> {
         if let Some(textures) = self.data.textures.as_mut() {
             let _ = textures
                 .iter_mut()
-                .try_for_each(|texture| texture.destroy(context));
+                .try_for_each(|texture| context.destroy_resource(*texture));
         }
         if let Some(uniforms) = self.data.uniforms.as_mut() {
-            let _ = uniforms.destroy(context);
+            let _ = context.destroy_resource(*uniforms);
         }
-        let _ = self.data.descriptors.destroy(context);
+        let _ = context.destroy_resource(self.data.descriptors);
         Ok(())
     }
 }

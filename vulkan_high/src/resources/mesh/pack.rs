@@ -1,7 +1,7 @@
 use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
 use ash::vk;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult};
+use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult};
 
 use graphics::model::{Mesh, Vertex};
 use vulkan_low::{
@@ -19,11 +19,12 @@ use vulkan_low::{
                     operation::{self, Operation},
                     DrawIndexed,
                 },
+                ResourceIndex, ResourceIndexListBuilder,
             },
             Partial,
         },
     },
-    error::{ResourceError, VkError, VkResult},
+    error::{ResourceError, ResourceResult, VkError, VkResult},
     Context,
 };
 
@@ -95,7 +96,7 @@ pub struct MeshPack<V: Vertex> {
 
 impl<V: Vertex> Create for MeshPack<V> {
     type Config<'a> = (MeshPackPartial<'a, V>, AllocatorIndex);
-    type CreateError = VkError;
+    type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let (
@@ -109,7 +110,7 @@ impl<V: Vertex> Create for MeshPack<V> {
             },
             allocator,
         ) = config;
-        let mut buffer = Buffer::create((buffer, allocator), context)?;
+        let buffer = context.create_resource((buffer, allocator))?;
         let num_indices = meshes.iter().fold(0, |acc, mesh| acc + mesh.indices.len());
         let num_vertices = meshes.iter().fold(0, |acc, mesh| acc + mesh.vertices.len());
         let mut builder = StagingBufferBuilder::new();
@@ -133,7 +134,10 @@ impl<V: Vertex> Create for MeshPack<V> {
                 .iter()
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
-            staging_buffer.transfer_buffer_data(&context, &mut buffer, 0)?;
+            let index_list = ResourceIndexListBuilder::new().push(buffer).build();
+            context.opperate_mut(index_list, |unpack_list![buffer, _allocator]| {
+                staging_buffer.transfer_buffer_data(&context, &mut ***buffer, 0)
+            })??;
             let _ = staging_buffer.destroy(&context);
             (vertex_ranges, index_ranges)
         };
@@ -162,7 +166,7 @@ impl<V: Vertex> Destroy for MeshPack<V> {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.data.buffer.destroy(context)?;
+        let _ = context.destroy_resource(self.data.buffer);
         Ok(())
     }
 }
@@ -199,7 +203,7 @@ impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
 impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
     fn from(value: MeshPackRef<'a, V>) -> Self {
         MeshPackBinding {
-            buffer: value.data.buffer.get_vk_buffer(),
+            buffer: value.data.buffer,
             buffer_ranges: value.data.buffer_ranges,
         }
     }
@@ -262,7 +266,7 @@ pub fn load_mesh_pack<V: Vertex>(
     context: &Context,
     meshes: &[Mesh<V>],
     allocator: AllocatorIndex,
-) -> VkResult<MeshPack<V>> {
+) -> ResourceResult<MeshPack<V>> {
     let partial = MeshPackPartial::create(meshes, context)?;
     MeshPack::create((partial, allocator), context)
 }
