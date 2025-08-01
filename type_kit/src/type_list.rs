@@ -44,7 +44,7 @@ mod tests {
     }
 }
 
-pub trait Marker {}
+pub trait Marker: 'static {}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Here {}
@@ -81,7 +81,7 @@ impl<T> Clone for There<T> {
 
 impl<T> Copy for There<T> {}
 
-impl<T> Marker for There<T> {}
+impl<T: 'static> Marker for There<T> {}
 
 pub trait Contains<T, M: Marker> {
     fn get(&self) -> &T;
@@ -334,7 +334,7 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
 
 #[cfg(test)]
 mod test_macro {
-    use crate::{list_type, list_value, unpack_list, Cons, Nil};
+    use crate::{list_type, list_value, unpack_any, Cons, Nil};
 
     trait AssertEqualTypes<A, B> {}
 
@@ -360,7 +360,7 @@ mod test_macro {
     #[test]
     fn test_unpack_list_macro() {
         let list = list_value![8u8, 16u16, 32u32];
-        let unpack_list![value_u8, value_u16, value_u32] = list;
+        let unpack_any![value_u8, value_u16, value_u32] = list;
 
         assert_eq!(value_u8, 8u8);
         assert_eq!(value_u16, 16u16);
@@ -391,12 +391,28 @@ macro_rules! list_value {
 #[macro_export]
 macro_rules! unpack_list {
     [$tail:ident] => {
-        $tail
+        Cons {
+            head: $tail,
+            ..
+        }
     };
     [$head:ident $(, $tail:ident)*] => {
         Cons {
             head: $head,
             tail: unpack_list![$($tail),*]
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! unpack_any {
+    [$tail:ident] => {
+        $tail
+    };
+    [$head:ident $(, $tail:ident)*] => {
+        Cons {
+            head: $head,
+            tail: unpack_any![$($tail),*]
         }
     };
 }

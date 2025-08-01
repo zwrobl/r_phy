@@ -42,7 +42,7 @@ use vulkan_low::{
         },
     },
     error::{ResourceError, ShaderResult, VkError},
-    Context,
+    index_list, Context,
 };
 
 use math::types::{Matrix4, Vector3};
@@ -201,21 +201,14 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         camera_matrices: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>> {
         let (primary_command, swapchain_frame, camera_descriptor) = {
-            let index_list = ResourceIndexListBuilder::new()
-                .push(self.renderer.borrow().frame_data.swapchain)
-                .push(self.frames.camera_uniform.uniform_buffer)
-                .push(self.frames.camera_uniform.descriptors)
-                .push(self.frames.primary_commands)
-                .build();
             context.operate_mut(
-                index_list,
-                |unpack_list![
-                    primary_commands,
-                    descriptors,
-                    camera_uniform,
-                    swapchain,
-                    _rest
-                ]| {
+                index_list![
+                    self.renderer.borrow().frame_data.swapchain,
+                    self.frames.camera_uniform.uniform_buffer,
+                    self.frames.camera_uniform.descriptors,
+                    self.frames.primary_commands
+                ],
+                |unpack_list![primary_commands, descriptors, camera_uniform, swapchain]| {
                     let (index, primary_command) = primary_commands.next();
                     // Here begin_primary_command is required to be caled before swapchain get_frame,
                     // as begin_command waits for the fence associated with the command execution
@@ -223,7 +216,7 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
                     // this violates the Vulkan spec
                     // TODO: Try come up with a pattern that enforces correct order of operations
                     let primary_command = context.begin_primary_command(primary_command)?;
-                    let frame = context.get_frame(&***swapchain, self.frames.image_sync[index])?;
+                    let frame = context.get_frame(swapchain, self.frames.image_sync[index])?;
                     let descriptor = descriptors.get(index);
                     camera_uniform[index] = *camera_matrices;
                     Result::<_, Box<dyn Error>>::Ok((primary_command, frame, descriptor))
@@ -284,12 +277,12 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let primary_command =
             self.record_primary_command(context, primary_command, commands, &swapchain_frame)?;
         let renderer = self.renderer.borrow();
-        let index_list = ResourceIndexListBuilder::new()
-            .push(renderer.frame_data.swapchain)
-            .build();
-        context.operate_ref(index_list, |unpack_list![swapchain, _rest]| {
-            context.present_frame(&***swapchain, primary_command, swapchain_frame)
-        })??;
+        context.operate_ref(
+            index_list![renderer.frame_data.swapchain],
+            |unpack_list![swapchain]| {
+                context.present_frame(swapchain, primary_command, swapchain_frame)
+            },
+        )??;
         Ok(())
     }
 }
@@ -343,17 +336,16 @@ impl GBuffer {
         extent: vk::Extent2D,
         swapchain_image: vk::ImageView,
     ) -> FramebufferBuilder<DeferedRenderPass<AttachmentsGBuffer>> {
-        let index_list = ResourceIndexListBuilder::new()
-            .push(self.combined)
-            .push(self.albedo)
-            .push(self.normal)
-            .push(self.position)
-            .push(self.depth)
-            .build();
         context
             .operate_ref(
-                index_list,
-                |unpack_list![depth, position, normal, albedo, combined, _rest]| {
+                index_list![
+                    self.combined,
+                    self.albedo,
+                    self.normal,
+                    self.position,
+                    self.depth
+                ],
+                |unpack_list![depth, position, normal, albedo, combined]| {
                     let builder = FramebufferBuilder::new(
                         extent,
                         AttachmentsBuilder::new()
@@ -424,11 +416,9 @@ impl Create for DeferredRendererFrameData {
                 &framebuffer_builder,
             )?;
         let (framebuffer_index, num_frames) = {
-            let index_list = ResourceIndexListBuilder::new().push(swapchain).build();
             context
-                .operate_ref(index_list, |unpack_list![swapchain, _rest]| {
-                    let swapchain: &Swapchain<DeferedRenderPass<AttachmentsGBuffer>> =
-                        &***swapchain;
+                .operate_ref(index_list![swapchain], |unpack_list![swapchain]| {
+                    let swapchain: &Swapchain<DeferedRenderPass<AttachmentsGBuffer>> = swapchain;
                     Result::<_, Infallible>::Ok((
                         swapchain.get_framebuffer_index(0),
                         swapchain.num_images,
@@ -437,21 +427,21 @@ impl Create for DeferredRendererFrameData {
                 .unwrap()
         };
         let descriptors = {
-            let index_list = ResourceIndexListBuilder::new()
-                .push(framebuffer_index)
-                .build();
-            context.operate_ref(index_list, |unpack_list![framebuffer, _rest]| {
-                context.create_resource::<DescriptorPool<_>, _>(
-                    DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
-                        .write_images::<InputAttachment>(
-                            &GBufferShadingPass::<AttachmentsGBuffer>::references()
-                                .get_input_attachments(&*framebuffer)
-                                .iter()
-                                .map(|attachment| attachment.into())
-                                .collect::<Vec<_>>(),
-                        ),
-                )
-            })??
+            context.operate_ref(
+                index_list![framebuffer_index],
+                |unpack_list![framebuffer]| {
+                    context.create_resource::<DescriptorPool<_>, _>(
+                        DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
+                            .write_images::<InputAttachment>(
+                                &GBufferShadingPass::<AttachmentsGBuffer>::references()
+                                    .get_input_attachments(&*framebuffer)
+                                    .iter()
+                                    .map(|attachment| attachment.into())
+                                    .collect::<Vec<_>>(),
+                            ),
+                    )
+                },
+            )??
         };
         Ok(DeferredRendererFrameData {
             g_buffer: DropGuard::new(g_buffer),

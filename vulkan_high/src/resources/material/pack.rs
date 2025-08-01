@@ -17,7 +17,7 @@ use vulkan_low::{
         Partial,
     },
     error::{ResourceResult, VkResult},
-    Context,
+    index_list, Context,
 };
 
 use super::{Material, TextureSamplers};
@@ -183,14 +183,16 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
 > {
     let MaterialUniformPartial { uniform, data } = partial;
     let uniform_buffer = context.create_resource::<UniformBuffer<_, _>, _>((uniform, allocator))?;
-    let index_list = ResourceIndexListBuilder::new().push(uniform_buffer).build();
     context
-        .operate_mut(index_list, |unpack_list![uniform_buffer, _rest]| {
-            for (index, uniform) in data.into_iter().enumerate() {
-                *uniform_buffer[index].as_inner_mut() = *uniform;
-            }
-            Result::<_, Infallible>::Ok(())
-        })?
+        .operate_mut(
+            index_list![uniform_buffer],
+            |unpack_list![uniform_buffer]| {
+                for (index, uniform) in data.into_iter().enumerate() {
+                    *uniform_buffer[index].as_inner_mut() = *uniform;
+                }
+                Result::<_, Infallible>::Ok(())
+            },
+        )?
         .unwrap();
     Ok(uniform_buffer)
 }
@@ -237,10 +239,9 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
         let image_infos = textures
             .iter()
             .map(|&texture| {
-                let index_list = ResourceIndexListBuilder::new().push(texture).build();
                 context
-                    .operate_ref(index_list, |unpack_list![texture, _allocator]| {
-                        let image_info: vk::DescriptorImageInfo = (&***texture).into();
+                    .operate_ref(index_list![texture], |unpack_list![texture]| {
+                        let image_info: vk::DescriptorImageInfo = texture.into();
                         Result::<_, Infallible>::Ok(image_info)
                     })
                     .unwrap()
@@ -252,9 +253,8 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
         writer
     };
     let writer = if let Some(uniforms) = &uniforms {
-        let index_list = ResourceIndexListBuilder::new().push(*uniforms).build();
         context
-            .operate_ref(index_list, |unpack_list![uniforms, _allocator]| {
+            .operate_ref(index_list![*uniforms], |unpack_list![uniforms]| {
                 Result::<_, Infallible>::Ok(writer.write_buffer(uniforms))
             })
             .unwrap()

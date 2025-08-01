@@ -20,8 +20,8 @@ use layout::{DescriptorSetLayoutRaw, PipelineLayoutRaw};
 use pipeline::GraphicsPipelineRaw;
 use swapchain::SwapchainRaw;
 use type_kit::{
-    list_type, BorrowCollection, BorrowList, CollectionDestroyError, Cons, Contains, Create,
-    Destroy, DestroyResult, FromGuard, GenCell, GenCollectionResult, GenIndex, GenIndexRaw,
+    list_type, BorrowCollection, BorrowList, BorrowedGuard, CollectionDestroyError, Cons, Contains,
+    Create, Destroy, DestroyResult, FromGuard, GenCell, GenCollectionResult, GenIndex, GenIndexRaw,
     GuardCollectionT, GuardIndex, IndexList, Marked, Marker, Nil, TypeGuard, TypeGuardCollection,
     TypeMap, TypedIndex,
 };
@@ -110,6 +110,16 @@ pub type ResourceStorageList = list_type![
     Nil
 ];
 
+pub type BorrowRef<'a, T> =
+    <<<T as ResourceIndexList>::List as IndexList<ResourceStorageList>>::Borrowed as BorrowList<
+        ResourceStorageList,
+    >>::InnerRef<'a>;
+
+pub type BorrowMut<'a, T> =
+    <<<T as ResourceIndexList>::List as IndexList<ResourceStorageList>>::Borrowed as BorrowList<
+        ResourceStorageList,
+    >>::InnerMut<'a>;
+
 #[derive(Debug)]
 pub struct ResourceStorage {
     storage: RefCell<ResourceStorageList>,
@@ -179,37 +189,27 @@ impl ResourceStorage {
     }
 
     #[inline]
-    pub fn operate_ref<
-        I: ResourceIndexList,
-        R,
-        E,
-        F: FnOnce(&<I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
-    >(
+    pub fn operate_ref<I: ResourceIndexList, R, E, F: FnOnce(BorrowRef<'_, I>) -> Result<R, E>>(
         &self,
         index: I,
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
         let index_list = index.into_index_list();
         let borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
-        let result = f(&borrowed);
+        let result = f(borrowed.inner_ref());
         borrowed.put_back(&mut self.storage.borrow_mut())?;
         Ok(result)
     }
 
     #[inline]
-    pub fn operate_mut<
-        I: ResourceIndexList,
-        R,
-        E,
-        F: FnOnce(&mut <I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
-    >(
+    pub fn operate_mut<I: ResourceIndexList, R, E, F: FnOnce(BorrowMut<'_, I>) -> Result<R, E>>(
         &self,
         index: I,
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
         let index_list = index.into_index_list();
         let mut borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
-        let result = f(&mut borrowed);
+        let result = f(borrowed.inner_mut());
         borrowed.put_back(&mut self.storage.borrow_mut())?;
         Ok(result)
     }
@@ -296,14 +296,25 @@ impl<I: ResourceIndexList> ResourceIndexListBuilder<I> {
     }
 }
 
+#[macro_export]
+macro_rules! index_list {
+    [$($indices:expr),*] => {
+        ResourceIndexListBuilder::new()
+        $(.push($indices))*
+        .build()
+    };
+}
+
 pub trait ResourceIndexList {
     type List: IndexList<ResourceStorageList>;
+    type BorrowList: BorrowList<ResourceStorageList>;
 
     fn into_index_list(self) -> Self::List;
 }
 
 impl ResourceIndexList for Nil {
     type List = Nil;
+    type BorrowList = Nil;
 
     #[inline]
     fn into_index_list(self) -> Self::List {
@@ -317,6 +328,7 @@ where
     ResourceStorageList: Contains<R::RawCollection, M>,
 {
     type List = Cons<Marked<TypedIndex<R, R::RawCollection>, M>, N::List>;
+    type BorrowList = Cons<Marked<BorrowedGuard<R, R::RawCollection>, M>, N::BorrowList>;
 
     #[inline]
     fn into_index_list(self) -> Self::List {

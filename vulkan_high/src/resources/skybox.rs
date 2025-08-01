@@ -22,7 +22,7 @@ use vulkan_low::{
         Partial,
     },
     error::ResourceError,
-    Context,
+    index_list, Context,
 };
 
 use crate::resources::{bind_mesh_pack, MeshPack, MeshPackPartial};
@@ -102,10 +102,9 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
     ) -> type_kit::CreateResult<Self> {
         let (SkyboxPartial { cubemap, cube }, allocator) = config;
         let cubemap = context.create_resource::<Texture<_>, _>((cubemap, allocator))?;
-        let index_list = ResourceIndexListBuilder::new().push(cubemap).build();
         let descriptor =
-            context.operate_ref(index_list, |unpack_list![cubemap, _allocator]| {
-                let image_info = (&***cubemap).into();
+            context.operate_ref(index_list![cubemap], |unpack_list![cubemap]| {
+                let image_info = cubemap.into();
                 context.create_resource(
                     DescriptorSetWriter::<TextureDescriptorSet>::new(1)
                         .write_images::<Texture<Image2D>>(&[image_info]),
@@ -149,23 +148,24 @@ pub fn draw_skybox<
     mut camera_matrices: CameraMatrices,
 ) -> RecordingCommand<'a, T, L, O> {
     camera_matrices.view[3] = Vector4::w();
-    let index_list = ResourceIndexListBuilder::new()
-        .push(skybox.pipeline)
-        .push(skybox.descriptor)
-        .build();
     context
-        .operate_ref(index_list, |unpack_list![descriptor, pipeline, _rest]| {
-            let command = bind_mesh_pack(
-                context,
-                command
-                    .bind_pipeline(&***pipeline)
-                    .bind_descriptor_set(&descriptor.get(0).get_binding_data(&pipeline).unwrap())
-                    .push_constants(pipeline.get_push_range(&camera_matrices)),
-                &*skybox.mesh_pack,
-            )
-            .draw_indexed(skybox.mesh_pack.get(0));
-            Result::<_, Infallible>::Ok(command)
-        })
+        .operate_ref(
+            index_list![skybox.pipeline, skybox.descriptor],
+            |unpack_list![descriptor, pipeline]| {
+                let command = bind_mesh_pack(
+                    context,
+                    command
+                        .bind_pipeline(pipeline.get_binding_data())
+                        .bind_descriptor_set(
+                            &descriptor.get(0).get_binding_data(&pipeline).unwrap(),
+                        )
+                        .push_constants(pipeline.get_push_range(&camera_matrices)),
+                    &*skybox.mesh_pack,
+                )
+                .draw_indexed(skybox.mesh_pack.get(0));
+                Result::<_, Infallible>::Ok(command)
+            },
+        )
         .unwrap()
         .unwrap()
 }

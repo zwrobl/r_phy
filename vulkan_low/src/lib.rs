@@ -8,8 +8,8 @@ use crate::device::{
     raw::{
         allocator::{Allocation, Allocator, Unpooled},
         resources::{
-            RawIndex, ResourceIndexList, TypeUniqueRawCollection, TypeUniqueResource,
-            TypeUniqueResourceStorage, TypeUniqueResourceStorageList,
+            BorrowMut, BorrowRef, RawIndex, ResourceIndexList, TypeUniqueRawCollection,
+            TypeUniqueResource, TypeUniqueResourceStorage, TypeUniqueResourceStorageList,
         },
     },
 };
@@ -36,7 +36,7 @@ use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
     Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize,
-    GenCollectionResult, IndexList, Initialize, Marker, TypeGuardCollection,
+    GenCollectionResult, Initialize, Marker, TypeGuardCollection,
 };
 
 use ash::vk;
@@ -338,12 +338,7 @@ impl Context {
     }
 
     #[inline]
-    pub fn operate_ref<
-        I: ResourceIndexList,
-        R,
-        E,
-        F: FnOnce(&<I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
-    >(
+    pub fn operate_ref<I: ResourceIndexList, R, E, F: FnOnce(BorrowRef<'_, I>) -> Result<R, E>>(
         &self,
         index: I,
         f: F,
@@ -352,12 +347,7 @@ impl Context {
     }
 
     #[inline]
-    pub fn operate_mut<
-        I: ResourceIndexList,
-        R,
-        E,
-        F: FnOnce(&mut <I::List as IndexList<ResourceStorageList>>::Borrowed) -> Result<R, E>,
-    >(
+    pub fn operate_mut<I: ResourceIndexList, R, E, F: FnOnce(BorrowMut<'_, I>) -> Result<R, E>>(
         &self,
         index: I,
         f: F,

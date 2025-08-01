@@ -29,7 +29,7 @@ use crate::{
         },
     },
     error::{AllocatorError, ResourceError, ResourceResult},
-    Context,
+    index_list, Context,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -304,8 +304,7 @@ impl Context {
         allocation: AllocationEntry<M>,
     ) -> ResourceResult<*mut c_void> {
         let Allocation { memory, range } = self.get_allocation(allocation)?;
-        let index_list = ResourceIndexListBuilder::new().push(memory).build();
-        let ptr = self.operate_mut(index_list, |unpack_list![memory, _rest]| {
+        let ptr = self.operate_mut(index_list![memory], |unpack_list![memory]| {
             let ptr = unsafe { memory.map(self)?.byte_offset(range.beg as isize) };
             Result::<_, ResourceError>::Ok(ptr)
         })??;
@@ -317,9 +316,8 @@ impl Context {
         allocation: AllocationEntry<M>,
     ) -> ResourceResult<()> {
         let Allocation { memory, .. } = self.get_allocation(allocation)?;
-        let index_list = ResourceIndexListBuilder::new().push(memory).build();
         // TODO: Consider allowing for returning other types than Result for operate_* functions
-        let _ = self.operate_mut(index_list, |unpack_list![memory, _rest]| {
+        let _ = self.operate_mut(index_list![memory], |unpack_list![memory]| {
             memory.unmap(self);
             Result::<_, Infallible>::Ok(())
         })?;
@@ -332,15 +330,14 @@ impl Context {
         allocation: AllocationEntry<M>,
     ) -> ResourceResult<()> {
         let Allocation { memory, range } = self.get_allocation(allocation)?;
-        let index_list = ResourceIndexListBuilder::new().push(memory).build();
-        self.operate_ref(index_list, |unpack_list![memory, _rest]| {
+        self.operate_ref(index_list![memory], |unpack_list![memory]| {
             match resource.into() {
                 // TODO: This 4x deref is quite ugly, consider refactoring
                 BindResource::Image(image) => unsafe {
-                    self.bind_image_memory(image, ****memory, range.beg as vk::DeviceSize)
+                    self.bind_image_memory(image, **memory, range.beg as vk::DeviceSize)
                 },
                 BindResource::Buffer(buffer) => unsafe {
-                    self.bind_buffer_memory(buffer, ****memory, range.beg as vk::DeviceSize)
+                    self.bind_buffer_memory(buffer, **memory, range.beg as vk::DeviceSize)
                 },
             }
         })??;

@@ -1394,7 +1394,13 @@ where
     }
 }
 
-pub trait BorrowList<C: 'static> {
+pub trait BorrowList<C: 'static>: 'static {
+    type InnerRef<'a>;
+    type InnerMut<'a>;
+
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a>;
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a>;
+
     // Consider if here failure to put back the borrowed item should be considered a fatal error, resulting in pacnic
     // This is because if any single item on the list fails to be put back, the entire list must be considered invalid.
     // It is not possible to defined static error type for this case,
@@ -1406,6 +1412,19 @@ pub trait BorrowList<C: 'static> {
 }
 
 impl<C: 'static> BorrowList<C> for Nil {
+    type InnerRef<'a> = Self;
+    type InnerMut<'a> = Self;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a> {
+        *self
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a> {
+        *self
+    }
+
     #[inline]
     fn put_back(self, _: &mut C) -> GenCollectionResult<()> {
         Ok(())
@@ -1417,6 +1436,20 @@ impl<L: 'static, H: 'static, C: BorrowCollection<H>, M: Marker, T: BorrowList<L>
 where
     L: Contains<C, M>,
 {
+    type InnerRef<'a> = Cons<&'a H, T::InnerRef<'a>>;
+
+    type InnerMut<'a> = Cons<&'a mut H, T::InnerMut<'a>>;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a> {
+        Cons::new(&self.head.value.item, self.tail.inner_ref())
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a> {
+        Cons::new(&mut self.head.value.item, self.tail.inner_mut())
+    }
+
     #[inline]
     fn put_back(self, collection: &mut L) -> GenCollectionResult<()> {
         let Cons {
@@ -1481,16 +1514,19 @@ pub struct BorrowedContext<C: 'static, B: BorrowList<C>> {
 
 impl<C: 'static, B: BorrowList<C>> BorrowedContext<C, B> {
     #[inline]
-    pub fn operate_ref<R, E, F: FnOnce(&B) -> Result<R, E>>(&self, operation: F) -> Result<R, E> {
-        operation(self.borrow.as_ref().unwrap())
+    pub fn operate_ref<R, E, F: FnOnce(B::InnerRef<'_>) -> Result<R, E>>(
+        &self,
+        operation: F,
+    ) -> Result<R, E> {
+        operation(self.borrow.as_ref().unwrap().inner_ref())
     }
 
     #[inline]
-    pub fn operate_mut<R, E, F: FnOnce(&mut B) -> Result<R, E>>(
+    pub fn operate_mut<R, E, F: FnOnce(B::InnerMut<'_>) -> Result<R, E>>(
         &mut self,
         operation: F,
     ) -> Result<R, E> {
-        operation(self.borrow.as_mut().unwrap())
+        operation(self.borrow.as_mut().unwrap().inner_mut())
     }
 }
 
@@ -1595,8 +1631,7 @@ mod test_list_index {
         let index_u32: GenIndex<u32, _> = collection_u32.push(32).unwrap();
 
         let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
-        let unpack_list![b_u8, b_u16, b_u32, _rest] =
-            index_list.get_owned(&mut collection).unwrap();
+        let unpack_list![b_u8, b_u16, b_u32] = index_list.get_owned(&mut collection).unwrap();
 
         assert_eq!(b_u8, 8);
         assert_eq!(b_u16, 16);
@@ -1625,7 +1660,7 @@ mod test_list_index {
         let index_u32: GenIndex<u32, _> = collection_u32.push(32).unwrap();
 
         let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
-        let unpack_list![b_u8, b_u16, b_u32, _rest] = index_list.get_ref(&collection).unwrap();
+        let unpack_list![b_u8, b_u16, b_u32] = index_list.get_ref(&collection).unwrap();
 
         assert_eq!(*b_u8, 8);
         assert_eq!(*b_u16, 16);
@@ -1654,8 +1689,7 @@ mod test_list_index {
         let index_u32: GenIndex<u32, _> = collection_u32.push(32).unwrap();
 
         let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
-        let unpack_list![b_u8, b_u16, b_u32, _rest] =
-            index_list.get_borrowed(&mut collection).unwrap();
+        let unpack_list![b_u8, b_u16, b_u32] = index_list.get_borrowed(&mut collection).unwrap();
 
         assert_eq!(**b_u8, 8);
         assert_eq!(**b_u16, 16);
@@ -1711,8 +1745,7 @@ mod test_list_index {
         let index_vec_u16: GenIndex<Vec<u16>, _> = collection_vec_u16.push(vec![16]).unwrap();
 
         let index_list = mark![TestNonCopyCollection, index_vec_u8, index_vec_u16];
-        let unpack_list![b_vec_u8, b_vec_u16, _rest] =
-            index_list.get_borrowed(&mut collection).unwrap();
+        let unpack_list![b_vec_u8, b_vec_u16] = index_list.get_borrowed(&mut collection).unwrap();
 
         assert_eq!(**b_vec_u8, vec![8]);
         assert_eq!(**b_vec_u16, vec![16]);
@@ -1757,16 +1790,16 @@ mod test_list_index {
             let mut context = collection.get_borrow(index_list).unwrap();
             let _ = context.operate_ref::<_, Infallible, _>(|borrow| {
                 let unpack_list![b_u8, b_u16, b_u32] = borrow;
-                assert_eq!(b_u8.item, 8);
-                assert_eq!(b_u16.item, 16);
-                assert_eq!(b_u32.item, 32);
+                assert_eq!(*b_u8, 8);
+                assert_eq!(*b_u16, 16);
+                assert_eq!(*b_u32, 32);
                 Ok(())
             });
             let _ = context.operate_mut::<_, bool, _>(|borrow| {
                 let unpack_list![b_u8, b_u16, b_u32] = borrow;
-                b_u8.item = 7;
-                b_u16.item = 15;
-                b_u32.item = 31;
+                *b_u8 = 7;
+                *b_u16 = 15;
+                *b_u32 = 31;
                 Ok(())
             });
             assert!(context.destroy(&mut collection).is_ok());
@@ -1775,9 +1808,9 @@ mod test_list_index {
             let mut context = collection.get_borrow(index_list).unwrap();
             let _ = context.operate_ref::<_, bool, _>(|borrow| {
                 let unpack_list![b_u8, b_u16, b_u32] = borrow;
-                assert_eq!(b_u8.item, 7);
-                assert_eq!(b_u16.item, 15);
-                assert_eq!(b_u32.item, 31);
+                assert_eq!(*b_u8, 7);
+                assert_eq!(*b_u16, 15);
+                assert_eq!(*b_u32, 31);
                 Ok(())
             });
             assert!(context.destroy(&mut collection).is_ok());
@@ -1840,6 +1873,19 @@ impl<L: 'static, H: FromGuard, C: GuardCollectionT<H::Inner>, M: Marker, T: Borr
 where
     L: Contains<C, M>,
 {
+    type InnerRef<'a> = Cons<&'a H, T::InnerRef<'a>>;
+    type InnerMut<'a> = Cons<&'a mut H, T::InnerMut<'a>>;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a> {
+        Cons::new(&self.head.value.item, self.tail.inner_ref())
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a> {
+        Cons::new(&mut self.head.value.item, self.tail.inner_mut())
+    }
+
     #[inline]
     fn put_back(self, collection: &mut L) -> GenCollectionResult<()> {
         let Cons {
@@ -1997,7 +2043,7 @@ mod test_type_guard_borrow_list {
         {
             let mut borrow = collection.get_borrow(index_list).unwrap();
             let _ = borrow.operate_ref::<_, Infallible, _>(|borrow| {
-                let unpack_list![b_a, b_b, _rest] = borrow;
+                let unpack_list![b_a, b_b] = borrow;
                 assert_eq!(b_a.0, 42);
                 assert_eq!(b_b.0, 31);
                 Ok(())
@@ -2007,7 +2053,7 @@ mod test_type_guard_borrow_list {
         {
             let mut borrow = collection.get_borrow(index_list).unwrap();
             let _ = borrow.operate_mut::<_, Infallible, _>(|borrow| {
-                let unpack_list![b_a, b_b, _rest] = borrow;
+                let unpack_list![b_a, b_b] = borrow;
                 b_a.0 = 41;
                 b_b.0 = 30;
                 Ok(())
@@ -2017,7 +2063,7 @@ mod test_type_guard_borrow_list {
         {
             let mut borrow = collection.get_borrow(index_list).unwrap();
             let _ = borrow.operate_ref::<_, Infallible, _>(|borrow| {
-                let unpack_list![b_a, b_b, _rest] = borrow;
+                let unpack_list![b_a, b_b] = borrow;
                 assert_eq!(b_a.0, 41);
                 assert_eq!(b_b.0, 30);
                 Ok(())
@@ -2260,7 +2306,7 @@ mod test_mixed_collection_types {
         let index_cell: GenIndex<u32, _> = cell_u32.push(16).unwrap();
 
         let index_list = mark![TestCollectionListType, index_cell, index_collection];
-        let unpack_list![item_cell, item_collection, _rest] =
+        let unpack_list![item_cell, item_collection] =
             index_list.get_owned(&mut collection).unwrap();
 
         assert_eq!(item_collection, 8);
@@ -2282,32 +2328,29 @@ mod test_mixed_collection_types {
         let index_list = mark![TestCollectionListType, index_a, index_b];
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ =
-                context.operate_ref::<_, Infallible, _>(|unpack_list![item_a, item_b, _nil]| {
-                    assert_eq!(***item_a, 42);
-                    assert_eq!(***item_b, 42);
-                    Ok(())
-                });
+            let _ = context.operate_ref::<_, Infallible, _>(|unpack_list![item_a, item_b]| {
+                assert_eq!(*item_a, 42);
+                assert_eq!(*item_b, 42);
+                Ok(())
+            });
             assert!(context.destroy(&mut collection).is_ok());
         }
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ =
-                context.operate_mut::<_, Infallible, _>(|unpack_list![item_a, item_b, _nil]| {
-                    ***item_a = 31;
-                    ***item_b = 40;
-                    Ok(())
-                });
+            let _ = context.operate_mut::<_, Infallible, _>(|unpack_list![item_a, item_b]| {
+                *item_a = 31;
+                *item_b = 40;
+                Ok(())
+            });
             assert!(context.destroy(&mut collection).is_ok());
         }
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ =
-                context.operate_ref::<_, Infallible, _>(|unpack_list![item_a, item_b, _nil]| {
-                    assert_eq!(***item_a, 31);
-                    assert_eq!(***item_b, 40);
-                    Ok(())
-                });
+            let _ = context.operate_ref::<_, Infallible, _>(|unpack_list![item_a, item_b]| {
+                assert_eq!(*item_a, 31);
+                assert_eq!(*item_b, 40);
+                Ok(())
+            });
             assert!(context.destroy(&mut collection).is_ok());
         }
     }

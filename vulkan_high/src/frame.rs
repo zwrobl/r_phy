@@ -27,22 +27,25 @@ use vulkan_low::{
                 ModuleLoader,
             },
             render_pass::RenderPassConfig,
-            ResourceIndex, ResourceIndexListBuilder,
+            ResourceIndex,
         },
         Partial,
     },
     error::{ResourceError, VkError, VkResult},
-    Context,
+    index_list, Context,
 };
 
 use vulkan_low::device::{
-    raw::resources::command::{
-        level::{Primary, Secondary},
-        operation::Graphics,
-        BeginCommand, Persistent, PersistentCommandPool,
-    },
     raw::resources::descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
     raw::resources::swapchain::{SwapchainFrame, SwapchainImageSync},
+    raw::resources::{
+        command::{
+            level::{Primary, Secondary},
+            operation::Graphics,
+            BeginCommand, Persistent, PersistentCommandPool,
+        },
+        ResourceIndexListBuilder,
+    },
 };
 
 use crate::resources::{MaterialPackList, MeshPackList};
@@ -157,16 +160,17 @@ impl Create for CameraUniform {
         let (CameraUniformPartial { buffer }, allocator) = config;
         let uniform_buffer =
             context.create_resource::<UniformBuffer<_, _>, _>((buffer, allocator))?;
-        let index_list = ResourceIndexListBuilder::new().push(uniform_buffer).build();
-        let (descriptors, len) =
-            context.operate_ref(index_list, |unpack_list![uniform_buffer, _rest]| {
+        let (descriptors, len) = context.operate_ref(
+            index_list![uniform_buffer],
+            |unpack_list![uniform_buffer]| {
                 let len = uniform_buffer.len();
                 let descriptors = context.create_resource(
                     DescriptorSetWriter::<CameraDescriptorSet>::new(len)
                         .write_buffer(&uniform_buffer),
                 )?;
                 Result::<_, ResourceError>::Ok((descriptors, len))
-            })??;
+            },
+        )??;
         Ok(CameraUniform {
             descriptors,
             uniform_buffer,

@@ -21,7 +21,7 @@ use vulkan_low::{
         },
         Device,
     },
-    Context,
+    index_list, Context,
 };
 
 use crate::{
@@ -51,20 +51,18 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
         camera_matrices: &CameraMatrices,
     ) -> Result<Commands<P>, Box<dyn Error>> {
         let renderer = self.renderer.borrow();
-        let index_list = ResourceIndexListBuilder::new()
-            .push(renderer.frame_data.descriptors)
-            .push(self.frames.secondary_commands)
-            .push(self.pipelines.depth_prepass)
-            .push(self.pipelines.shading_pass)
-            .build();
         let (depth_prepass, shading_pass, skybox_pass) = context.operate_mut(
-            index_list,
+            index_list![
+                renderer.frame_data.descriptors,
+                self.frames.secondary_commands,
+                self.pipelines.depth_prepass,
+                self.pipelines.shading_pass
+            ],
             |unpack_list![
                 shading_pass_pipeline,
                 depth_prepass_pipeline,
                 secondary_commands,
-                descriptors,
-                _rest
+                descriptors
             ]| {
                 let depth_prepass = {
                     let command = context
@@ -75,10 +73,10 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                         )?;
                     context.record_command(command, |command| {
                         command
-                            .bind_pipeline(&***depth_prepass_pipeline)
+                            .bind_pipeline(depth_prepass_pipeline.get_binding_data())
                             .bind_descriptor_set(
                                 &camera_descriptor
-                                    .get_binding_data(&depth_prepass_pipeline)
+                                    .get_binding_data(depth_prepass_pipeline)
                                     .unwrap(),
                             )
                     })
@@ -97,7 +95,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                         bind_mesh_pack(
                             context,
                             command
-                                .bind_pipeline(&***shading_pass_pipeline)
+                                .bind_pipeline(shading_pass_pipeline.get_binding_data())
                                 .bind_descriptor_set(&binding_data),
                             &*renderer.resources.mesh,
                         )

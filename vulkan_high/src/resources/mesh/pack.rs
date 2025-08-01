@@ -25,7 +25,7 @@ use vulkan_low::{
         },
     },
     error::{ResourceError, ResourceResult},
-    Context,
+    index_list, Context,
 };
 
 use super::{
@@ -134,9 +134,8 @@ impl<V: Vertex> Create for MeshPack<V> {
                 .iter()
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
-            let index_list = ResourceIndexListBuilder::new().push(buffer).build();
-            context.operate_mut(index_list, |unpack_list![buffer, _allocator]| {
-                staging_buffer.transfer_buffer_data(&context, &mut ***buffer, 0)
+            context.operate_mut(index_list![buffer], |unpack_list![buffer]| {
+                staging_buffer.transfer_buffer_data(&context, buffer, 0)
             })??;
             let _ = staging_buffer.destroy(&context);
             (vertex_ranges, index_ranges)

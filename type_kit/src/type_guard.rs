@@ -141,7 +141,7 @@ mod tests {
         let b_2 = B(32);
         let list_guard = list_value!(a_1, b_1, a_2, b_2, Nil::new()).into_guard();
         let list = Cons::<A, Cons<B, Cons<A, Cons<B, Nil>>>>::try_from_guard(list_guard).unwrap();
-        let unpack_list![a_1, b_1, a_2, b_2, _nil] = list;
+        let unpack_list![a_1, b_1, a_2, b_2] = list;
         assert_eq!(a_1.0, 42);
         assert_eq!(b_1.0, 31);
         assert_eq!(a_2.0, 43);
@@ -615,7 +615,7 @@ mod test_type_gurad_list {
         let b_2 = B(32);
         let list_guard = list_value!(a_1, b_1, a_2, b_2, Nil::new()).into_guard();
         let list = Cons::<A, Cons<B, Cons<A, Cons<B, Nil>>>>::try_from_guard(list_guard).unwrap();
-        let unpack_list![a_1, b_1, a_2, b_2, _nil] = list;
+        let unpack_list![a_1, b_1, a_2, b_2] = list;
         assert_eq!(a_1.0, 42);
         assert_eq!(b_1.0, 31);
         assert_eq!(a_2.0, 43);

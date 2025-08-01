@@ -183,8 +183,7 @@ impl Create for Static {
         let unpack_list![
             device_local_builder,
             host_coherent_builder,
-            host_visible_builder,
-            _nil
+            host_visible_builder
         ] = config.builders;
         let mut buffers: Buffers = Buffers::default();
         *buffers.get_mut::<Option<LinearBuffer<DeviceLocal>>, _>() =

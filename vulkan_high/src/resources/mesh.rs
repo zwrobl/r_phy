@@ -24,7 +24,7 @@ use vulkan_low::{
             },
         },
     },
-    Context,
+    index_list, Context,
 };
 
 #[derive(strum::EnumCount)]
@@ -123,9 +123,8 @@ pub fn bind_mesh_pack<'a, T, L: Level, O: Operation>(
     pack: impl Into<MeshPackBinding>,
 ) -> RecordingCommand<'a, T, L, O> {
     let pack = pack.into();
-    let index_list = ResourceIndexListBuilder::new().push(pack.buffer).build();
     context
-        .operate_ref(index_list, |unpack_list![buffer, _allocator]| {
+        .operate_ref(index_list![pack.buffer], |unpack_list![buffer]| {
             let command = command
                 .bind_index_buffer(
                     BufferBinding {

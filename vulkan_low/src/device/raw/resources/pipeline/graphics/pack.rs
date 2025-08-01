@@ -164,11 +164,12 @@ impl Destroy for GraphicsPipelineRaw {
     }
 }
 
-impl<C: GraphicsPipelineConfig> From<&GraphicsPipeline<C>> for PipelineBindData {
-    fn from(value: &GraphicsPipeline<C>) -> Self {
+impl<C: GraphicsPipelineConfig> GraphicsPipeline<C> {
+    #[inline]
+    pub fn get_binding_data(&self) -> PipelineBindData {
         PipelineBindData {
             bind_point: vk::PipelineBindPoint::GRAPHICS,
-            pipeline: value.handle,
+            pipeline: self.handle,
         }
     }
 }

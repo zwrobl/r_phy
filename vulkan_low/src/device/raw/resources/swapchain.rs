@@ -9,9 +9,10 @@ use crate::{
     device::raw::resources::{
         framebuffer::{FramebufferBuilder, FramebufferRaw},
         render_pass::RenderPassConfig,
-        Resource, ResourceIndex, ResourceIndexListBuilder,
+        Resource, ResourceIndex,
     },
     error::{ResourceError, ResourceResult},
+    index_list,
     surface::PhysicalDeviceSurfaceProperties,
     Context,
 };
@@ -23,6 +24,7 @@ use crate::device::{
         FinishedCommand, Persistent, SubmitSemaphoreState,
     },
     raw::resources::framebuffer::{Framebuffer, FramebufferHandle},
+    raw::resources::ResourceIndexListBuilder,
     Device,
 };
 
@@ -108,14 +110,14 @@ impl Context {
         swapchain: &Swapchain<C>,
         index: usize,
     ) -> ResourceResult<FramebufferHandle<C>> {
-        let index_list = ResourceIndexListBuilder::new()
-            .push(swapchain.get_framebuffer_index(index))
-            .build();
         let handle = self
-            .operate_ref(index_list, |unpack_list![framebuffer, _rest]| {
-                let handle: FramebufferHandle<C> = (&***framebuffer).into();
-                Result::<_, Infallible>::Ok(handle)
-            })
+            .operate_ref(
+                index_list![swapchain.get_framebuffer_index(index)],
+                |unpack_list![framebuffer]| {
+                    let handle: FramebufferHandle<C> = framebuffer.into();
+                    Result::<_, Infallible>::Ok(handle)
+                },
+            )
             .map(|handle| handle.unwrap())?;
         Ok(handle)
     }

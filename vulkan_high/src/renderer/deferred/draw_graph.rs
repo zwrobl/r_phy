@@ -24,7 +24,7 @@ use vulkan_low::{
         swapchain::SwapchainFrame,
         ResourceIndexListBuilder,
     },
-    Context,
+    index_list, Context,
 };
 
 use crate::{
@@ -149,13 +149,10 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                 .or_insert_with(|| {
                     let material_binding_data =
                         material_packs.try_get::<D::Material>().map(|pack| {
-                            let index_list = ResourceIndexListBuilder::new()
-                                .push(pack.descriptors)
-                                .build();
                             let material_descriptor = context
                                 .operate_ref(
-                                    index_list,
-                                    |unpack_list![material_descriptor, _rest]| {
+                                    index_list![pack.descriptors],
+                                    |unpack_list![material_descriptor]| {
                                         let descriptor = material_descriptor
                                             .get(descriptor_index.material_index as usize);
                                         Result::<_, Infallible>::Ok(descriptor)
@@ -217,11 +214,9 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
             ..
         } = state;
         let renderer = self.renderer.borrow();
-        let index_list = ResourceIndexListBuilder::new()
-            .push(self.pipelines.depth_prepass)
-            .build();
-        let depth_prepass =
-            context.operate_mut(index_list, |unpack_list![pipeline, _rest]| {
+        let depth_prepass = context.operate_mut(
+            index_list![self.pipelines.depth_prepass],
+            |unpack_list![pipeline]| {
                 let depth_prepass = context.record_command(depth_prepass, |command| {
                     draw_graph.pipeline_states.iter().fold(
                         command,
@@ -263,13 +258,12 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                     )
                 });
                 Result::<_, Infallible>::Ok(depth_prepass)
-            })??;
-        let index_list = ResourceIndexListBuilder::new()
-            .push(self.frames.secondary_commands)
-            .build();
+            },
+        )??;
         for (_, pipeline_state) in draw_graph.pipeline_states {
-            let command =
-                context.operate_mut(index_list, |unpack_list![secondary_commands, _rest]| {
+            let command = context.operate_mut(
+                index_list![self.frames.secondary_commands],
+                |unpack_list![secondary_commands]| {
                     let command = context
                         .begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
                             secondary_commands.next().1,
@@ -316,7 +310,8 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                         )
                     });
                     Result::<_, Box<dyn Error>>::Ok(command)
-                })??;
+                },
+            )??;
             write_pass.push(command);
         }
         Ok(Commands {
@@ -337,7 +332,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
             .unwrap()
             .get(pipeline_index);
         PipelineState {
-            pipeline_bind_data: (&pipeline).into(),
+            pipeline_bind_data: pipeline.get_binding_data(),
             push_constant_mapper: PushConstantRangeMapper::new(&pipeline),
             descriptor_states: HashMap::new(),
         }
