@@ -179,7 +179,7 @@ impl ResourceStorage {
     }
 
     #[inline]
-    pub fn opperate_ref<
+    pub fn operate_ref<
         I: ResourceIndexList,
         R,
         E,
@@ -197,7 +197,7 @@ impl ResourceStorage {
     }
 
     #[inline]
-    pub fn opperate_mut<
+    pub fn operate_mut<
         I: ResourceIndexList,
         R,
         E,

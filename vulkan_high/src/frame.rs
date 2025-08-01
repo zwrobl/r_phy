@@ -159,7 +159,7 @@ impl Create for CameraUniform {
             context.create_resource::<UniformBuffer<_, _>, _>((buffer, allocator))?;
         let index_list = ResourceIndexListBuilder::new().push(uniform_buffer).build();
         let (descriptors, len) =
-            context.opperate_ref(index_list, |unpack_list![uniform_buffer, _rest]| {
+            context.operate_ref(index_list, |unpack_list![uniform_buffer, _rest]| {
                 let len = uniform_buffer.len();
                 let descriptors = context.create_resource(
                     DescriptorSetWriter::<CameraDescriptorSet>::new(len)

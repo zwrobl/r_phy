@@ -57,7 +57,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
             .push(self.pipelines.depth_prepass)
             .push(self.pipelines.shading_pass)
             .build();
-        let (depth_prepass, shading_pass, skybox_pass) = context.opperate_mut(
+        let (depth_prepass, shading_pass, skybox_pass) = context.operate_mut(
             index_list,
             |unpack_list![
                 shading_pass_pipeline,

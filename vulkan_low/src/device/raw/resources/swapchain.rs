@@ -112,7 +112,7 @@ impl Context {
             .push(swapchain.get_framebuffer_index(index))
             .build();
         let handle = self
-            .opperate_ref(index_list, |unpack_list![framebuffer, _rest]| {
+            .operate_ref(index_list, |unpack_list![framebuffer, _rest]| {
                 let handle: FramebufferHandle<C> = (&***framebuffer).into();
                 Result::<_, Infallible>::Ok(handle)
             })

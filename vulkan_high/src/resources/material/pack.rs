@@ -9,7 +9,7 @@ use vulkan_low::{
         resources::{
             buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
             command::operation::Graphics,
-            descriptor::{Descriptor, DescriptorPool, DescriptorPoolRef, DescriptorSetWriter},
+            descriptor::{DescriptorPool, DescriptorSetWriter},
             image::{Image2D, Image2DReader, ImageReader, Texture, TexturePartial},
             layout::presets::{FragmentStage, PodUniform},
             ResourceIndex, ResourceIndexListBuilder,
@@ -185,12 +185,12 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
     let uniform_buffer = context.create_resource::<UniformBuffer<_, _>, _>((uniform, allocator))?;
     let index_list = ResourceIndexListBuilder::new().push(uniform_buffer).build();
     context
-        .opperate_mut(index_list, |unpack_list![uniform_buffer, _rest]| {
+        .operate_mut(index_list, |unpack_list![uniform_buffer, _rest]| {
             for (index, uniform) in data.into_iter().enumerate() {
                 *uniform_buffer[index].as_inner_mut() = *uniform;
             }
             Result::<_, Infallible>::Ok(())
-        })
+        })?
         .unwrap();
     Ok(uniform_buffer)
 }
@@ -239,7 +239,7 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
             .map(|&texture| {
                 let index_list = ResourceIndexListBuilder::new().push(texture).build();
                 context
-                    .opperate_ref(index_list, |unpack_list![texture, _allocator]| {
+                    .operate_ref(index_list, |unpack_list![texture, _allocator]| {
                         let image_info: vk::DescriptorImageInfo = (&***texture).into();
                         Result::<_, Infallible>::Ok(image_info)
                     })
@@ -254,7 +254,7 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
     let writer = if let Some(uniforms) = &uniforms {
         let index_list = ResourceIndexListBuilder::new().push(*uniforms).build();
         context
-            .opperate_ref(index_list, |unpack_list![uniforms, _allocator]| {
+            .operate_ref(index_list, |unpack_list![uniforms, _allocator]| {
                 Result::<_, Infallible>::Ok(writer.write_buffer(uniforms))
             })
             .unwrap()

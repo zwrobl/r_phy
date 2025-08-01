@@ -305,7 +305,7 @@ impl Context {
     ) -> ResourceResult<*mut c_void> {
         let Allocation { memory, range } = self.get_allocation(allocation)?;
         let index_list = ResourceIndexListBuilder::new().push(memory).build();
-        let ptr = self.opperate_mut(index_list, |unpack_list![memory, _rest]| {
+        let ptr = self.operate_mut(index_list, |unpack_list![memory, _rest]| {
             let ptr = unsafe { memory.map(self)?.byte_offset(range.beg as isize) };
             Result::<_, ResourceError>::Ok(ptr)
         })??;
@@ -319,7 +319,7 @@ impl Context {
         let Allocation { memory, .. } = self.get_allocation(allocation)?;
         let index_list = ResourceIndexListBuilder::new().push(memory).build();
         // TODO: Consider allowing for returning other types than Result for operate_* functions
-        let _ = self.opperate_mut(index_list, |unpack_list![memory, _rest]| {
+        let _ = self.operate_mut(index_list, |unpack_list![memory, _rest]| {
             memory.unmap(self);
             Result::<_, Infallible>::Ok(())
         })?;
@@ -333,7 +333,7 @@ impl Context {
     ) -> ResourceResult<()> {
         let Allocation { memory, range } = self.get_allocation(allocation)?;
         let index_list = ResourceIndexListBuilder::new().push(memory).build();
-        self.opperate_ref(index_list, |unpack_list![memory, _rest]| {
+        self.operate_ref(index_list, |unpack_list![memory, _rest]| {
             match resource.into() {
                 // TODO: This 4x deref is quite ugly, consider refactoring
                 BindResource::Image(image) => unsafe {

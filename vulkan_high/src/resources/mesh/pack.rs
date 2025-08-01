@@ -12,19 +12,19 @@ use vulkan_low::{
             range::Range,
             resources::{
                 buffer::{
-                    Buffer, BufferInfoBuilder, BufferPartial, StagingBuffer, StagingBufferBuilder,
+                    BufferInfoBuilder, BufferPartial, StagingBuffer, StagingBufferBuilder,
                     StagingBufferPartial,
                 },
                 command::{
                     operation::{self, Operation},
                     DrawIndexed,
                 },
-                ResourceIndex, ResourceIndexListBuilder,
+                ResourceIndexListBuilder,
             },
             Partial,
         },
     },
-    error::{ResourceError, ResourceResult, VkError, VkResult},
+    error::{ResourceError, ResourceResult},
     Context,
 };
 
@@ -135,7 +135,7 @@ impl<V: Vertex> Create for MeshPack<V> {
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
             let index_list = ResourceIndexListBuilder::new().push(buffer).build();
-            context.opperate_mut(index_list, |unpack_list![buffer, _allocator]| {
+            context.operate_mut(index_list, |unpack_list![buffer, _allocator]| {
                 staging_buffer.transfer_buffer_data(&context, &mut ***buffer, 0)
             })??;
             let _ = staging_buffer.destroy(&context);

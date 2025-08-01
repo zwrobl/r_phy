@@ -207,7 +207,7 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
                 .push(self.frames.camera_uniform.descriptors)
                 .push(self.frames.primary_commands)
                 .build();
-            context.opperate_mut(
+            context.operate_mut(
                 index_list,
                 |unpack_list![
                     primary_commands,
@@ -287,7 +287,7 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let index_list = ResourceIndexListBuilder::new()
             .push(renderer.frame_data.swapchain)
             .build();
-        context.opperate_ref(index_list, |unpack_list![swapchain, _rest]| {
+        context.operate_ref(index_list, |unpack_list![swapchain, _rest]| {
             context.present_frame(&***swapchain, primary_command, swapchain_frame)
         })??;
         Ok(())
@@ -351,7 +351,7 @@ impl GBuffer {
             .push(self.depth)
             .build();
         context
-            .opperate_ref(
+            .operate_ref(
                 index_list,
                 |unpack_list![depth, position, normal, albedo, combined, _rest]| {
                     let builder = FramebufferBuilder::new(
@@ -426,7 +426,7 @@ impl Create for DeferredRendererFrameData {
         let (framebuffer_index, num_frames) = {
             let index_list = ResourceIndexListBuilder::new().push(swapchain).build();
             context
-                .opperate_ref(index_list, |unpack_list![swapchain, _rest]| {
+                .operate_ref(index_list, |unpack_list![swapchain, _rest]| {
                     let swapchain: &Swapchain<DeferedRenderPass<AttachmentsGBuffer>> =
                         &***swapchain;
                     Result::<_, Infallible>::Ok((
@@ -440,7 +440,7 @@ impl Create for DeferredRendererFrameData {
             let index_list = ResourceIndexListBuilder::new()
                 .push(framebuffer_index)
                 .build();
-            context.opperate_ref(index_list, |unpack_list![framebuffer, _rest]| {
+            context.operate_ref(index_list, |unpack_list![framebuffer, _rest]| {
                 context.create_resource::<DescriptorPool<_>, _>(
                     DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
                         .write_images::<InputAttachment>(

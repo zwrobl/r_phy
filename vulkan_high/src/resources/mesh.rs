@@ -125,7 +125,7 @@ pub fn bind_mesh_pack<'a, T, L: Level, O: Operation>(
     let pack = pack.into();
     let index_list = ResourceIndexListBuilder::new().push(pack.buffer).build();
     context
-        .opperate_ref(index_list, |unpack_list![buffer, _allocator]| {
+        .operate_ref(index_list, |unpack_list![buffer, _allocator]| {
             let command = command
                 .bind_index_buffer(
                     BufferBinding {

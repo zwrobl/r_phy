@@ -153,7 +153,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                                 .push(pack.descriptors)
                                 .build();
                             let material_descriptor = context
-                                .opperate_ref(
+                                .operate_ref(
                                     index_list,
                                     |unpack_list![material_descriptor, _rest]| {
                                         let descriptor = material_descriptor
@@ -221,7 +221,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
             .push(self.pipelines.depth_prepass)
             .build();
         let depth_prepass =
-            context.opperate_mut(index_list, |unpack_list![pipeline, _rest]| {
+            context.operate_mut(index_list, |unpack_list![pipeline, _rest]| {
                 let depth_prepass = context.record_command(depth_prepass, |command| {
                     draw_graph.pipeline_states.iter().fold(
                         command,
@@ -268,9 +268,8 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
             .push(self.frames.secondary_commands)
             .build();
         for (_, pipeline_state) in draw_graph.pipeline_states {
-            let command = context.opperate_mut(
-                index_list,
-                |unpack_list![secondary_commands, _rest]| {
+            let command =
+                context.operate_mut(index_list, |unpack_list![secondary_commands, _rest]| {
                     let command = context
                         .begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
                             secondary_commands.next().1,
@@ -317,8 +316,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                         )
                     });
                     Result::<_, Box<dyn Error>>::Ok(command)
-                },
-            )??;
+                })??;
             write_pass.push(command);
         }
         Ok(Commands {

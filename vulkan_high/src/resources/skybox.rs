@@ -104,7 +104,7 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
         let cubemap = context.create_resource::<Texture<_>, _>((cubemap, allocator))?;
         let index_list = ResourceIndexListBuilder::new().push(cubemap).build();
         let descriptor =
-            context.opperate_ref(index_list, |unpack_list![cubemap, _allocator]| {
+            context.operate_ref(index_list, |unpack_list![cubemap, _allocator]| {
                 let image_info = (&***cubemap).into();
                 context.create_resource(
                     DescriptorSetWriter::<TextureDescriptorSet>::new(1)
@@ -154,7 +154,7 @@ pub fn draw_skybox<
         .push(skybox.descriptor)
         .build();
     context
-        .opperate_ref(index_list, |unpack_list![descriptor, pipeline, _rest]| {
+        .operate_ref(index_list, |unpack_list![descriptor, pipeline, _rest]| {
             let command = bind_mesh_pack(
                 context,
                 command

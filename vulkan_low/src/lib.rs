@@ -338,7 +338,7 @@ impl Context {
     }
 
     #[inline]
-    pub fn opperate_ref<
+    pub fn operate_ref<
         I: ResourceIndexList,
         R,
         E,
@@ -348,11 +348,11 @@ impl Context {
         index: I,
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
-        self.storage.opperate_ref(index, f)
+        self.storage.operate_ref(index, f)
     }
 
     #[inline]
-    pub fn opperate_mut<
+    pub fn operate_mut<
         I: ResourceIndexList,
         R,
         E,
@@ -362,6 +362,6 @@ impl Context {
         index: I,
         f: F,
     ) -> GenCollectionResult<Result<R, E>> {
-        self.storage.opperate_mut(index, f)
+        self.storage.operate_mut(index, f)
     }
 }
