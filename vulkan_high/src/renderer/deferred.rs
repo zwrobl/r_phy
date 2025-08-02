@@ -31,8 +31,8 @@ use vulkan_low::{
                 },
                 image::{Image, Image2D, ImagePartial},
                 pipeline::{
-                    GraphicsPipeline, GraphicsPipelineConfig, GraphicsPipelineListBuilder,
-                    GraphicsPipelinePackList, ModuleLoader, Modules, ShaderDirectory,
+                    GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, Modules,
+                    ShaderDirectory,
                 },
                 render_pass::{RenderPass, Subpass},
                 swapchain::Swapchain,
@@ -54,7 +54,10 @@ use crate::{
         GBufferShadingPass, GBufferShadingPassPipeline, GBufferSkyboxPipeline, GBufferWritePass,
         PipelineLayoutMaterial, StatesDepthWriteDisabled,
     },
-    resources::{MaterialPackList, MeshPack, MeshPackList, MeshPackPartial, Skybox, SkyboxPartial},
+    resources::{
+        GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList, MeshPack,
+        MeshPackList, MeshPackPartial, Skybox, SkyboxPartial,
+    },
 };
 
 fn get_deferred_renderer_meshes() -> &'static [Mesh<CommonVertex>] {

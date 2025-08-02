@@ -22,10 +22,7 @@ use vulkan_low::{
         resources::{
             buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
             layout::presets::CameraDescriptorSet,
-            pipeline::{
-                GraphicsPipelineConfig, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
-                ModuleLoader,
-            },
+            pipeline::{GraphicsPipelineConfig, ModuleLoader},
             render_pass::RenderPassConfig,
             ResourceIndex,
         },
@@ -48,7 +45,9 @@ use vulkan_low::device::{
     },
 };
 
-use crate::resources::{MaterialPackList, MeshPackList};
+use crate::resources::{
+    GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList, MeshPackList,
+};
 
 pub trait Frame: 'static {
     type Shader<S: ShaderType>: ShaderType + GraphicsPipelineConfig + ModuleLoader;

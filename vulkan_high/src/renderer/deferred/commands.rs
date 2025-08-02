@@ -15,7 +15,6 @@ use vulkan_low::{
             descriptor::Descriptor,
             framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
             layout::presets::CameraDescriptorSet,
-            pipeline::GraphicsPipelinePackList,
             swapchain::SwapchainFrame,
             ResourceIndexListBuilder,
         },
@@ -29,7 +28,7 @@ use crate::{
         AttachmentsGBuffer, DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass,
         GBufferSkyboxPass,
     },
-    resources::{bind_mesh_pack, draw_skybox},
+    resources::{bind_mesh_pack, draw_skybox, GraphicsPipelinePackList},
 };
 
 use super::DeferredRendererContext;

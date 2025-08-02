@@ -18,18 +18,18 @@ use vulkan_low::{
             presets::{ModelMatrix, ModelNormalMatrix},
             DescriptorLayout,
         },
-        pipeline::{
-            GraphicsPipeline, GraphicsPipelinePackList, PipelineBindData, PushConstantRangeMapper,
-        },
+        pipeline::{GraphicsPipeline, PipelineBindData, PushConstantRangeMapper},
         swapchain::SwapchainFrame,
-        ResourceIndexListBuilder,
+        ResourceIndex, ResourceIndexListBuilder,
     },
     index_list, Context,
 };
 
 use crate::{
     renderer::deferred::presets::{AttachmentsGBuffer, DeferedRenderPass, GBufferWritePass},
-    resources::{bind_mesh_pack, MaterialPackList, MeshPackBinding, MeshPackList},
+    resources::{
+        bind_mesh_pack, GraphicsPipelinePackList, MaterialPackList, MeshPackBinding, MeshPackList,
+    },
 };
 
 use super::{Commands, DeferredRendererContext, DeferredRendererFrameState, DeferredShader};
@@ -141,7 +141,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                 .draw_graph
                 .pipeline_states
                 .entry(pipeline_index)
-                .or_insert_with(|| self.get_pipeline_state(shader));
+                .or_insert_with(|| self.get_pipeline_state(context, shader));
             let descriptor_index = DescriptorIndex::get(drawable.material());
             let descriptor_state = pipeline_state
                 .descriptor_states
@@ -160,11 +160,13 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
                                 )
                                 .unwrap()
                                 .unwrap();
-                            self.get_descriptor_binding_data(material_descriptor, shader)
+                            self.get_descriptor_binding_data(context, material_descriptor, shader)
                         });
-                    let camera_binding_data = Some(
-                        self.get_descriptor_binding_data(current_frame.camera_descriptor, shader),
-                    );
+                    let camera_binding_data = Some(self.get_descriptor_binding_data(
+                        context,
+                        current_frame.camera_descriptor,
+                        shader,
+                    ));
                     DescriptorState {
                         sets: [material_binding_data, camera_binding_data]
                             .into_iter()
@@ -323,34 +325,51 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
         })
     }
 
-    fn get_pipeline_state<S: ShaderType>(&self, shader: ShaderHandle<S>) -> PipelineState {
-        let pipeline_index = shader.index() as usize;
-        let pipeline: GraphicsPipeline<DeferredShader<S>> = self
+    fn get_pipeline_state<S: ShaderType>(
+        &self,
+        context: &Context,
+        shader: ShaderHandle<S>,
+    ) -> PipelineState {
+        let pipeline: ResourceIndex<GraphicsPipeline<DeferredShader<S>>> = self
             .pipelines
             .write_pass
             .try_get()
             .unwrap()
-            .get(pipeline_index);
+            .get(shader.index() as usize);
+        let (pipeline_bind_data, push_constant_mapper) = context
+            .operate_ref(index_list![pipeline], |unpack_list![pipeline]| {
+                let binding = pipeline.get_binding_data();
+                let mapper = PushConstantRangeMapper::new(&pipeline);
+                Result::<_, Infallible>::Ok((binding, mapper))
+            })
+            .unwrap()
+            .unwrap();
         PipelineState {
-            pipeline_bind_data: pipeline.get_binding_data(),
-            push_constant_mapper: PushConstantRangeMapper::new(&pipeline),
+            pipeline_bind_data,
+            push_constant_mapper,
             descriptor_states: HashMap::new(),
         }
     }
 
     fn get_descriptor_binding_data<S: ShaderType, L: DescriptorLayout>(
         &self,
+        context: &Context,
         descriptor: Descriptor<L>,
         shader: ShaderHandle<S>,
     ) -> DescriptorBindingData {
-        let pipeline_index = shader.index() as usize;
-        let pipeline: GraphicsPipeline<DeferredShader<S>> = self
+        let pipeline: ResourceIndex<GraphicsPipeline<DeferredShader<S>>> = self
             .pipelines
             .write_pass
             .try_get()
             .unwrap()
-            .get(pipeline_index);
-        descriptor.get_binding_data(&pipeline).unwrap()
+            .get(shader.index() as usize);
+        context
+            .operate_ref(index_list![pipeline], |unpack_list![pipeline]| {
+                let binding = descriptor.get_binding_data(&pipeline)?;
+                Result::<_, Box<dyn Error>>::Ok(binding)
+            })
+            .unwrap()
+            .unwrap()
     }
 }
 

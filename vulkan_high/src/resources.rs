@@ -1,9 +1,11 @@
 mod material;
 mod mesh;
+mod pipeline;
 mod skybox;
 
 pub use material::*;
 pub use mesh::*;
+pub use pipeline::*;
 pub use skybox::*;
 
 use std::convert::Infallible;

@@ -18,9 +18,6 @@ use graphics::{
 use std::convert::Infallible;
 use std::path::Path;
 use std::{cell::RefCell, error::Error, marker::PhantomData, rc::Rc};
-use vulkan_low::device::raw::resources::pipeline::{
-    GraphicsPipelineListBuilder, GraphicsPipelinePackList,
-};
 use winit::window::Window;
 
 use vulkan_low::device::raw::allocator::{AllocatorIndex, Static, StaticConfig};
@@ -29,8 +26,9 @@ use vulkan_low::device::raw::Partial;
 use crate::frame::{CameraUniform, CameraUniformPartial, Frame, FrameContext};
 use crate::renderer::deferred::{DeferredRenderer, DeferredRendererPartial};
 use crate::resources::{
-    MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
-    MeshPackListBuilder, MeshPackListPartial,
+    GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList,
+    MaterialPackListBuilder, MaterialPackListPartial, MeshPackList, MeshPackListBuilder,
+    MeshPackListPartial,
 };
 
 #[derive(Debug, Clone, Copy)]
