@@ -7,7 +7,7 @@ use std::{convert::Infallible, error::Error, marker::PhantomData};
 
 use type_kit::{
     unpack_list, Cons, Create, CreateCollection, CreateResult, Destroy, DestroyCollection,
-    DestroyResult, DropGuardError,
+    DestroyResult, DropGuard, DropGuardError,
 };
 
 use graphics::{
@@ -97,7 +97,7 @@ pub trait FrameContext: Sized {
 }
 
 pub struct CameraUniformPartial {
-    buffer: UniformBufferPartial<CameraMatrices, Graphics>,
+    buffer: DropGuard<UniformBufferPartial<CameraMatrices, Graphics>>,
 }
 
 impl Destroy for CameraUniformPartial {
@@ -106,7 +106,8 @@ impl Destroy for CameraUniformPartial {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.buffer.destroy(context)
+        let _ = self.buffer.destroy(context);
+        Ok(())
     }
 }
 
@@ -119,11 +120,12 @@ impl Partial for CameraUniformPartial {
 impl CameraUniform {
     #[inline]
     pub fn prepare<R: Frame>(context: &Context, renderer: &R) -> VkResult<CameraUniformPartial> {
+        let partial = UniformBufferPartial::create(
+            UniformBufferInfoBuilder::new().with_len(renderer.get_num_frames()),
+            &context,
+        )?;
         Ok(CameraUniformPartial {
-            buffer: UniformBufferPartial::create(
-                UniformBufferInfoBuilder::new().with_len(renderer.get_num_frames()),
-                &context,
-            )?,
+            buffer: DropGuard::new(partial),
         })
     }
 }

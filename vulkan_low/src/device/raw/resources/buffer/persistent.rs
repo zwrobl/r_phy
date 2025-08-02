@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use type_kit::{Create, Destroy, DestroyResult, FromGuard};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard};
 
 use crate::{
     device::{
@@ -69,7 +69,7 @@ impl FromGuard for PersistentBuffer {
 }
 
 impl Create for PersistentBuffer {
-    type Config<'a> = (BufferPartial<HostCoherent>, AllocatorIndex);
+    type Config<'a> = (DropGuard<BufferPartial<HostCoherent>>, AllocatorIndex);
     type CreateError = ResourceError;
 
     #[inline]

@@ -1,4 +1,4 @@
-use type_kit::{Cons, Destroy, TypedNil};
+use type_kit::{Cons, Destroy, DropGuard, TypedNil};
 
 use crate::{device::raw::allocator::AllocatorBuilder, Context};
 
@@ -11,6 +11,20 @@ where
     for<'a> Self: Destroy<Context<'a> = &'a Context>,
 {
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B);
+}
+
+// For now, we manually wrap partial instance in the DropGuard,
+// and all implementations of Create using Partial instances as Config,
+// require them to be wrapped in DropGuard, this is so external user can
+// prepare resource and query for its memory requirements wihtout need to
+// insert it to the Context ResourceStorage, yet enforcing that the resource is properly destroyed
+// either when target Resource is created or if not the partial .destroy() is called manually.
+// TODO: Come up with a better way of enforcing this pattern
+impl<T: Partial> Partial for DropGuard<T> {
+    #[inline]
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, _builder: &mut B) {
+        self.as_ref().register_memory_requirements(_builder);
+    }
 }
 
 impl<T: Partial> Partial for Vec<T> {

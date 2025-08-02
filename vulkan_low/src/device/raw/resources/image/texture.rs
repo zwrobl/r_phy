@@ -5,7 +5,9 @@ pub use reader::*;
 use std::convert::Infallible;
 
 use ash::vk;
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
+use type_kit::{
+    Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardCollection,
+};
 
 use crate::{
     device::{
@@ -28,7 +30,7 @@ use crate::{
 };
 
 pub struct TexturePartial<V: ImageType, R: ImageReader<Type = V>> {
-    image: ImagePartial<V, DeviceLocal>,
+    image: DropGuard<ImagePartial<V, DeviceLocal>>,
     reader: R,
 }
 
@@ -38,7 +40,7 @@ impl<V: ImageType, R: ImageReader<Type = V>> Create for TexturePartial<V, R> {
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let image = ImagePartial::create(config.get_create_info()?, context)?;
+        let image = DropGuard::new(ImagePartial::create(config.get_create_info()?, context)?);
         Ok(TexturePartial {
             image,
             reader: config,
@@ -62,7 +64,8 @@ impl<V: ImageType, R: ImageReader<Type = V>> Destroy for TexturePartial<V, R> {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.image.destroy(context)
+        let _ = self.image.destroy(context);
+        Ok(())
     }
 }
 
@@ -89,15 +92,20 @@ impl<V: ImageType> From<&Texture<V>> for vk::DescriptorImageInfo {
 }
 
 impl<V: ImageType> Create for Texture<V> {
-    type Config<'a> = (TexturePartial<V, V::ImageReader<'a>>, AllocatorIndex);
+    type Config<'a> = (
+        DropGuard<TexturePartial<V, V::ImageReader<'a>>>,
+        AllocatorIndex,
+    );
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (TexturePartial { image, mut reader }, allocator) = config;
+        let (texture_partial, allocator) = config;
+        let TexturePartial { image, mut reader } = unsafe { texture_partial.unwrap() };
         let mut image = Image::create((image, allocator), context)?;
         let mut builder = StagingBufferBuilder::new();
         let image_range = builder.append::<u8>(reader.required_buffer_size());
-        let stating_buffer_partial = StagingBufferPartial::create(builder, context)?;
+        let stating_buffer_partial =
+            DropGuard::new(StagingBufferPartial::create(builder, context)?);
         {
             let mut staging_buffer = StagingBuffer::create(
                 (stating_buffer_partial, context.default_allocator()),

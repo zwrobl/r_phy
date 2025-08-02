@@ -1,7 +1,7 @@
 use std::{any::TypeId, convert::Infallible, error::Error, marker::PhantomData};
 
 use ash::vk;
-use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, FromGuard};
+use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard};
 
 use vulkan_low::{
     device::raw::{
@@ -23,7 +23,7 @@ use vulkan_low::{
 use super::{Material, TextureSamplers};
 
 struct MaterialUniformPartial<'a, M: Material> {
-    uniform: UniformBufferPartial<PodUniform<M::Uniform, FragmentStage>, Graphics>,
+    uniform: DropGuard<UniformBufferPartial<PodUniform<M::Uniform, FragmentStage>, Graphics>>,
     data: Vec<&'a M::Uniform>,
 }
 
@@ -39,7 +39,8 @@ impl<'b, M: Material> Destroy for MaterialUniformPartial<'b, M> {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.uniform.destroy(context)
+        let _ = self.uniform.destroy(context);
+        Ok(())
     }
 }
 
@@ -50,7 +51,7 @@ pub struct MaterialPackData<M: Material> {
 }
 
 pub struct MaterialPackPartial<'a, M: Material, R: ImageReader<Type = Image2D>> {
-    textures: Option<Vec<TexturePartial<Image2D, R>>>,
+    textures: Option<Vec<DropGuard<TexturePartial<Image2D, R>>>>,
     uniforms: Option<MaterialUniformPartial<'a, M>>,
     num_materials: usize,
 }
@@ -122,7 +123,7 @@ impl<'a, M: Material, T: Material> TryFrom<&'a MaterialPack<M>> for MaterialPack
 fn prepare_material_pack_textures<'a, M: Material>(
     context: &Context,
     materials: &'a [M],
-) -> VkResult<Option<Vec<TexturePartial<Image2D, Image2DReader<'a>>>>> {
+) -> VkResult<Option<Vec<DropGuard<TexturePartial<Image2D, Image2DReader<'a>>>>>> {
     if M::NUM_IMAGES > 0 {
         let textures = materials
             .iter()
@@ -132,7 +133,10 @@ fn prepare_material_pack_textures<'a, M: Material>(
                 material
                     .images()
                     .unwrap()
-                    .map(|image| TexturePartial::create(Image2DReader::new(image)?, context))
+                    .map(|image| {
+                        TexturePartial::create(Image2DReader::new(image)?, context)
+                            .map(DropGuard::new)
+                    })
                     .collect::<Vec<_>>()
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -145,7 +149,7 @@ fn prepare_material_pack_textures<'a, M: Material>(
 #[inline]
 fn allocate_material_pack_textures_memory<'a>(
     context: &Context,
-    textures: Vec<TexturePartial<Image2D, Image2DReader>>,
+    textures: Vec<DropGuard<TexturePartial<Image2D, Image2DReader<'a>>>>,
     allocator: AllocatorIndex,
 ) -> ResourceResult<Vec<ResourceIndex<Texture<Image2D>>>> {
     textures
@@ -167,7 +171,10 @@ fn prepare_material_pack_uniforms<'a, M: Material>(
             UniformBufferInfoBuilder::new().with_len(materials.len()),
             context,
         )?;
-        Ok(Some(MaterialUniformPartial { uniform, data }))
+        Ok(Some(MaterialUniformPartial {
+            uniform: DropGuard::new(uniform),
+            data,
+        }))
     } else {
         Ok(None)
     }

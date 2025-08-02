@@ -6,7 +6,7 @@ use std::{
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardCollection};
 
 use crate::{
     device::{
@@ -81,7 +81,7 @@ impl<U: AnyBitPattern, O: Operation> UniformBufferInfo<U, O> {
 
 #[derive(Debug)]
 pub struct UniformBufferPartial<U: AnyBitPattern, O: Operation> {
-    partial: BufferPartial<HostCoherent>,
+    partial: DropGuard<BufferPartial<HostCoherent>>,
     _phantom: PhantomData<(U, O)>,
 }
 
@@ -106,7 +106,7 @@ impl<U: AnyBitPattern, O: Operation> Create for UniformBufferPartial<U, O> {
     ) -> type_kit::CreateResult<Self> {
         let partial = BufferPartial::create(config.build(context).get_buffer_info(), context)?;
         Ok(UniformBufferPartial {
-            partial,
+            partial: DropGuard::new(partial),
             _phantom: PhantomData,
         })
     }
@@ -119,7 +119,8 @@ impl<U: AnyBitPattern, O: Operation> Destroy for UniformBufferPartial<U, O> {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.partial.destroy(context)
+        let _ = self.partial.destroy(context);
+        Ok(())
     }
 }
 
@@ -171,7 +172,7 @@ impl<U: AnyBitPattern, O: Operation> DerefMut for UniformBuffer<U, O> {
 }
 
 impl<U: AnyBitPattern, O: Operation> Create for UniformBuffer<U, O> {
-    type Config<'a> = (UniformBufferPartial<U, O>, AllocatorIndex);
+    type Config<'a> = (DropGuard<UniformBufferPartial<U, O>>, AllocatorIndex);
     type CreateError = ResourceError;
 
     #[inline]
@@ -179,7 +180,8 @@ impl<U: AnyBitPattern, O: Operation> Create for UniformBuffer<U, O> {
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (UniformBufferPartial { partial, .. }, allocator) = config;
+        let (buffer_partial, allocator) = config;
+        let UniformBufferPartial { partial, .. } = unsafe { buffer_partial.unwrap() };
         let buffer = PersistentBuffer::create((partial, allocator), context)?;
         Ok(UniformBuffer {
             buffer,

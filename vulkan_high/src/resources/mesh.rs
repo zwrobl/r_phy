@@ -4,7 +4,7 @@ mod pack;
 use ash::vk;
 pub use list::*;
 pub use pack::*;
-use type_kit::{unpack_list, Cons};
+use type_kit::{unpack_list, Cons, DropGuard};
 
 use std::{convert::Infallible, ops::Index};
 
@@ -86,7 +86,7 @@ impl<V: Vertex> From<MeshByteRange> for MeshRange<V> {
 pub struct MeshPackDataPartial<'a, V: Vertex> {
     meshes: &'a [Mesh<V>],
     buffer_ranges: BufferRanges,
-    buffer: BufferPartial<DeviceLocal>,
+    buffer: DropGuard<BufferPartial<DeviceLocal>>,
 }
 
 #[derive(Debug)]

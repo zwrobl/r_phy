@@ -1,7 +1,7 @@
 use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
 use ash::vk;
-use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult};
+use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard};
 
 use graphics::model::{Mesh, Vertex};
 use vulkan_low::{
@@ -66,7 +66,7 @@ impl<'b, V: Vertex> Create for MeshPackPartial<'b, V> {
             context,
         )?;
         let partial = MeshPackDataPartial {
-            buffer,
+            buffer: DropGuard::new(buffer),
             buffer_ranges,
             meshes: config,
         };
@@ -80,7 +80,8 @@ impl<'b, V: Vertex> Destroy for MeshPackPartial<'b, V> {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.partial.buffer.destroy(context)
+        let _ = self.partial.buffer.destroy(context);
+        Ok(())
     }
 }
 
@@ -119,7 +120,7 @@ impl<V: Vertex> Create for MeshPack<V> {
         let (vertex_ranges, index_ranges) = {
             let mut staging_buffer = StagingBuffer::create(
                 (
-                    StagingBufferPartial::create(builder, context)?,
+                    DropGuard::new(StagingBufferPartial::create(builder, context)?),
                     context.default_allocator(),
                 ),
                 &context,

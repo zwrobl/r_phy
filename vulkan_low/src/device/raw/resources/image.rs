@@ -21,7 +21,9 @@ use crate::{
     error::{ResourceError, ResourceResult},
     Context,
 };
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
+use type_kit::{
+    Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardCollection,
+};
 
 use super::Resource;
 
@@ -290,20 +292,17 @@ impl<V: ImageType, M: MemoryProperties> Resource for Image<V, M> {
 }
 
 impl<V: ImageType, M: MemoryProperties> Create for Image<V, M> {
-    type Config<'a> = (ImagePartial<V, M>, AllocatorIndex);
+    type Config<'a> = (DropGuard<ImagePartial<V, M>>, AllocatorIndex);
     type CreateError = ResourceError;
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (
-            ImagePartial {
-                image,
-                alloc_req,
-                create_info,
-                ..
-            },
-            allocator,
-        ) = config;
+        let (image_partial, allocator) = config;
+        let ImagePartial {
+            image,
+            alloc_req,
+            create_info,
+        } = unsafe { image_partial.unwrap() };
         let allocation = context.allocate(allocator, alloc_req)?;
         context.bind_memory(image, allocation)?;
         let view = ImageView::create(create_info.get_view_create_info(image), context)?;

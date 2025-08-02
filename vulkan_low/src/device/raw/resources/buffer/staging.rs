@@ -8,7 +8,7 @@ use std::{
 
 use ash::vk;
 use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
-use type_kit::{Create, CreateResult, Destroy, DestroyResult};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard};
 
 use crate::{
     device::{
@@ -57,7 +57,7 @@ impl StagingBufferBuilder {
 
 #[derive(Debug)]
 pub struct StagingBufferPartial {
-    partial: BufferPartial<HostCoherent>,
+    partial: DropGuard<BufferPartial<HostCoherent>>,
 }
 
 impl Partial for StagingBufferPartial {
@@ -85,7 +85,9 @@ impl Create for StagingBufferPartial {
                 .with_size(config.range.end as vk::DeviceSize),
             context,
         )?;
-        Ok(StagingBufferPartial { partial })
+        Ok(StagingBufferPartial {
+            partial: DropGuard::new(partial),
+        })
     }
 }
 
@@ -96,7 +98,8 @@ impl Destroy for StagingBufferPartial {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.partial.destroy(context)
+        let _ = self.partial.destroy(context);
+        Ok(())
     }
 }
 
@@ -254,12 +257,13 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
 }
 
 impl Create for StagingBuffer {
-    type Config<'a> = (StagingBufferPartial, AllocatorIndex);
+    type Config<'a> = (DropGuard<StagingBufferPartial>, AllocatorIndex);
     type CreateError = ResourceError;
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (StagingBufferPartial { partial }, allocator) = config;
+        let (buffer_partial, allocator) = config;
+        let StagingBufferPartial { partial } = unsafe { buffer_partial.unwrap() };
         let buffer = PersistentBuffer::create((partial, allocator), context)?;
         Ok(StagingBuffer { buffer })
     }

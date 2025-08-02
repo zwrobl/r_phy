@@ -31,7 +31,7 @@ pub type LayoutSkybox =
     PipelineLayoutBuilder<Cons<TextureDescriptorSet, Nil>, Cons<CameraMatrices, Nil>>;
 
 pub struct SkyboxPartial {
-    cubemap: TexturePartial<ImageCube, ImageCubeReader>,
+    cubemap: DropGuard<TexturePartial<ImageCube, ImageCubeReader>>,
     cube: MeshPackPartial<'static, CommonVertex>,
 }
 
@@ -67,7 +67,10 @@ impl Create for SkyboxPartial {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         Ok(SkyboxPartial {
-            cubemap: TexturePartial::create(ImageCubeReader::new(config)?, context)?,
+            cubemap: DropGuard::new(TexturePartial::create(
+                ImageCubeReader::new(config)?,
+                context,
+            )?),
             cube: MeshPackPartial::create(get_skybox_meshes(), context)?,
         })
     }

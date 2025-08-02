@@ -111,11 +111,11 @@ impl<S: ShaderType> ModuleLoader for DeferredShader<S> {
 }
 
 pub struct GBufferPartial {
-    pub combined: ImagePartial<Image2D, DeviceLocal>,
-    pub albedo: ImagePartial<Image2D, DeviceLocal>,
-    pub normal: ImagePartial<Image2D, DeviceLocal>,
-    pub position: ImagePartial<Image2D, DeviceLocal>,
-    pub depth: ImagePartial<Image2D, DeviceLocal>,
+    pub combined: DropGuard<ImagePartial<Image2D, DeviceLocal>>,
+    pub albedo: DropGuard<ImagePartial<Image2D, DeviceLocal>>,
+    pub normal: DropGuard<ImagePartial<Image2D, DeviceLocal>>,
+    pub position: DropGuard<ImagePartial<Image2D, DeviceLocal>>,
+    pub depth: DropGuard<ImagePartial<Image2D, DeviceLocal>>,
 }
 
 pub struct DeferredRendererPartial {
@@ -293,11 +293,11 @@ impl Create for GBufferPartial {
 
     fn create<'a, 'b>(_config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         Ok(GBufferPartial {
-            combined: context.prepare_color_attachment_image()?,
-            albedo: context.prepare_color_attachment_image()?,
-            normal: context.prepare_color_attachment_image()?,
-            position: context.prepare_color_attachment_image()?,
-            depth: context.prepare_depth_stencil_attachment_image()?,
+            combined: DropGuard::new(context.prepare_color_attachment_image()?),
+            albedo: DropGuard::new(context.prepare_color_attachment_image()?),
+            normal: DropGuard::new(context.prepare_color_attachment_image()?),
+            position: DropGuard::new(context.prepare_color_attachment_image()?),
+            depth: DropGuard::new(context.prepare_depth_stencil_attachment_image()?),
         })
     }
 }

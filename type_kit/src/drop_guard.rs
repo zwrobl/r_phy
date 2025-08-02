@@ -435,6 +435,20 @@ impl<T: Destroy> DropGuard<T> {
         let inner = Some(inner);
         Self { inner }
     }
+
+    // This method is unsafe because it allows you to take ownership of the inner resource,
+    // bypassing enforcement of the destruction call before drop for the inner type
+    #[inline]
+    pub unsafe fn unwrap(mut self) -> T {
+        #[cfg(debug_assertions)]
+        let inner = self
+            .inner
+            .take()
+            .expect("DropGuard inner resource was already destroyed");
+        #[cfg(not(debug_assertions))]
+        let inner = self.inner;
+        inner
+    }
 }
 
 impl<T: Create + Destroy> From<T> for DropGuard<T> {
@@ -600,6 +614,9 @@ impl<T: Destroy> Drop for DropGuard<T> {
     #[inline]
     fn drop(&mut self) {
         #[cfg(debug_assertions)]
+        // TODO: Panic on drop is problematic, as it can obscure the original error
+        // that caused the stack to unwind and lead to DropGuard being dropped without
+        // destroy call. Consider using a logging mechanism instead.
         if self.inner.is_some() {
             panic!(
                 "DropGuard<{}> inner resource was not destroyed before drop! \
