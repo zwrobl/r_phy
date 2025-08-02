@@ -6,12 +6,15 @@ use ash::vk;
 
 use crate::{
     device::{
-        raw::resources::framebuffer::{
-            AttachmentFormatInfo, AttachmentList, AttachmentListFormats, AttachmentReference,
-            AttachmentReferences, AttachmentTarget, AttachmentTransistions, AttachmentTransition,
-            IndexedAttachmentReference, References, Transitions,
+        raw::resources::{
+            framebuffer::{
+                AttachmentFormatInfo, AttachmentList, AttachmentListFormats, AttachmentReference,
+                AttachmentReferences, AttachmentTarget, AttachmentTransistions,
+                AttachmentTransition, AttachmentUsage, IndexedAttachmentReference, References,
+                Transitions,
+            },
+            TypeUniqueResource,
         },
-        raw::resources::TypeUniqueResource,
         AttachmentProperties,
     },
     error::ResourceError,
@@ -117,31 +120,31 @@ impl SubpassDescription {
 
     pub fn get<R: AttachmentReferences>(references: &R) -> Self {
         let mut references = Self::get_references(references.get_references());
-        references.sort_by_key(|(target, _)| *target as usize);
+        references.sort_by_key(|(target, _)| target.get_sort_key());
         let preserve = references
             .iter()
-            .filter(|(target, _)| *target == AttachmentTarget::Preserve)
+            .filter(|(target, _)| target.try_get_usage().is_none())
             .map(|(_, reference)| reference.attachment)
             .collect::<Vec<_>>();
 
         let num_color = references
             .iter()
-            .filter(|(target, _)| *target == AttachmentTarget::Color)
+            .filter(|(target, _)| target.try_get_usage() == Some(AttachmentUsage::Color))
             .count();
 
         let num_depth_stencil = references
             .iter()
-            .filter(|(target, _)| *target == AttachmentTarget::DepthStencil)
+            .filter(|(target, _)| target.try_get_usage() == Some(AttachmentUsage::DepthStencil))
             .count();
 
         let num_resolve = references
             .iter()
-            .filter(|(target, _)| *target == AttachmentTarget::Resolve)
+            .filter(|(target, _)| target.try_get_usage() == Some(AttachmentUsage::Resolve))
             .count();
 
         let num_input = references
             .iter()
-            .filter(|(target, _)| *target == AttachmentTarget::Input)
+            .filter(|(target, _)| target.try_get_usage() == Some(AttachmentUsage::Input))
             .count();
 
         let references = references

@@ -1,6 +1,5 @@
 use std::{any::TypeId, convert::Infallible, error::Error, marker::PhantomData};
 
-use ash::vk;
 use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard};
 
 use vulkan_low::{
@@ -10,7 +9,9 @@ use vulkan_low::{
             buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
             command::operation::Graphics,
             descriptor::{DescriptorPool, DescriptorSetWriter},
-            image::{Image2D, Image2DReader, ImageReader, Texture, TexturePartial},
+            image::{
+                DescriptorImageInfo, Image2D, Image2DReader, ImageReader, Texture, TexturePartial,
+            },
             layout::presets::{FragmentStage, PodUniform},
             ResourceIndex, ResourceIndexListBuilder,
         },
@@ -248,7 +249,7 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
             .map(|&texture| {
                 context
                     .operate_ref(index_list![texture], |unpack_list![texture]| {
-                        let image_info: vk::DescriptorImageInfo = texture.into();
+                        let image_info: DescriptorImageInfo = texture.into();
                         Result::<_, Infallible>::Ok(image_info)
                     })
                     .unwrap()

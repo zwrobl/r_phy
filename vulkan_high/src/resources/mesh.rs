@@ -1,7 +1,6 @@
 mod list;
 mod pack;
 
-use ash::vk;
 pub use list::*;
 pub use pack::*;
 use type_kit::{unpack_list, Cons, DropGuard};
@@ -19,7 +18,9 @@ use vulkan_low::{
             range::ByteRange,
             resources::{
                 buffer::{Buffer, BufferPartial},
-                command::{level::Level, operation::Operation, BufferBinding, RecordingCommand},
+                command::{
+                    level::Level, operation::Operation, BufferBinding, IndexType, RecordingCommand,
+                },
                 ResourceIndex, ResourceIndexListBuilder,
             },
         },
@@ -131,7 +132,7 @@ pub fn bind_mesh_pack<'a, T, L: Level, O: Operation>(
                         buffer: buffer.get_vk_buffer(),
                         range: pack.buffer_ranges[BufferType::Index],
                     },
-                    vk::IndexType::UINT32,
+                    IndexType::U32,
                 )
                 .bind_vertex_buffer(BufferBinding {
                     buffer: buffer.get_vk_buffer(),

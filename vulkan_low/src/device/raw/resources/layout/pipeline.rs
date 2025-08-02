@@ -4,7 +4,10 @@ use ash::vk;
 
 use crate::{
     device::raw::resources::{
-        layout::{DescriptorBinding, DescriptorLayout, DescriptorSetLayout},
+        descriptor::DescriptorWriteInfo,
+        layout::{
+            DescriptorBinding, DescriptorLayout, DescriptorSetLayout, DescriptorSetLayoutBinding,
+        },
         TypeUniqueResource,
     },
     error::{ResourceError, ResourceResult},
@@ -160,15 +163,15 @@ impl DescriptorLayoutList for Nil {
 }
 
 impl DescriptorLayout for Nil {
-    fn get_descriptor_set_bindings() -> Vec<vk::DescriptorSetLayoutBinding> {
+    fn get_descriptor_set_bindings() -> Vec<DescriptorSetLayoutBinding> {
         unreachable!()
     }
 
-    fn get_descriptor_pool_sizes(_num_sets: u32) -> Vec<vk::DescriptorPoolSize> {
+    fn get_descriptor_pools(_num_sets: u32) -> Vec<vk::DescriptorPoolSize> {
         unreachable!()
     }
 
-    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<vk::WriteDescriptorSet> {
+    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<DescriptorWriteInfo> {
         unreachable!()
     }
 }

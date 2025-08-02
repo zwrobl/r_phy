@@ -81,12 +81,27 @@ pub struct TextureRaw {
     sampler: SamplerRaw,
 }
 
-impl<V: ImageType> From<&Texture<V>> for vk::DescriptorImageInfo {
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorImageInfo {
+    pub(crate) image_info: vk::DescriptorImageInfo,
+}
+
+impl DescriptorImageInfo {
+    #[inline]
+    pub fn get_vk_descriptor_image_info(&self) -> vk::DescriptorImageInfo {
+        self.image_info
+    }
+}
+
+impl<V: ImageType> From<&Texture<V>> for DescriptorImageInfo {
+    #[inline]
     fn from(texture: &Texture<V>) -> Self {
-        vk::DescriptorImageInfo {
-            sampler: texture.sampler.get_vk_sampler(),
-            image_view: texture.image.view.get_vk_image_view(),
-            image_layout: texture.image.layout,
+        DescriptorImageInfo {
+            image_info: vk::DescriptorImageInfo {
+                sampler: texture.sampler.get_vk_sampler(),
+                image_view: texture.image.view.get_vk_image_view(),
+                image_layout: texture.image.layout,
+            },
         }
     }
 }

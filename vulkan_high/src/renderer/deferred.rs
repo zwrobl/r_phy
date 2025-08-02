@@ -4,8 +4,6 @@ mod presets;
 
 use std::{cell::RefCell, convert::Infallible, error::Error, path::Path, rc::Rc, sync::Once};
 
-use ash::vk;
-
 use commands::Commands;
 use draw_graph::DrawGraph;
 
@@ -27,15 +25,16 @@ use vulkan_low::{
             resources::{
                 descriptor::{DescriptorPool, DescriptorSetWriter},
                 framebuffer::{
-                    AttachmentReferences, AttachmentsBuilder, FramebufferBuilder, InputAttachment,
+                    AttachmentReferences, AttachmentsBuilder, Extent2D, FramebufferBuilder,
+                    InputAttachment,
                 },
-                image::{Image, Image2D, ImagePartial},
+                image::{Image, Image2D, ImagePartial, ImageView},
                 pipeline::{
                     GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, Modules,
                     ShaderDirectory,
                 },
                 render_pass::{RenderPass, Subpass},
-                swapchain::Swapchain,
+                swapchain::{Swapchain, SwapchainFramebufferConfigBuilder},
                 ResourceIndex, ResourceIndexListBuilder,
             },
             Partial,
@@ -332,12 +331,12 @@ impl Destroy for GBufferPartial {
     }
 }
 
-impl GBuffer {
-    pub fn get_framebuffer_builder(
+impl SwapchainFramebufferConfigBuilder<DeferedRenderPass<AttachmentsGBuffer>> for GBuffer {
+    fn get_framebuffer_builder(
         &self,
         context: &Context,
-        extent: vk::Extent2D,
-        swapchain_image: vk::ImageView,
+        swapchain_image: &ImageView<Image2D>,
+        extent: Extent2D,
     ) -> FramebufferBuilder<DeferedRenderPass<AttachmentsGBuffer>> {
         context
             .operate_ref(
@@ -353,11 +352,11 @@ impl GBuffer {
                         extent,
                         AttachmentsBuilder::new()
                             .push(swapchain_image)
-                            .push(depth.get_image_view().get_vk_image_view())
-                            .push(position.get_image_view().get_vk_image_view())
-                            .push(normal.get_image_view().get_vk_image_view())
-                            .push(albedo.get_image_view().get_vk_image_view())
-                            .push(combined.get_image_view().get_vk_image_view()),
+                            .push(depth.get_image_view())
+                            .push(position.get_image_view())
+                            .push(normal.get_image_view())
+                            .push(albedo.get_image_view())
+                            .push(combined.get_image_view()),
                     );
                     Result::<_, Infallible>::Ok(builder)
                 },
@@ -411,13 +410,8 @@ impl Create for DeferredRendererFrameData {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let g_buffer = GBuffer::create(config, context)?;
-        let framebuffer_builder = |swapchain_image, extent| {
-            g_buffer.get_framebuffer_builder(context, extent, swapchain_image)
-        };
         let swapchain = context
-            .create_resource::<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>, _>(
-                &framebuffer_builder,
-            )?;
+            .create_resource::<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>, _>(&g_buffer)?;
         let (framebuffer_index, num_frames) = {
             context
                 .operate_ref(index_list![swapchain], |unpack_list![swapchain]| {

@@ -187,7 +187,7 @@ impl<L: DescriptorLayout> Create for DescriptorPool<L> {
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let pool_sizes = L::get_descriptor_pool_sizes(config.num_sets() as u32);
+        let pool_sizes = L::get_descriptor_pools(config.num_sets() as u32);
         let pool_create_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
             .max_sets(config.num_sets() as u32);

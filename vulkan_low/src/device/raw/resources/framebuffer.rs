@@ -1,13 +1,13 @@
 pub mod presets;
 
-use std::{convert::Infallible, marker::PhantomData, ptr::NonNull, usize};
+use std::{convert::Infallible, fmt::Debug, marker::PhantomData, ops::Deref, ptr::NonNull, usize};
 
-use ash::vk::{self, Extent2D};
+use ash::vk;
 
 use crate::{
     device::{
         raw::resources::{
-            image::{Image, Image2D},
+            image::{DescriptorImageInfo, Image, Image2D, ImageType, ImageView},
             render_pass::{RenderPass, RenderPassConfig},
             Resource,
         },
@@ -24,29 +24,61 @@ pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
 }
 
-pub struct ClearNone {}
+#[derive(Debug, Clone, Copy)]
+pub struct ClearNone;
 
 impl ClearValue for ClearNone {
+    #[inline]
     fn get(&self) -> Option<vk::ClearValue> {
         None
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct ClearColor {
-    pub color: vk::ClearColorValue,
+    color: vk::ClearColorValue,
+}
+
+impl Debug for ClearColor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClearColor")
+            .field("color", unsafe { &self.color.float32 })
+            .finish()
+    }
+}
+
+impl ClearColor {
+    #[inline]
+    pub fn new(color: [f32; 4]) -> Self {
+        Self {
+            color: vk::ClearColorValue { float32: color },
+        }
+    }
 }
 
 impl ClearValue for ClearColor {
+    #[inline]
     fn get(&self) -> Option<vk::ClearValue> {
         Some(vk::ClearValue { color: self.color })
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct ClearDeptStencil {
-    pub depth_stencil: vk::ClearDepthStencilValue,
+    depth_stencil: vk::ClearDepthStencilValue,
+}
+
+impl ClearDeptStencil {
+    #[inline]
+    pub fn new(depth: f32, stencil: u32) -> Self {
+        Self {
+            depth_stencil: vk::ClearDepthStencilValue { depth, stencil },
+        }
+    }
 }
 
 impl ClearValue for ClearDeptStencil {
+    #[inline]
     fn get(&self) -> Option<vk::ClearValue> {
         Some(vk::ClearValue {
             depth_stencil: self.depth_stencil,
@@ -55,6 +87,7 @@ impl ClearValue for ClearDeptStencil {
 }
 
 impl ClearValue for Nil {
+    #[inline]
     fn get(&self) -> Option<vk::ClearValue> {
         unreachable!()
     }
@@ -149,12 +182,96 @@ impl<V: ClearValueList> ClearValueBuilder<V> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum AttachmentTarget {
+pub enum AttachmentUsage {
     Color,
     DepthStencil,
     Resolve,
     Input,
-    Preserve,
+}
+
+impl AttachmentUsage {
+    #[inline]
+    fn get_layout(&self) -> vk::ImageLayout {
+        match self {
+            Self::Color => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            Self::DepthStencil => vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            Self::Resolve => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            Self::Input => vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        }
+    }
+
+    #[inline]
+    pub fn get_usage_flags(&self) -> vk::ImageUsageFlags {
+        match self {
+            Self::Color => vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            Self::DepthStencil => vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            Self::Resolve => vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            Self::Input => vk::ImageUsageFlags::INPUT_ATTACHMENT,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AttachmentTarget {
+    Use(AttachmentUsage),
+    Preserve(AttachmentUsage),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AttachmentReference {
+    pub target: AttachmentTarget,
+    pub layout: vk::ImageLayout,
+    pub usage: vk::ImageUsageFlags,
+}
+
+impl Deref for AttachmentReference {
+    type Target = AttachmentTarget;
+
+    fn deref(&self) -> &Self::Target {
+        &self.target
+    }
+}
+
+impl AttachmentTarget {
+    pub fn get_reference(&self) -> AttachmentReference {
+        let usage = match *self {
+            Self::Use(usage) => usage,
+            Self::Preserve(usage) => usage,
+        };
+        AttachmentReference {
+            target: *self,
+            layout: usage.get_layout(),
+            usage: usage.get_usage_flags(),
+        }
+    }
+
+    pub fn try_get_usage(&self) -> Option<AttachmentUsage> {
+        match *self {
+            Self::Use(usage) => Some(usage),
+            Self::Preserve(_) => None,
+        }
+    }
+
+    pub fn get_sort_key(&self) -> usize {
+        match *self {
+            Self::Use(usage) => usage as usize,
+            Self::Preserve(_) => usize::MAX,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IndexedAttachmentReference {
+    pub reference: AttachmentReference,
+    pub index: u32,
+}
+
+impl Deref for IndexedAttachmentReference {
+    type Target = AttachmentReference;
+
+    fn deref(&self) -> &Self::Target {
+        &self.reference
+    }
 }
 
 pub struct InputAttachment {
@@ -169,27 +286,18 @@ impl From<&Image<Image2D, DeviceLocal>> for InputAttachment {
     }
 }
 
-impl From<&InputAttachment> for vk::DescriptorImageInfo {
+impl From<&InputAttachment> for DescriptorImageInfo {
     fn from(attachment: &InputAttachment) -> Self {
-        vk::DescriptorImageInfo {
-            image_view: attachment.image_view,
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            sampler: vk::Sampler::null(),
+        DescriptorImageInfo {
+            image_info: vk::DescriptorImageInfo {
+                image_view: attachment.image_view,
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                sampler: vk::Sampler::null(),
+            },
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct AttachmentReference {
-    pub target: AttachmentTarget,
-    pub layout: vk::ImageLayout,
-    pub usage: vk::ImageUsageFlags,
-}
-
-pub struct IndexedAttachmentReference {
-    pub reference: AttachmentReference,
-    pub index: u32,
-}
 pub trait AttachmentReferenceList {
     const LEN: usize;
     type Next: AttachmentReferenceList;
@@ -275,12 +383,12 @@ impl AttachmentReferenceBuilder<Nil> {
 impl<A: AttachmentList> AttachmentReferenceBuilder<A> {
     pub fn push<N: Attachment>(
         self,
-        reference: Option<AttachmentReference>,
+        target: Option<AttachmentTarget>,
     ) -> AttachmentReferenceBuilder<Cons<AttachmentImage<N>, A>> {
         let Self { references } = self;
         AttachmentReferenceBuilder {
             references: Cons {
-                head: reference,
+                head: target.map(|target| target.get_reference()),
                 tail: references,
             },
         }
@@ -315,8 +423,8 @@ impl<A: AttachmentList> AttachmentReferences for AttachmentReferenceBuilder<A> {
             .into_iter()
             .zip(&framebuffer.attachments)
             .filter_map(|(reference, &attachment)| {
-                if let Some(reference) = reference {
-                    if reference.reference.target == AttachmentTarget::Input {
+                if let Some(usage) = reference.map(|r| r.try_get_usage()).flatten() {
+                    if usage == AttachmentUsage::Input {
                         return Some(InputAttachment {
                             image_view: attachment,
                         });
@@ -329,11 +437,80 @@ impl<A: AttachmentList> AttachmentReferences for AttachmentReferenceBuilder<A> {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum LoadOp {
+    Load,
+    Clear,
+    DontCare,
+}
+
+impl LoadOp {
+    fn get_vk_load_op(self) -> vk::AttachmentLoadOp {
+        match self {
+            Self::Load => vk::AttachmentLoadOp::LOAD,
+            Self::Clear => vk::AttachmentLoadOp::CLEAR,
+            Self::DontCare => vk::AttachmentLoadOp::DONT_CARE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum StoreOp {
+    Store,
+    DontCare,
+}
+
+impl StoreOp {
+    fn get_vk_store_op(self) -> vk::AttachmentStoreOp {
+        match self {
+            Self::Store => vk::AttachmentStoreOp::STORE,
+            Self::DontCare => vk::AttachmentStoreOp::DONT_CARE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ImageLayout {
+    Undefined,
+    ColorAttachment,
+    DepthStencilAttachment,
+    ShaderReadOnly,
+    PresentSrc,
+}
+
+impl ImageLayout {
+    fn get_vk_image_layout(self) -> vk::ImageLayout {
+        match self {
+            Self::Undefined => vk::ImageLayout::UNDEFINED,
+            Self::ColorAttachment => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            Self::DepthStencilAttachment => vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            Self::ShaderReadOnly => vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            Self::PresentSrc => vk::ImageLayout::PRESENT_SRC_KHR,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct AttachmentTransition {
-    pub load_op: vk::AttachmentLoadOp,
-    pub store_op: vk::AttachmentStoreOp,
-    pub initial_layout: vk::ImageLayout,
-    pub final_layout: vk::ImageLayout,
+    pub(crate) load_op: vk::AttachmentLoadOp,
+    pub(crate) store_op: vk::AttachmentStoreOp,
+    pub(crate) initial_layout: vk::ImageLayout,
+    pub(crate) final_layout: vk::ImageLayout,
+}
+
+impl AttachmentTransition {
+    pub fn new(
+        load_op: LoadOp,
+        store_op: StoreOp,
+        initial_layout: ImageLayout,
+        final_layout: ImageLayout,
+    ) -> Self {
+        Self {
+            load_op: load_op.get_vk_load_op(),
+            store_op: store_op.get_vk_store_op(),
+            initial_layout: initial_layout.get_vk_image_layout(),
+            final_layout: final_layout.get_vk_image_layout(),
+        }
+    }
 }
 
 pub trait AttachmentTransitionList {
@@ -567,15 +744,15 @@ impl AttachmentsBuilder<Nil> {
 }
 
 impl<A: AttachmentList> AttachmentsBuilder<A> {
-    pub fn push<N: Attachment>(
+    pub fn push<N: Attachment, V: ImageType>(
         self,
-        view: vk::ImageView,
+        view: &ImageView<V>,
     ) -> AttachmentsBuilder<Cons<AttachmentImage<N>, A>> {
         let Self { attachments } = self;
         AttachmentsBuilder {
             attachments: Cons {
                 head: AttachmentImage {
-                    view,
+                    view: view.get_vk_image_view(),
                     _phantom: PhantomData,
                 },
 
@@ -589,16 +766,30 @@ impl<A: AttachmentList> AttachmentsBuilder<A> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Extent2D {
+    extent: vk::Extent2D,
+}
+
+impl Extent2D {
+    #[inline]
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            extent: vk::Extent2D { width, height },
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct FramebufferBuilder<C: RenderPassConfig> {
-    extent: Extent2D,
+    extent: vk::Extent2D,
     attachments: AttachmentsBuilder<C::Attachments>,
 }
 
 impl<C: RenderPassConfig> FramebufferBuilder<C> {
     pub fn new(extent: Extent2D, attachments: AttachmentsBuilder<C::Attachments>) -> Self {
         Self {
-            extent,
+            extent: extent.extent,
             attachments,
         }
     }

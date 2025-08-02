@@ -4,7 +4,6 @@ use std::{
     ops::{Deref, DerefMut, Index, IndexMut},
 };
 
-use ash::vk;
 use bytemuck::AnyBitPattern;
 use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardCollection};
 
@@ -16,7 +15,7 @@ use crate::{
             resources::{
                 buffer::{
                     persistent::PersistentBuffer, Buffer, BufferInfoBuilder, BufferPartial,
-                    BufferRaw,
+                    BufferRaw, BufferUsage, SharingMode,
                 },
                 command::operation::Operation,
                 Resource,
@@ -73,9 +72,9 @@ impl<U: AnyBitPattern, O: Operation> UniformBufferInfo<U, O> {
     fn get_buffer_info<'a>(&'a self) -> BufferInfoBuilder<'a, HostCoherent> {
         BufferInfoBuilder::<HostCoherent>::new()
             .with_queue_families(&self.queue_indices)
-            .with_sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .with_size((self.len * size_of::<U>()) as vk::DeviceSize)
-            .with_usage(vk::BufferUsageFlags::UNIFORM_BUFFER)
+            .with_sharing_mode(SharingMode::Exclusive)
+            .with_usage(BufferUsage::UniformBuffer)
+            .with_size(self.len * size_of::<U>())
     }
 }
 

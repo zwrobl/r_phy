@@ -34,6 +34,42 @@ pub struct BufferInfo<'a, M: MemoryProperties> {
     _phantom: PhantomData<M>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum SharingMode {
+    Exclusive,
+    Concurrent,
+}
+
+impl SharingMode {
+    fn get_vk_sharing_mode(self) -> vk::SharingMode {
+        match self {
+            Self::Exclusive => vk::SharingMode::EXCLUSIVE,
+            Self::Concurrent => vk::SharingMode::CONCURRENT,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BufferUsage {
+    VertexBuffer,
+    IndexBuffer,
+    TransferDst,
+    TransferSrc,
+    UniformBuffer,
+}
+
+impl BufferUsage {
+    fn get_vk_usage_flags(self) -> vk::BufferUsageFlags {
+        match self {
+            Self::VertexBuffer => vk::BufferUsageFlags::VERTEX_BUFFER,
+            Self::IndexBuffer => vk::BufferUsageFlags::INDEX_BUFFER,
+            Self::TransferDst => vk::BufferUsageFlags::TRANSFER_DST,
+            Self::TransferSrc => vk::BufferUsageFlags::TRANSFER_SRC,
+            Self::UniformBuffer => vk::BufferUsageFlags::UNIFORM_BUFFER,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct BufferInfoBuilder<'a, M: MemoryProperties> {
     size: Option<vk::DeviceSize>,
@@ -56,25 +92,26 @@ impl<'a, M: MemoryProperties> BufferInfoBuilder<'a, M> {
     }
 
     #[inline]
-    pub fn with_size(self, size: vk::DeviceSize) -> Self {
+    pub fn with_size(self, size: usize) -> Self {
         Self {
-            size: Some(size),
+            size: Some(size as vk::DeviceSize),
             ..self
         }
     }
 
     #[inline]
-    pub fn with_usage(self, usage: vk::BufferUsageFlags) -> Self {
+    pub fn with_usage(self, usage: BufferUsage) -> Self {
+        let current = self.usage.unwrap_or(vk::BufferUsageFlags::empty());
         Self {
-            usage: Some(usage),
+            usage: Some(current | usage.get_vk_usage_flags()),
             ..self
         }
     }
 
     #[inline]
-    pub fn with_sharing_mode(self, sharing_mode: vk::SharingMode) -> Self {
+    pub fn with_sharing_mode(self, sharing_mode: SharingMode) -> Self {
         Self {
-            sharing_mode: Some(sharing_mode),
+            sharing_mode: Some(sharing_mode.get_vk_sharing_mode()),
             ..self
         }
     }

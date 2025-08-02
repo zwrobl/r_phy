@@ -666,6 +666,21 @@ pub struct BufferBinding {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum IndexType {
+    U16,
+    U32,
+}
+
+impl IndexType {
+    pub fn get_vk_index_type(self) -> vk::IndexType {
+        match self {
+            IndexType::U16 => vk::IndexType::UINT16,
+            IndexType::U32 => vk::IndexType::UINT32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct DrawIndexed {
     pub index_count: u32,
     pub index_offset: u32,
@@ -988,7 +1003,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
     pub fn bind_index_buffer(
         self,
         buffer: impl Into<BufferBinding>,
-        index_type: vk::IndexType,
+        index_type: IndexType,
     ) -> Self {
         let binding = buffer.into();
         let RecordingCommand(command, device) = self;
@@ -997,7 +1012,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
                 L::buffer(&command.data),
                 binding.buffer,
                 binding.range.beg as vk::DeviceSize,
-                index_type,
+                index_type.get_vk_index_type(),
             );
         }
         RecordingCommand(command, device)

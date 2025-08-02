@@ -2,25 +2,143 @@ use std::{any::TypeId, collections::HashMap, convert::Infallible, marker::Phanto
 
 use ash::vk;
 
-use crate::{device::raw::resources::TypeUniqueResource, error::ResourceError, Context};
+use crate::{
+    device::raw::resources::{descriptor::DescriptorWriteInfo, TypeUniqueResource},
+    error::ResourceError,
+    Context,
+};
 use type_kit::{Cons, Create, Destroy, FromGuard, Nil};
+
+#[derive(Debug, Clone, Copy)]
+pub enum ShaderStage {
+    Vertex,
+    Fragment,
+}
+
+impl ShaderStage {
+    pub fn get_vk_stage_flags(self) -> vk::ShaderStageFlags {
+        match self {
+            Self::Vertex => vk::ShaderStageFlags::VERTEX,
+            Self::Fragment => vk::ShaderStageFlags::FRAGMENT,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DescriptorType {
+    CombinedImageSampler,
+    UniformBuffer,
+    InputAttachment,
+}
+
+impl DescriptorType {
+    #[inline]
+    pub fn pool_size(self, count: u32) -> DescriptorPoolSize {
+        DescriptorPoolSize::new(self, count)
+    }
+
+    #[inline]
+    pub fn write_info(self, binding: u32) -> DescriptorWriteInfo {
+        DescriptorWriteInfo::new(binding, self)
+    }
+
+    #[inline]
+    pub fn layout_binding(self, binding: u32) -> DescriptorSetLayoutBinding {
+        DescriptorSetLayoutBinding::new(self, binding)
+    }
+
+    pub(crate) fn get_vk_descriptor_type(self) -> vk::DescriptorType {
+        match self {
+            Self::CombinedImageSampler => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            Self::UniformBuffer => vk::DescriptorType::UNIFORM_BUFFER,
+            Self::InputAttachment => vk::DescriptorType::INPUT_ATTACHMENT,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorPoolSize {
+    ty: vk::DescriptorType,
+    count: u32,
+}
+
+impl DescriptorPoolSize {
+    #[inline]
+    pub fn new(ty: DescriptorType, count: u32) -> Self {
+        Self {
+            ty: ty.get_vk_descriptor_type(),
+            count,
+        }
+    }
+
+    #[inline]
+    pub fn get_vk_descriptor_pool_size(self) -> vk::DescriptorPoolSize {
+        vk::DescriptorPoolSize {
+            ty: self.ty,
+            descriptor_count: self.count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorSetLayoutBinding {
+    binding: u32,
+    count: u32,
+    ty: vk::DescriptorType,
+    stage_flags: vk::ShaderStageFlags,
+}
+
+impl DescriptorSetLayoutBinding {
+    #[inline]
+    pub fn new(ty: DescriptorType, binding: u32) -> Self {
+        Self {
+            ty: ty.get_vk_descriptor_type(),
+            binding,
+            count: 1,
+            stage_flags: vk::ShaderStageFlags::empty(),
+        }
+    }
+
+    #[inline]
+    pub fn with_shader_stage(self, stage: ShaderStage) -> Self {
+        Self {
+            stage_flags: self.stage_flags | stage.get_vk_stage_flags(),
+            ..self
+        }
+    }
+
+    #[inline]
+    pub fn with_descriptor_count(self, count: u32) -> Self {
+        Self { count, ..self }
+    }
+
+    fn get_vk_descriptor_set_layout_binding(self) -> vk::DescriptorSetLayoutBinding {
+        vk::DescriptorSetLayoutBinding {
+            binding: self.binding,
+            descriptor_type: self.ty,
+            descriptor_count: self.count,
+            stage_flags: self.stage_flags,
+            ..Default::default()
+        }
+    }
+}
 
 pub trait DescriptorBinding: 'static {
     fn has_data() -> bool;
 
-    fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding;
+    fn get_descriptor_set_binding(binding: u32) -> DescriptorSetLayoutBinding;
 
-    fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet;
+    fn get_descriptor_write(binding: u32) -> DescriptorWriteInfo;
 
-    fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize;
+    fn get_descriptor_pool(num_sets: u32) -> DescriptorPoolSize;
 }
 
 pub trait DescriptorLayout: 'static {
-    fn get_descriptor_set_bindings() -> Vec<vk::DescriptorSetLayoutBinding>;
+    fn get_descriptor_set_bindings() -> Vec<DescriptorSetLayoutBinding>;
 
-    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<vk::WriteDescriptorSet>;
+    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<DescriptorWriteInfo>;
 
-    fn get_descriptor_pool_sizes(num_sets: u32) -> Vec<vk::DescriptorPoolSize>;
+    fn get_descriptor_pools(num_sets: u32) -> Vec<vk::DescriptorPoolSize>;
 }
 
 pub trait DescriptorBindingList: 'static {
@@ -35,15 +153,15 @@ impl DescriptorBinding for Nil {
         unreachable!()
     }
 
-    fn get_descriptor_set_binding(_binding: u32) -> vk::DescriptorSetLayoutBinding {
+    fn get_descriptor_set_binding(_binding: u32) -> DescriptorSetLayoutBinding {
         unreachable!()
     }
 
-    fn get_descriptor_write(_binding: u32) -> vk::WriteDescriptorSet {
+    fn get_descriptor_write(_binding: u32) -> DescriptorWriteInfo {
         unreachable!()
     }
 
-    fn get_descriptor_pool_size(_num_sets: u32) -> vk::DescriptorPoolSize {
+    fn get_descriptor_pool(_num_sets: u32) -> DescriptorPoolSize {
         unreachable!()
     }
 }
@@ -95,8 +213,8 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
 
     fn next_descriptor_binding<'a, T: DescriptorBindingList>(
         binding: u32,
-        mut descriptor_bindings: Vec<vk::DescriptorSetLayoutBinding>,
-    ) -> Vec<vk::DescriptorSetLayoutBinding> {
+        mut descriptor_bindings: Vec<DescriptorSetLayoutBinding>,
+    ) -> Vec<DescriptorSetLayoutBinding> {
         if T::LEN > 0 {
             let next_binding = if T::Item::has_data() {
                 descriptor_bindings.push(T::Item::get_descriptor_set_binding(binding));
@@ -110,14 +228,14 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         }
     }
 
-    pub fn get_descriptor_bindings() -> Vec<vk::DescriptorSetLayoutBinding> {
+    pub fn get_descriptor_bindings() -> Vec<DescriptorSetLayoutBinding> {
         Self::next_descriptor_binding::<B>(0, Vec::with_capacity(B::LEN))
     }
 
     fn try_get_descriptor_writes<S: DescriptorBinding, T: DescriptorBindingList>(
         binding: u32,
-        mut vec: Vec<vk::WriteDescriptorSet>,
-    ) -> Vec<vk::WriteDescriptorSet> {
+        mut vec: Vec<DescriptorWriteInfo>,
+    ) -> Vec<DescriptorWriteInfo> {
         debug_assert!(S::has_data(), "DescriptorBinding has no data!");
         if T::LEN > 0 {
             if T::Item::has_data() {
@@ -133,7 +251,7 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         }
     }
 
-    pub fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<vk::WriteDescriptorSet> {
+    pub fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<DescriptorWriteInfo> {
         Self::try_get_descriptor_writes::<T, B>(0, Vec::new())
     }
 
@@ -143,7 +261,8 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
     ) {
         if T::LEN > 0 {
             if T::Item::has_data() {
-                let pool_size = T::Item::get_descriptor_pool_size(num_sets);
+                let pool_size =
+                    T::Item::get_descriptor_pool(num_sets).get_vk_descriptor_pool_size();
                 let descriptor_count = pool_sizes.entry(pool_size.ty).or_insert(0);
                 *descriptor_count += pool_size.descriptor_count;
             }
@@ -165,15 +284,15 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
 }
 
 impl<B: DescriptorBindingList> DescriptorLayout for DescriptorLayoutBuilder<B> {
-    fn get_descriptor_set_bindings() -> Vec<vk::DescriptorSetLayoutBinding> {
+    fn get_descriptor_set_bindings() -> Vec<DescriptorSetLayoutBinding> {
         Self::get_descriptor_bindings()
     }
 
-    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<vk::WriteDescriptorSet> {
+    fn get_descriptor_writes<T: DescriptorBinding>() -> Vec<DescriptorWriteInfo> {
         Self::get_descriptor_writes::<T>()
     }
 
-    fn get_descriptor_pool_sizes(num_sets: u32) -> Vec<vk::DescriptorPoolSize> {
+    fn get_descriptor_pools(num_sets: u32) -> Vec<vk::DescriptorPoolSize> {
         Self::get_descriptor_pool_sizes(num_sets)
     }
 }
@@ -222,10 +341,13 @@ impl<T: DescriptorLayout> Create for DescriptorSetLayout<T> {
         _config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
+        let bindings = T::get_descriptor_set_bindings()
+            .into_iter()
+            .map(|binding| binding.get_vk_descriptor_set_layout_binding())
+            .collect::<Vec<_>>();
         let layout = unsafe {
             context.create_descriptor_set_layout(
-                &vk::DescriptorSetLayoutCreateInfo::builder()
-                    .bindings(&T::get_descriptor_set_bindings()),
+                &vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings),
                 None,
             )?
         };

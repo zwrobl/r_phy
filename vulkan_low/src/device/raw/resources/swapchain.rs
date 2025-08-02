@@ -7,7 +7,8 @@ use type_kit::{
 
 use crate::{
     device::raw::resources::{
-        framebuffer::{FramebufferBuilder, FramebufferRaw},
+        framebuffer::{Extent2D, FramebufferBuilder, FramebufferRaw},
+        image::{Image2D, ImageView, ImageViewCreateInfo},
         render_pass::RenderPassConfig,
         Resource, ResourceIndex,
     },
@@ -43,7 +44,7 @@ pub struct SwapchainFrame<C: RenderPassConfig> {
 
 struct SwapchainImage {
     _image: vk::Image,
-    view: vk::ImageView,
+    view: ImageView<Image2D>,
 }
 
 #[derive(Clone, Copy)]
@@ -192,28 +193,17 @@ impl Context {
         image: vk::Image,
         surface_format: vk::SurfaceFormatKHR,
     ) -> ResourceResult<SwapchainImage> {
-        unsafe {
-            let view = self.device.create_image_view(
-                &vk::ImageViewCreateInfo::builder()
-                    .image(image)
-                    .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(surface_format.format)
-                    .components(vk::ComponentMapping::default())
-                    .subresource_range(vk::ImageSubresourceRange {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    }),
-                None,
-            )?;
-
-            Ok(SwapchainImage {
-                _image: image,
-                view,
-            })
-        }
+        let view = ImageView::create(
+            ImageViewCreateInfo::new()
+                .with_image(image)
+                .with_format(surface_format.format)
+                .with_aspect(vk::ImageAspectFlags::COLOR),
+            self,
+        )?;
+        Ok(SwapchainImage {
+            _image: image,
+            view,
+        })
     }
 }
 
@@ -247,22 +237,17 @@ impl Destroy for SwapchainImageSync {
     }
 }
 
-pub trait FramebufferConfigBuilder<C: RenderPassConfig> {
-    fn get(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> FramebufferBuilder<C>;
-}
-
-impl<C: RenderPassConfig, F> FramebufferConfigBuilder<C> for F
-where
-    F: Fn(vk::ImageView, vk::Extent2D) -> FramebufferBuilder<C>,
-{
-    #[inline]
-    fn get(&self, image_view: vk::ImageView, extent: vk::Extent2D) -> FramebufferBuilder<C> {
-        self(image_view, extent)
-    }
+pub trait SwapchainFramebufferConfigBuilder<C: RenderPassConfig> {
+    fn get_framebuffer_builder(
+        &self,
+        context: &Context,
+        image_view: &ImageView<Image2D>,
+        extent: Extent2D,
+    ) -> FramebufferBuilder<C>;
 }
 
 impl<C: RenderPassConfig> Create for Swapchain<C> {
-    type Config<'a> = &'a dyn FramebufferConfigBuilder<C>;
+    type Config<'a> = &'a dyn SwapchainFramebufferConfigBuilder<C>;
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
@@ -307,7 +292,11 @@ impl<C: RenderPassConfig> Create for Swapchain<C> {
             .iter()
             .map(|image| {
                 context
-                    .create_resource::<Framebuffer<C>, _>(config.get(image.view, image_extent))
+                    .create_resource::<Framebuffer<C>, _>(config.get_framebuffer_builder(
+                        context,
+                        &image.view,
+                        Extent2D::new(image_extent.width, image_extent.height),
+                    ))
                     .map(|index| index.into_inner())
             })
             .collect::<Result<Box<_>, _>>()?;
@@ -330,10 +319,10 @@ impl<C: RenderPassConfig> Destroy for Swapchain<C> {
         (0..self.framebuffers.len()).for_each(|index| {
             let _ = context.destroy_resource(self.get_framebuffer_index(index));
         });
+        self.images.iter_mut().for_each(|image| {
+            let _ = image.view.destroy(context);
+        });
         unsafe {
-            self.images
-                .iter_mut()
-                .for_each(|image| context.destroy_image_view(image.view, None));
             context
                 .get_extensions()
                 .swapchain
@@ -358,10 +347,10 @@ impl Destroy for SwapchainRaw {
             })
         });
         self.images.take().map(|mut images| {
-            let images = unsafe { Box::from_raw(images.as_mut()) };
-            images
-                .iter()
-                .for_each(|image| unsafe { context.destroy_image_view(image.view, None) })
+            let mut images = unsafe { Box::from_raw(images.as_mut()) };
+            images.iter_mut().for_each(|image| {
+                let _ = image.view.destroy(context);
+            })
         });
         unsafe {
             context

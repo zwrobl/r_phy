@@ -4,28 +4,100 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::device::{
-    raw::resources::command::operation::Operation,
-    raw::{
-        resources::buffer::UniformBuffer,
-        resources::layout::{DescriptorBinding, DescriptorLayout},
+    raw::resources::{
+        buffer::UniformBuffer,
+        command::operation::Operation,
+        image::DescriptorImageInfo,
+        layout::{DescriptorBinding, DescriptorLayout, DescriptorType},
     },
     Device,
 };
 
 use super::Descriptor;
 
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptorWriteInfo {
+    binding: u32,
+    descriptor_type: vk::DescriptorType,
+    descriptor_count: u32,
+    dst_array_element: u32,
+}
+
+impl DescriptorWriteInfo {
+    pub fn new(binding: u32, descriptor_type: DescriptorType) -> Self {
+        Self {
+            binding,
+            descriptor_type: descriptor_type.get_vk_descriptor_type(),
+            descriptor_count: 1,
+            dst_array_element: 0,
+        }
+    }
+
+    pub fn with_descriptor_count(self, count: u32) -> Self {
+        Self {
+            descriptor_count: count,
+            ..self
+        }
+    }
+
+    pub fn with_dst_array_element(self, element: u32) -> Self {
+        Self {
+            dst_array_element: element,
+            ..self
+        }
+    }
+}
+
 #[derive(Debug)]
 enum SetWrite {
     Buffer {
         set_index: usize,
         buffer_write_index: usize,
-        write: vk::WriteDescriptorSet,
+        write: DescriptorWriteInfo,
     },
     Image {
         set_index: usize,
         image_write_index: usize,
-        write: vk::WriteDescriptorSet,
+        write: DescriptorWriteInfo,
     },
+}
+
+impl SetWrite {
+    fn get_vk_write(
+        &self,
+        descriptors: &[vk::DescriptorSet],
+        image_writes: &[vk::DescriptorImageInfo],
+        buffer_writes: &[vk::DescriptorBufferInfo],
+    ) -> vk::WriteDescriptorSet {
+        match self {
+            SetWrite::Buffer {
+                set_index,
+                buffer_write_index,
+                write,
+            } => vk::WriteDescriptorSet {
+                dst_set: descriptors[*set_index],
+                dst_binding: write.binding,
+                descriptor_count: write.descriptor_count,
+                descriptor_type: write.descriptor_type,
+                dst_array_element: write.dst_array_element,
+                p_buffer_info: &buffer_writes[*buffer_write_index],
+                ..Default::default()
+            },
+            SetWrite::Image {
+                set_index,
+                image_write_index,
+                write,
+            } => vk::WriteDescriptorSet {
+                dst_set: descriptors[*set_index],
+                dst_binding: write.binding,
+                descriptor_count: write.descriptor_count,
+                descriptor_type: write.descriptor_type,
+                dst_array_element: write.dst_array_element,
+                p_image_info: &image_writes[*image_write_index],
+                ..Default::default()
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -101,7 +173,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         self
     }
 
-    pub fn write_images<'a, B>(mut self, images: &'a [vk::DescriptorImageInfo]) -> Self
+    pub fn write_images<'a, B>(mut self, images: &'a [DescriptorImageInfo]) -> Self
     where
         B: DescriptorBinding,
     {
@@ -124,7 +196,11 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
             "Not enough images for DescriptorPool write!"
         );
         let iamge_write_base_index = self.image_writes.len();
-        self.image_writes.extend(images);
+        self.image_writes.extend(
+            images
+                .iter()
+                .map(|image| image.get_vk_descriptor_image_info()),
+        );
         self.writes.extend((0..self.num_sets).flat_map(|set_index| {
             let mut image_set_write_offset = 0;
             writes
@@ -161,26 +237,7 @@ impl Device {
         } = writer;
         let writes = writes
             .into_iter()
-            .map(|write| match write {
-                SetWrite::Buffer {
-                    set_index,
-                    buffer_write_index,
-                    write,
-                } => vk::WriteDescriptorSet {
-                    dst_set: sets[set_index],
-                    p_buffer_info: &bufer_writes[buffer_write_index],
-                    ..write
-                },
-                SetWrite::Image {
-                    set_index,
-                    image_write_index,
-                    write,
-                } => vk::WriteDescriptorSet {
-                    dst_set: sets[set_index],
-                    p_image_info: &image_writes[image_write_index],
-                    ..write
-                },
-            })
+            .map(|write| write.get_vk_write(&sets, &image_writes, &bufer_writes))
             .collect::<Vec<_>>();
         unsafe { self.device.update_descriptor_sets(&writes, &[]) };
         sets.into_iter()

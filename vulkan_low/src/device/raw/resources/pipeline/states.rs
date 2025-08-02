@@ -6,11 +6,10 @@ use ash::vk::{self, Extent2D};
 pub use presets::*;
 
 use crate::device::{
-    raw::resources::framebuffer::{
-        AttachmentList, AttachmentReferences, AttachmentTarget, IndexedAttachmentReference,
-        References,
+    raw::resources::{
+        framebuffer::{AttachmentList, AttachmentReferences, AttachmentUsage, References},
+        render_pass::Subpass,
     },
-    raw::resources::render_pass::Subpass,
     AttachmentProperties, PhysicalDevice, PhysicalDeviceProperties,
 };
 use graphics::model::{Vertex, VertexNone};
@@ -218,8 +217,8 @@ impl<B: Blend> ColorBlend for ColorBlendBuilder<B> {
             .get_references()
             .into_iter()
             .filter_map(|reference| {
-                if let Some(IndexedAttachmentReference { reference, .. }) = reference {
-                    if reference.target == AttachmentTarget::Color {
+                if let Some(reference) = reference {
+                    if reference.try_get_usage() == Some(AttachmentUsage::Color) {
                         return Some(B::BLEND);
                     }
                 }

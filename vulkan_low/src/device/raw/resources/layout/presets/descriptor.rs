@@ -1,20 +1,21 @@
 use std::marker::PhantomData;
 
-use ash::vk;
 use bytemuck::{AnyBitPattern, Zeroable};
 
-use crate::device::{
-    raw::resources::framebuffer::InputAttachment,
-    raw::{
-        resources::image::{Image2D, Texture},
-        resources::layout::{DescriptorBinding, DescriptorLayoutBuilder},
+use crate::device::raw::resources::{
+    descriptor::DescriptorWriteInfo,
+    framebuffer::InputAttachment,
+    image::{Image2D, Texture},
+    layout::{
+        DescriptorBinding, DescriptorLayoutBuilder, DescriptorPoolSize, DescriptorSetLayoutBinding,
+        DescriptorType, ShaderStage,
     },
 };
 use graphics::renderer::camera::CameraMatrices;
 use type_kit::{Cons, Nil};
 
 pub trait PipelineStage: 'static {
-    const STAGE: vk::ShaderStageFlags;
+    const STAGE: ShaderStage;
 }
 
 #[repr(C)]
@@ -22,7 +23,7 @@ pub trait PipelineStage: 'static {
 pub struct VertexStage;
 
 impl PipelineStage for VertexStage {
-    const STAGE: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
+    const STAGE: ShaderStage = ShaderStage::Vertex;
 }
 
 #[repr(C)]
@@ -30,7 +31,7 @@ impl PipelineStage for VertexStage {
 pub struct FragmentStage;
 
 impl PipelineStage for FragmentStage {
-    const STAGE: vk::ShaderStageFlags = vk::ShaderStageFlags::FRAGMENT;
+    const STAGE: ShaderStage = ShaderStage::Fragment;
 }
 
 #[repr(C)]
@@ -76,31 +77,18 @@ impl<T: Clone + Copy + AnyBitPattern, S: PipelineStage> DescriptorBinding for Po
         size_of::<Self>() > 0
     }
 
-    fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding {
-            binding,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: S::STAGE,
-            p_immutable_samplers: std::ptr::null(),
-        }
+    fn get_descriptor_set_binding(binding: u32) -> DescriptorSetLayoutBinding {
+        DescriptorType::UniformBuffer
+            .layout_binding(binding)
+            .with_shader_stage(S::STAGE)
     }
 
-    fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_binding: binding,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            ..Default::default()
-        }
+    fn get_descriptor_write(binding: u32) -> DescriptorWriteInfo {
+        DescriptorType::UniformBuffer.write_info(binding)
     }
 
-    fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
-        vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: num_sets,
-        }
+    fn get_descriptor_pool(num_sets: u32) -> DescriptorPoolSize {
+        DescriptorType::UniformBuffer.pool_size(num_sets)
     }
 }
 
@@ -109,31 +97,18 @@ impl DescriptorBinding for CameraMatrices {
         true
     }
 
-    fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding {
-            binding,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-            p_immutable_samplers: std::ptr::null(),
-        }
+    fn get_descriptor_set_binding(binding: u32) -> DescriptorSetLayoutBinding {
+        DescriptorType::UniformBuffer
+            .layout_binding(binding)
+            .with_shader_stage(ShaderStage::Vertex)
     }
 
-    fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_binding: binding,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-            ..Default::default()
-        }
+    fn get_descriptor_write(binding: u32) -> DescriptorWriteInfo {
+        DescriptorType::UniformBuffer.write_info(binding)
     }
 
-    fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
-        vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: num_sets,
-        }
+    fn get_descriptor_pool(num_sets: u32) -> DescriptorPoolSize {
+        DescriptorType::UniformBuffer.pool_size(num_sets)
     }
 }
 
@@ -142,31 +117,18 @@ impl DescriptorBinding for Texture<Image2D> {
         true
     }
 
-    fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding {
-            binding,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            p_immutable_samplers: std::ptr::null(),
-        }
+    fn get_descriptor_set_binding(binding: u32) -> DescriptorSetLayoutBinding {
+        DescriptorType::CombinedImageSampler
+            .layout_binding(binding)
+            .with_shader_stage(ShaderStage::Fragment)
     }
 
-    fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_binding: binding,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            ..Default::default()
-        }
+    fn get_descriptor_write(binding: u32) -> DescriptorWriteInfo {
+        DescriptorType::CombinedImageSampler.write_info(binding)
     }
 
-    fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
-        vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: num_sets,
-        }
+    fn get_descriptor_pool(num_sets: u32) -> DescriptorPoolSize {
+        DescriptorType::CombinedImageSampler.pool_size(num_sets)
     }
 }
 
@@ -175,31 +137,18 @@ impl DescriptorBinding for InputAttachment {
         true
     }
 
-    fn get_descriptor_set_binding(binding: u32) -> vk::DescriptorSetLayoutBinding {
-        vk::DescriptorSetLayoutBinding {
-            binding,
-            descriptor_type: vk::DescriptorType::INPUT_ATTACHMENT,
-            descriptor_count: 1,
-            stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            p_immutable_samplers: std::ptr::null(),
-        }
+    fn get_descriptor_set_binding(binding: u32) -> DescriptorSetLayoutBinding {
+        DescriptorType::InputAttachment
+            .layout_binding(binding)
+            .with_shader_stage(ShaderStage::Fragment)
     }
 
-    fn get_descriptor_write(binding: u32) -> vk::WriteDescriptorSet {
-        vk::WriteDescriptorSet {
-            dst_binding: binding,
-            dst_array_element: 0,
-            descriptor_count: 1,
-            descriptor_type: vk::DescriptorType::INPUT_ATTACHMENT,
-            ..Default::default()
-        }
+    fn get_descriptor_write(binding: u32) -> DescriptorWriteInfo {
+        DescriptorType::InputAttachment.write_info(binding)
     }
 
-    fn get_descriptor_pool_size(num_sets: u32) -> vk::DescriptorPoolSize {
-        vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::INPUT_ATTACHMENT,
-            descriptor_count: num_sets,
-        }
+    fn get_descriptor_pool(num_sets: u32) -> DescriptorPoolSize {
+        DescriptorType::InputAttachment.pool_size(num_sets)
     }
 }
 

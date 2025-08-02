@@ -13,15 +13,17 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard};
 use crate::{
     device::{
         memory::{DeviceLocal, HostCoherent},
-        raw::resources::command::{
-            operation::{self, Operation},
-            SubmitSemaphoreState,
-        },
         raw::{
             allocator::AllocatorIndex,
             range::{ByteRange, Range},
             resources::{
-                buffer::{BufferInfoBuilder, BufferPartial, PersistentBuffer},
+                buffer::{
+                    BufferInfoBuilder, BufferPartial, BufferUsage, PersistentBuffer, SharingMode,
+                },
+                command::{
+                    operation::{self, Operation},
+                    SubmitSemaphoreState,
+                },
                 image::{Image, ImageType},
             },
             Partial,
@@ -79,10 +81,10 @@ impl Create for StagingBufferPartial {
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let partial = BufferPartial::create(
             BufferInfoBuilder::<HostCoherent>::new()
-                .with_usage(vk::BufferUsageFlags::TRANSFER_SRC)
-                .with_sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .with_usage(BufferUsage::TransferSrc)
+                .with_sharing_mode(SharingMode::Exclusive)
                 .with_queue_families(&[operation::Transfer::get_queue_family_index(context)])
-                .with_size(config.range.end as vk::DeviceSize),
+                .with_size(config.range.end),
             context,
         )?;
         Ok(StagingBufferPartial {

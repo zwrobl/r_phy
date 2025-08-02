@@ -14,14 +14,43 @@ use crate::{
 
 pub struct ImageViewCreateInfo<V: ImageType> {
     image: vk::Image,
-    aspect: vk::ImageAspectFlags,
     format: vk::Format,
+    aspect: vk::ImageAspectFlags,
     mip_info: MipInfo,
     array_info: ArrayInfo,
     _phantom: PhantomData<V>,
 }
 
 impl<V: ImageType> ImageViewCreateInfo<V> {
+    pub fn new() -> Self {
+        Self {
+            image: vk::Image::null(),
+            format: vk::Format::UNDEFINED,
+            aspect: vk::ImageAspectFlags::default(),
+            mip_info: MipInfo::default(),
+            array_info: ArrayInfo::default(),
+            _phantom: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn with_image(self, image: vk::Image) -> Self {
+        Self { image, ..self }
+    }
+
+    pub fn with_format(self, format: vk::Format) -> Self {
+        Self { format, ..self }
+    }
+    pub fn with_aspect(self, aspect: vk::ImageAspectFlags) -> Self {
+        Self { aspect, ..self }
+    }
+    pub fn with_mip_info(self, mip_info: MipInfo) -> Self {
+        Self { mip_info, ..self }
+    }
+    pub fn with_array_info(self, array_info: ArrayInfo) -> Self {
+        Self { array_info, ..self }
+    }
+
     fn get_vk_create_info(&self) -> vk::ImageViewCreateInfo {
         let ArrayInfo {
             base_array_layer,

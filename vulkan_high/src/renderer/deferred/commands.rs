@@ -1,7 +1,5 @@
 use std::{error::Error, marker::PhantomData};
 
-use ash::vk;
-
 use graphics::renderer::camera::CameraMatrices;
 use type_kit::{unpack_list, Cons};
 use vulkan_low::{
@@ -154,33 +152,12 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
         let shading_pass = device.finish_command(shading_pass)?;
 
         let clear_values = ClearValueBuilder::new()
-            .push(ClearNone {})
-            .push(ClearDeptStencil {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            })
-            .push(ClearColor {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            });
+            .push(ClearNone)
+            .push(ClearDeptStencil::new(1.0, 0))
+            .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]))
+            .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]))
+            .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]))
+            .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]));
         let primary_command = device.record_command(primary_command, |command| {
             let command = command
                 .begin_render_pass(swapchain_frame, &renderer.render_pass, &clear_values)

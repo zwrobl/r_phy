@@ -1,12 +1,11 @@
-use ash::vk;
 use graphics::{model::CommonVertex, renderer::camera::CameraMatrices};
 use type_kit::{Cons, Nil, TypedNil};
 use vulkan_low::device::raw::resources::{
     framebuffer::{
         presets::{ColorMultisampled, DepthStencilMultisampled, Resolve},
-        AttachmentImage, AttachmentList, AttachmentReference, AttachmentReferenceBuilder,
-        AttachmentTarget, AttachmentTransition, AttachmentTransitionBuilder, InputAttachment,
-        References, Transitions,
+        AttachmentImage, AttachmentList, AttachmentReferenceBuilder, AttachmentTarget,
+        AttachmentTransition, AttachmentTransitionBuilder, AttachmentUsage, ImageLayout,
+        InputAttachment, LoadOp, References, StoreOp, Transitions,
     },
     layout::{
         presets::{CameraDescriptorSet, ModelMatrix, ModelNormalMatrix, TextureDescriptorSet},
@@ -63,48 +62,60 @@ pub struct DeferedRenderPassTransitions<A: AttachmentList> {
 impl TransitionList<AttachmentsGBuffer> for DeferedRenderPassTransitions<AttachmentsGBuffer> {
     fn transitions() -> Transitions<AttachmentsGBuffer> {
         AttachmentTransitionBuilder::new()
-            .push(AttachmentTransition {
+            .push(
                 // Combined
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            })
-            .push(AttachmentTransition {
+                AttachmentTransition::new(
+                    LoadOp::Clear,
+                    StoreOp::DontCare,
+                    ImageLayout::Undefined,
+                    ImageLayout::ColorAttachment,
+                ),
+            )
+            .push(
                 // Albedo
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            })
-            .push(AttachmentTransition {
+                AttachmentTransition::new(
+                    LoadOp::Clear,
+                    StoreOp::DontCare,
+                    ImageLayout::Undefined,
+                    ImageLayout::ShaderReadOnly,
+                ),
+            )
+            .push(
                 // Normal
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            })
-            .push(AttachmentTransition {
+                AttachmentTransition::new(
+                    LoadOp::Clear,
+                    StoreOp::DontCare,
+                    ImageLayout::Undefined,
+                    ImageLayout::ShaderReadOnly,
+                ),
+            )
+            .push(
                 // Position
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            })
-            .push(AttachmentTransition {
+                AttachmentTransition::new(
+                    LoadOp::Clear,
+                    StoreOp::DontCare,
+                    ImageLayout::Undefined,
+                    ImageLayout::ShaderReadOnly,
+                ),
+            )
+            .push(
                 // Depth
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            })
-            .push(AttachmentTransition {
+                AttachmentTransition::new(
+                    LoadOp::Clear,
+                    StoreOp::DontCare,
+                    ImageLayout::Undefined,
+                    ImageLayout::ShaderReadOnly,
+                ),
+            )
+            .push(
                 // Resolve
-                load_op: vk::AttachmentLoadOp::DONT_CARE,
-                store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-            })
+                AttachmentTransition::new(
+                    LoadOp::DontCare,
+                    StoreOp::DontCare,
+                    ImageLayout::Undefined,
+                    ImageLayout::PresentSrc,
+                ),
+            )
     }
 }
 
@@ -119,11 +130,7 @@ impl Subpass<AttachmentsGBuffer> for GBufferDepthPrepas<AttachmentsGBuffer> {
             .push(None)
             .push(None)
             .push(None)
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::DepthStencil,
-                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            }))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::DepthStencil)))
             .push(None)
     }
 }
@@ -136,26 +143,10 @@ impl Subpass<AttachmentsGBuffer> for GBufferWritePass<AttachmentsGBuffer> {
     fn references() -> References<AttachmentsGBuffer> {
         AttachmentReferenceBuilder::new()
             .push(None)
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Color,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Color,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Color,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::DepthStencil,
-                layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            }))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Color)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Color)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Color)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::DepthStencil)))
             .push(None)
     }
 }
@@ -167,36 +158,12 @@ pub struct GBufferShadingPass<A: AttachmentList> {
 impl Subpass<AttachmentsGBuffer> for GBufferShadingPass<AttachmentsGBuffer> {
     fn references() -> References<AttachmentsGBuffer> {
         AttachmentReferenceBuilder::new()
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Color,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Input,
-                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                usage: vk::ImageUsageFlags::INPUT_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Input,
-                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                usage: vk::ImageUsageFlags::INPUT_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Input,
-                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                usage: vk::ImageUsageFlags::INPUT_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Input,
-                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                usage: vk::ImageUsageFlags::INPUT_ATTACHMENT,
-            }))
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Resolve,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            }))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Color)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Input)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Input)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Input)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Input)))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Resolve)))
     }
 }
 
@@ -207,19 +174,11 @@ pub struct GBufferSkyboxPass<A: AttachmentList> {
 impl Subpass<AttachmentsGBuffer> for GBufferSkyboxPass<AttachmentsGBuffer> {
     fn references() -> References<AttachmentsGBuffer> {
         AttachmentReferenceBuilder::new()
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::Color,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            }))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::Color)))
             .push(None)
             .push(None)
             .push(None)
-            .push(Some(AttachmentReference {
-                target: AttachmentTarget::DepthStencil,
-                layout: vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                usage: vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            }))
+            .push(Some(AttachmentTarget::Use(AttachmentUsage::DepthStencil)))
             .push(None)
     }
 }

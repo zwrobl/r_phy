@@ -2,8 +2,6 @@ pub mod frame;
 pub mod renderer;
 pub mod resources;
 
-use ash::vk;
-
 use math::types::Matrix4;
 use type_kit::{Cons, Contains, Create, Destroy, DestroyResult, DropGuard, Marker, Nil};
 use vulkan_low::Context;
@@ -32,14 +30,10 @@ use crate::resources::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct VulkanRendererConfig {
-    pub page_size: vk::DeviceSize,
-}
+pub struct VulkanRendererConfig {}
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct VulkanRendererConfigBuilder {
-    page_size: Option<vk::DeviceSize>,
-}
+pub struct VulkanRendererConfigBuilder {}
 
 impl VulkanRendererConfig {
     pub fn builder() -> VulkanRendererConfigBuilder {
@@ -49,15 +43,8 @@ impl VulkanRendererConfig {
 
 impl VulkanRendererConfigBuilder {
     pub fn build(self) -> Result<VulkanRendererConfig, Box<dyn Error>> {
-        let config = VulkanRendererConfig {
-            page_size: self.page_size.ok_or("Page size not provided")?,
-        };
+        let config = VulkanRendererConfig {};
         Ok(config)
-    }
-
-    pub fn with_page_size(mut self, size: usize) -> Self {
-        self.page_size = Some(size as vk::DeviceSize);
-        self
     }
 }
 

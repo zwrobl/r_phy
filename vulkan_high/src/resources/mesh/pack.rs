@@ -1,6 +1,5 @@
 use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
-use ash::vk;
 use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard};
 
 use graphics::model::{Mesh, Vertex};
@@ -12,8 +11,8 @@ use vulkan_low::{
             range::Range,
             resources::{
                 buffer::{
-                    BufferInfoBuilder, BufferPartial, StagingBuffer, StagingBufferBuilder,
-                    StagingBufferPartial,
+                    BufferInfoBuilder, BufferPartial, BufferUsage, SharingMode, StagingBuffer,
+                    StagingBufferBuilder, StagingBufferPartial,
                 },
                 command::{
                     operation::{self, Operation},
@@ -55,14 +54,12 @@ impl<'b, V: Vertex> Create for MeshPackPartial<'b, V> {
         buffer_ranges.set(BufferType::Index, index_range);
         let buffer = BufferPartial::create(
             BufferInfoBuilder::<DeviceLocal>::new()
-                .with_sharing_mode(vk::SharingMode::EXCLUSIVE)
-                .with_usage(
-                    vk::BufferUsageFlags::VERTEX_BUFFER
-                        | vk::BufferUsageFlags::INDEX_BUFFER
-                        | vk::BufferUsageFlags::TRANSFER_DST,
-                )
+                .with_sharing_mode(SharingMode::Exclusive)
+                .with_usage(BufferUsage::VertexBuffer)
+                .with_usage(BufferUsage::IndexBuffer)
+                .with_usage(BufferUsage::TransferDst)
                 .with_queue_families(&[operation::Graphics::get_queue_family_index(context)])
-                .with_size(buffer_ranges.get_rquired_buffer_size() as vk::DeviceSize),
+                .with_size(buffer_ranges.get_rquired_buffer_size()),
             context,
         )?;
         let partial = MeshPackDataPartial {
