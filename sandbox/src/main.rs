@@ -4,8 +4,8 @@ use graphics::{
 };
 use std::{error::Error, result::Result};
 use vulkan_high::{
-    renderer::deferred::{DeferredRenderer, DeferredShader},
-    VulkanContextBuilder, VulkanRendererBuilder, VulkanRendererConfig,
+    renderer::deferred::DeferredRenderer, VulkanContextBuilder, VulkanRendererBuilder,
+    VulkanRendererConfig,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -45,18 +45,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_material_type::<EmptyMaterial>()
         .with_mesh_type::<CommonVertex>()
         .with_mesh_type::<SimpleVertex>()
-        .with_shader_type::<DeferredShader<Shader<CommonVertex, EmptyMaterial>>>()
-        .with_shader_type::<DeferredShader<Shader<CommonVertex, UnlitMaterial>>>()
-        .with_shader_type::<DeferredShader<Shader<CommonVertex, PbrMaterial>>>();
+        .with_shader_type::<CommonVertex, EmptyMaterial>()
+        .with_shader_type::<CommonVertex, UnlitMaterial>()
+        .with_shader_type::<CommonVertex, PbrMaterial>();
     let empty_material = context_builder.add_material(EmptyMaterial::default());
     let cube_mesh = context_builder.add_mesh::<CommonVertex, _>(Cube::new(1.0f32).into());
-    // TODO: Explicit type conversion to the type used by selected renderer should not be visible at the front-end
-    let checker_shader = context_builder.add_shader::<DeferredShader<_>, _>(
-        Shader::<CommonVertex, EmptyMaterial>::new(
-            "_resources/shaders/spv/deferred/gbuffer_write/checker",
-        )
-        .into(),
-    );
+    let checker_shader = context_builder.add_shader(Shader::<CommonVertex, EmptyMaterial>::new(
+        "_resources/shaders/spv/deferred/gbuffer_write/checker",
+    ));
     let scene = game_loop.scene(context_builder)?.with_objects(
         checker_shader,
         vec![

@@ -2,6 +2,7 @@ pub mod frame;
 pub mod renderer;
 pub mod resources;
 
+use graphics::shader::Shader;
 use math::types::Matrix4;
 use type_kit::{Cons, Contains, Create, Destroy, DestroyResult, Marker, Nil};
 use vulkan_low::Context;
@@ -353,9 +354,10 @@ impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
         }
     }
 
-    pub fn with_shader_type<N: ShaderType + Into<<DeferredRenderer as Frame>::Shader<N>>>(
+    pub fn with_shader_type<N: Vertex, T: Material>(
         self,
-    ) -> VulkanContextBuilder<Cons<Vec<<DeferredRenderer as Frame>::Shader<N>>, S>, M, V> {
+    ) -> VulkanContextBuilder<Cons<Vec<<DeferredRenderer as Frame>::Shader<Shader<N, T>>>, S>, M, V>
+    {
         VulkanContextBuilder {
             shaders: Cons {
                 head: vec![],
@@ -380,12 +382,12 @@ impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
         MeshHandle::new(push_and_get_index(self.meshes.get_mut(), mesh))
     }
 
-    pub fn add_shader<N: ShaderType + Into<<DeferredRenderer as Frame>::Shader<N>>, T: Marker>(
+    pub fn add_shader<N: Vertex, T: Material, K: Marker>(
         &mut self,
-        shader: N,
-    ) -> ShaderHandle<N>
+        shader: Shader<N, T>,
+    ) -> ShaderHandle<Shader<N, T>>
     where
-        S: Contains<Vec<<DeferredRenderer as Frame>::Shader<N>>, T>,
+        S: Contains<Vec<<DeferredRenderer as Frame>::Shader<Shader<N, T>>>, K>,
     {
         ShaderHandle::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
     }
