@@ -1,12 +1,12 @@
 mod presets;
 mod storage;
 
-use std::{convert::Infallible, error::Error, path::Path, sync::Once};
+use std::{convert::Infallible, error::Error, path::Path};
 
 use storage::{CommandStorage, DrawStorage};
 
 use graphics::{
-    model::{CommonVertex, Drawable, Mesh, MeshBuilder},
+    model::Drawable,
     renderer::camera::CameraMatrices,
     shader::{ShaderHandle, ShaderType},
 };
@@ -42,7 +42,7 @@ use vulkan_low::{
     index_list, Context,
 };
 
-use math::types::{Matrix4, Vector3};
+use math::types::Matrix4;
 
 use crate::{
     frame::{CameraUniformPartial, Frame, FrameContext, FrameData, FramePool},
@@ -52,31 +52,13 @@ use crate::{
         PipelineLayoutMaterial, StatesDepthWriteDisabled,
     },
     resources::{
-        GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList, MeshPack,
-        MeshPackList, MeshPackPartial, Skybox, SkyboxPartial,
+        CommonResources, GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList,
+        MeshPackList, Skybox, SkyboxPartial,
     },
 };
 
-fn get_deferred_renderer_meshes() -> &'static [Mesh<CommonVertex>] {
-    static mut QUAD: Option<[Mesh<CommonVertex>; 1]> = None;
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| {
-            if QUAD.is_none() {
-                QUAD.replace([MeshBuilder::plane_subdivided(
-                    0,
-                    2.0 * Vector3::y(),
-                    2.0 * Vector3::x(),
-                    Vector3::zero(),
-                    false,
-                )
-                .offset(Vector3::new(-1.0, -1.0, 0.0))
-                .build()]);
-            }
-        });
-        QUAD.as_ref().unwrap()
-    }
-}
+const DEPTH_PREPASS_SHADER: &'static str = "_resources/shaders/spv/deferred/depth_prepass";
+const GBUFFER_COMBINE_SHADER: &'static str = "_resources/shaders/spv/deferred/gbuffer_combine";
 
 pub struct DeferredShader<S: ShaderType> {
     shader: S,
@@ -121,7 +103,6 @@ pub struct GBufferPartial {
 pub struct DeferredRendererPartial {
     g_buffer: GBufferPartial,
     skybox: SkyboxPartial,
-    meshes: MeshPackPartial<'static, CommonVertex>,
 }
 
 pub struct GBuffer {
@@ -146,7 +127,6 @@ struct DeferredRendererFrameData {
 }
 
 struct DeferredRendererResources {
-    mesh: DropGuard<MeshPack<CommonVertex>>,
     skybox: DropGuard<Skybox<GBufferSkyboxPipeline<AttachmentsGBuffer>>>,
 }
 
@@ -208,6 +188,7 @@ impl<'a, P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<'
     fn begin_frame(
         &mut self,
         context: &Context,
+        common_resources: &CommonResources,
         camera_matrices: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>> {
         let (primary_command, swapchain_frame, camera_descriptor) = {
@@ -235,6 +216,7 @@ impl<'a, P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<'
         };
         let commands = self.prepare_commands(
             context,
+            common_resources,
             &swapchain_frame,
             camera_descriptor,
             camera_matrices,
@@ -469,22 +451,16 @@ impl Destroy for DeferredRendererFrameData {
 }
 
 impl Create for DeferredRendererResources {
-    type Config<'a> = (
-        SkyboxPartial,
-        MeshPackPartial<'static, CommonVertex>,
-        AllocatorIndex,
-    );
+    type Config<'a> = (SkyboxPartial, AllocatorIndex);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (skybox_partial, mesh_partial, allocator) = config;
+        let (skybox_partial, allocator) = config;
         let skybox = Skybox::create((skybox_partial, allocator), context)?;
-        let mesh = MeshPack::create((mesh_partial, allocator), context)?;
         Ok(DeferredRendererResources {
-            mesh: DropGuard::new(mesh),
             skybox: DropGuard::new(skybox),
         })
     }
@@ -495,7 +471,6 @@ impl Destroy for DeferredRendererResources {
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.mesh.destroy(context)?;
         self.skybox.destroy(context)?;
         Ok(())
     }
@@ -510,10 +485,10 @@ impl<P: GraphicsPipelinePackList> Create for DeferredRendererPipelines<P> {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let depth_prepass = context.create_resource(&ShaderDirectory::new(Path::new(
-            "_resources/shaders/spv/deferred/depth_prepass",
+            DEPTH_PREPASS_SHADER,
         )) as &dyn ModuleLoader)?;
         let shading_pass = context.create_resource(&ShaderDirectory::new(Path::new(
-            "_resources/shaders/spv/deferred/gbuffer_combine",
+            GBUFFER_COMBINE_SHADER,
         )) as &dyn ModuleLoader)?;
         Ok(DeferredRendererPipelines {
             write_pass: config,
@@ -544,7 +519,6 @@ impl Create for DeferredRendererPartial {
         Ok(DeferredRendererPartial {
             g_buffer: GBufferPartial::create((), context)?,
             skybox: SkyboxPartial::create(config, context)?,
-            meshes: MeshPackPartial::create(get_deferred_renderer_meshes(), &context)?,
         })
     }
 }
@@ -552,7 +526,6 @@ impl Create for DeferredRendererPartial {
 impl Partial for DeferredRendererPartial {
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
         self.g_buffer.register_memory_requirements(builder);
-        self.meshes.register_memory_requirements(builder);
         self.skybox.register_memory_requirements(builder);
     }
 }
@@ -564,7 +537,6 @@ impl Destroy for DeferredRendererPartial {
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let _ = self.g_buffer.destroy(context);
-        let _ = self.meshes.destroy(context);
         let _ = self.skybox.destroy(context);
         Ok(())
     }
@@ -578,17 +550,10 @@ impl Create for DeferredRenderer {
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (
-            DeferredRendererPartial {
-                g_buffer,
-                skybox,
-                meshes,
-            },
-            allocator,
-        ) = config;
+        let (DeferredRendererPartial { g_buffer, skybox }, allocator) = config;
         let render_pass = context.get_or_create_unique_resource()?;
         let frame_data = DeferredRendererFrameData::create((g_buffer, allocator), context)?;
-        let resources = DeferredRendererResources::create((skybox, meshes, allocator), context)?;
+        let resources = DeferredRendererResources::create((skybox, allocator), context)?;
         Ok(DeferredRenderer {
             render_pass,
             frame_data,

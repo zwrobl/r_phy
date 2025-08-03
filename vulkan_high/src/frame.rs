@@ -46,7 +46,8 @@ use vulkan_low::device::{
 };
 
 use crate::resources::{
-    GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList, MeshPackList,
+    CommonResources, GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList,
+    MeshPackList,
 };
 
 pub trait Frame: 'static {
@@ -73,6 +74,7 @@ pub trait FrameContext: Sized {
     fn begin_frame(
         &mut self,
         context: &Context,
+        common_resources: &CommonResources,
         camera: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>>;
 

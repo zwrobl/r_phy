@@ -1,8 +1,10 @@
+mod common;
 mod material;
 mod mesh;
 mod pipeline;
 mod skybox;
 
+pub use common::*;
 pub use material::*;
 pub use mesh::*;
 pub use pipeline::*;

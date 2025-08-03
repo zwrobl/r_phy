@@ -26,9 +26,9 @@ use crate::renderer::deferred::{
     DeferredRenderer, DeferredRendererContext, DeferredRendererPartial,
 };
 use crate::resources::{
-    GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList,
-    MaterialPackListBuilder, MaterialPackListPartial, MeshPackList, MeshPackListBuilder,
-    MeshPackListPartial,
+    CommonResources, CommonResourcesPartial, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
+    MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
+    MeshPackListBuilder, MeshPackListPartial,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -90,6 +90,7 @@ impl<R: Destroy + Frame> RendererBuilder for VulkanRendererBuilder<R> {
 pub struct VulkanRenderer {
     context: Context,
     renderer: DeferredRenderer,
+    common_resources: CommonResources,
     allocator: AllocatorIndex,
     _config: VulkanRendererConfig,
 }
@@ -97,6 +98,7 @@ pub struct VulkanRenderer {
 impl Drop for VulkanRenderer {
     fn drop(&mut self) {
         let _ = self.context.wait_idle();
+        let _ = self.common_resources.destroy(&self.context);
         let _ = self.renderer.destroy(&self.context);
         let _ = self.context.destroy_allocator(self.allocator);
     }
@@ -229,17 +231,21 @@ pub struct VulkanRendererContext<
 impl VulkanRenderer {
     pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
         let context = Context::build(window)?;
+        let common_resources = CommonResourcesPartial::create((), &context)?;
         let renderer_partial = DeferredRendererPartial::create(
             Path::new("_resources/assets/skybox/skybox"),
             &context,
         )?;
         let mut allocator_config = StaticConfig::new();
+        common_resources.register_memory_requirements(&mut allocator_config);
         renderer_partial.register_memory_requirements(&mut allocator_config);
         let allocator = context.create_allocator::<Static>(allocator_config)?;
+        let common_meshes = CommonResources::create((common_resources, allocator), &context)?;
         let renderer = DeferredRenderer::create((renderer_partial, allocator), &context)?;
         Ok(Self {
             context,
             renderer,
+            common_resources: common_meshes,
             allocator,
             _config: config,
         })
@@ -399,8 +405,11 @@ impl<
 
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
-        self.renderer_context
-            .begin_frame(&self.renderer.context, &camera_matrices)?;
+        self.renderer_context.begin_frame(
+            &self.renderer.context,
+            &self.renderer.common_resources,
+            &camera_matrices,
+        )?;
         Ok(())
     }
 

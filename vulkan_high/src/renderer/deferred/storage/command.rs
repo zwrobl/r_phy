@@ -29,7 +29,7 @@ use crate::{
         },
         DeferredRendererContext,
     },
-    resources::{bind_mesh_pack, draw_skybox, GraphicsPipelinePackList},
+    resources::{draw_skybox, CommonMesh, CommonResources, GraphicsPipelinePackList},
 };
 
 pub struct CommandStorage<P: GraphicsPipelinePackList> {
@@ -44,6 +44,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
     pub fn prepare_commands(
         &mut self,
         context: &Context,
+        common_meshes: &CommonResources,
         swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         camera_matrices: &CameraMatrices,
@@ -90,14 +91,10 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                         .get(0)
                         .get_binding_data(&shading_pass_pipeline)?;
                     context.record_command(command, |command| {
-                        bind_mesh_pack(
-                            context,
-                            command
-                                .bind_pipeline(shading_pass_pipeline.get_binding_data())
-                                .bind_descriptor_set(&binding_data),
-                            &*renderer.resources.mesh,
-                        )
-                        .draw_indexed(renderer.resources.mesh.get(0))
+                        let command = command
+                            .bind_pipeline(shading_pass_pipeline.get_binding_data())
+                            .bind_descriptor_set(&binding_data);
+                        common_meshes.draw(context, command, CommonMesh::Plane)
                     })
                 };
                 let skybox_pass = {
@@ -111,6 +108,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                         draw_skybox(
                             context,
                             &renderer.resources.skybox,
+                            common_meshes,
                             command,
                             *camera_matrices,
                         )

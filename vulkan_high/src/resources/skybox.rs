@@ -1,11 +1,7 @@
-use std::{convert::Infallible, path::Path, sync::Once};
+use std::{convert::Infallible, path::Path};
 
-use graphics::{
-    model::{CommonVertex, Mesh},
-    renderer::camera::CameraMatrices,
-};
+use graphics::renderer::camera::CameraMatrices;
 use math::types::Vector4;
-use physics::shape;
 
 use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
 use vulkan_low::{
@@ -25,37 +21,22 @@ use vulkan_low::{
     index_list, Context,
 };
 
-use crate::resources::{bind_mesh_pack, MeshPack, MeshPackPartial};
+use crate::resources::{CommonMesh, CommonResources};
 
 pub type LayoutSkybox =
     PipelineLayoutBuilder<Cons<TextureDescriptorSet, Nil>, Cons<CameraMatrices, Nil>>;
 
 pub struct SkyboxPartial {
     cubemap: DropGuard<TexturePartial<ImageCube, ImageCubeReader>>,
-    cube: MeshPackPartial<'static, CommonVertex>,
 }
 
 pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
-    pub mesh_pack: DropGuard<MeshPack<CommonVertex>>,
     cubemap: ResourceIndex<Texture<ImageCube>>,
     pub descriptor: ResourceIndex<DescriptorPool<TextureDescriptorSet>>,
     pub pipeline: ResourceIndex<GraphicsPipeline<L>>,
 }
 
 const SKYBOX_SHADER: &'static str = "_resources/shaders/spv/skybox";
-
-fn get_skybox_meshes() -> &'static [Mesh<CommonVertex>] {
-    static mut CUBE: Option<[Mesh<CommonVertex>; 1]> = None;
-    static INIT: Once = Once::new();
-    unsafe {
-        INIT.call_once(|| {
-            if CUBE.is_none() {
-                CUBE.replace([shape::Cube::new(1.0).into()]);
-            }
-        });
-        CUBE.as_ref().unwrap()
-    }
-}
 
 impl Create for SkyboxPartial {
     type Config<'a> = &'a Path;
@@ -71,7 +52,6 @@ impl Create for SkyboxPartial {
                 ImageCubeReader::new(config)?,
                 context,
             )?),
-            cube: MeshPackPartial::create(get_skybox_meshes(), context)?,
         })
     }
 }
@@ -79,7 +59,6 @@ impl Create for SkyboxPartial {
 impl Partial for SkyboxPartial {
     #[inline]
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
-        self.cube.register_memory_requirements(builder);
         self.cubemap.register_memory_requirements(builder);
     }
 }
@@ -89,7 +68,6 @@ impl Destroy for SkyboxPartial {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let _ = self.cube.destroy(context);
         let _ = self.cubemap.destroy(context);
         Ok(())
     }
@@ -103,7 +81,7 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (SkyboxPartial { cubemap, cube }, allocator) = config;
+        let (SkyboxPartial { cubemap }, allocator) = config;
         let cubemap = context.create_resource::<Texture<_>, _>((cubemap, allocator))?;
         let descriptor =
             context.operate_ref(index_list![cubemap], |unpack_list![cubemap]| {
@@ -115,9 +93,7 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
             })??;
         let modules = ShaderDirectory::new(Path::new(SKYBOX_SHADER));
         let pipeline = context.create_resource(&modules as &dyn ModuleLoader)?;
-        let mesh_pack = MeshPack::create((cube, allocator), context)?;
         Ok(Skybox {
-            mesh_pack: DropGuard::new(mesh_pack),
             cubemap,
             descriptor,
             pipeline,
@@ -130,7 +106,6 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Destroy for Skybox<L> {
     type DestroyError = DropGuardError<Infallible>;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.mesh_pack.destroy(context)?;
         let _ = context.destroy_resource(self.descriptor);
         let _ = context.destroy_resource(self.cubemap);
         let _ = context.destroy_resource(self.pipeline);
@@ -147,6 +122,7 @@ pub fn draw_skybox<
 >(
     context: &Context,
     skybox: &Skybox<C>,
+    common_meshes: &CommonResources,
     command: RecordingCommand<'a, T, L, O>,
     mut camera_matrices: CameraMatrices,
 ) -> RecordingCommand<'a, T, L, O> {
@@ -155,17 +131,11 @@ pub fn draw_skybox<
         .operate_ref(
             index_list![skybox.pipeline, skybox.descriptor],
             |unpack_list![descriptor, pipeline]| {
-                let command = bind_mesh_pack(
-                    context,
-                    command
-                        .bind_pipeline(pipeline.get_binding_data())
-                        .bind_descriptor_set(
-                            &descriptor.get(0).get_binding_data(&pipeline).unwrap(),
-                        )
-                        .push_constants(pipeline.get_push_range(&camera_matrices)),
-                    &*skybox.mesh_pack,
-                )
-                .draw_indexed(skybox.mesh_pack.get(0));
+                let command = command
+                    .bind_pipeline(pipeline.get_binding_data())
+                    .bind_descriptor_set(&descriptor.get(0).get_binding_data(&pipeline).unwrap())
+                    .push_constants(pipeline.get_push_range(&camera_matrices));
+                let command = common_meshes.draw(context, command, CommonMesh::Cube);
                 Result::<_, Infallible>::Ok(command)
             },
         )
