@@ -10,7 +10,7 @@ use png::{BitDepth, ColorType};
 use type_kit::{GenCollectionError, GuardCollectionError, TypeGuardConversionError};
 use winit::raw_window_handle::HandleError;
 
-use crate::device::raw::resources::image::ImageCubeFace;
+use crate::resources::image::ImageCubeFace;
 
 #[derive(Debug, Clone, Copy)]
 pub enum AllocatorError {

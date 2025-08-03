@@ -5,20 +5,19 @@ use math::types::Vector4;
 
 use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
 use vulkan_low::{
-    device::raw::{
-        allocator::{AllocatorBuilder, AllocatorIndex},
-        resources::{
-            command::{level::Level, operation::Operation, RecordingCommand},
-            descriptor::{DescriptorPool, DescriptorSetWriter},
-            image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
-            layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
-            pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, ShaderDirectory},
-            ResourceIndex, ResourceIndexListBuilder,
-        },
-        Partial,
-    },
     error::ResourceError,
-    index_list, Context,
+    index_list,
+    memory::allocator::{AllocatorBuilder, AllocatorIndex},
+    resources::{
+        command::{level::Level, operation::Operation, RecordingCommand},
+        descriptor::{DescriptorPool, DescriptorSetWriter},
+        image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
+        layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
+        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, ShaderDirectory},
+        storage::ResourceIndexListBuilder,
+        Partial, ResourceIndex,
+    },
+    Context,
 };
 
 use crate::resources::{CommonMesh, CommonResources};

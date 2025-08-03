@@ -19,8 +19,8 @@ use std::path::Path;
 use std::{error::Error, marker::PhantomData};
 use winit::window::Window;
 
-use vulkan_low::device::raw::allocator::{AllocatorIndex, Static, StaticConfig};
-use vulkan_low::device::raw::Partial;
+use vulkan_low::memory::allocator::{AllocatorBuilder, AllocatorIndex, Static, StaticConfig};
+use vulkan_low::resources::Partial;
 
 use crate::frame::{CameraUniform, Frame, FrameContext};
 use crate::renderer::deferred::{
@@ -187,10 +187,7 @@ where
     for<'b> PM: Destroy<Context<'b> = &'b Context>,
     for<'b> PV: Destroy<Context<'b> = &'b Context>,
 {
-    fn register_memory_requirements<B: vulkan_low::device::raw::allocator::AllocatorBuilder>(
-        &self,
-        builder: &mut B,
-    ) {
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
         self.materials.register_memory_requirements(builder);
         self.meshes.register_memory_requirements(builder);
     }

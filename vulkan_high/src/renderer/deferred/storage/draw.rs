@@ -15,15 +15,16 @@ use graphics::{
 use math::types::Matrix4;
 use type_kit::{unpack_list, Cons};
 use vulkan_low::{
-    device::raw::resources::{
+    index_list,
+    resources::{
         command::DrawIndexed,
         descriptor::{Descriptor, DescriptorBindingData},
         layout::presets::{CameraDescriptorSet, ModelMatrix, ModelNormalMatrix},
         pipeline::{PipelineBindData, PushConstantRangeMapper},
+        storage::ResourceIndexListBuilder,
         swapchain::SwapchainFrame,
-        ResourceIndexListBuilder,
     },
-    index_list, Context,
+    Context,
 };
 
 use crate::{

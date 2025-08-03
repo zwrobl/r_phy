@@ -9,7 +9,7 @@ pub use pack::*;
 use graphics::model::Material as MaterialBase;
 use type_kit::{Cons, Nil};
 
-use vulkan_low::device::raw::resources::{
+use vulkan_low::resources::{
     descriptor::DescriptorWriteInfo,
     layout::{
         presets::{FragmentStage, PodUniform},

@@ -1,29 +1,29 @@
 mod debug;
-pub mod device;
+mod device;
 pub mod error;
+pub mod memory;
+pub mod resources;
 mod surface;
 
-use crate::device::{
-    memory::{AllocReqTyped, MemoryProperties},
-    raw::{
-        allocator::{Allocation, Allocator, Unpooled},
-        resources::{
-            BorrowMut, BorrowRef, RawIndex, ResourceIndexList, TypeUniqueRawCollection,
-            TypeUniqueResource, TypeUniqueResourceStorage, TypeUniqueResourceStorageList,
+use crate::{
+    memory::{
+        allocator::{
+            Allocation, AllocationEntry, Allocator, AllocatorIndex, AllocatorStorage, Unpooled,
         },
+        AllocReqTyped, MemoryProperties,
+    },
+    resources::{
+        storage::{
+            BorrowMut, BorrowRef, RawCollection, ResourceIndexList, ResourceStorage,
+            ResourceStorageList, TypeUniqueRawCollection, TypeUniqueResource,
+            TypeUniqueResourceStorage, TypeUniqueResourceStorageList,
+        },
+        RawIndex, Resource, ResourceIndex,
     },
 };
 
 use self::{
-    device::{
-        raw::{
-            allocator::{AllocationEntry, AllocatorIndex, AllocatorStorage},
-            resources::{
-                RawCollection, Resource, ResourceIndex, ResourceStorage, ResourceStorageList,
-            },
-        },
-        Device,
-    },
+    device::Device,
     error::{ResourceResult, VkError, VkResult},
     surface::Surface,
 };

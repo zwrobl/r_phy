@@ -1,0 +1,242 @@
+use std::{
+    convert::Infallible,
+    marker::PhantomData,
+    ops::{Deref, DerefMut, Index, IndexMut},
+};
+
+use bytemuck::AnyBitPattern;
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardVec};
+
+use crate::{
+    error::ResourceError,
+    memory::{
+        allocator::{AllocatorBuilder, AllocatorIndex},
+        HostCoherent,
+    },
+    resources::{
+        buffer::{
+            persistent::PersistentBuffer, Buffer, BufferInfoBuilder, BufferPartial, BufferRaw,
+            BufferUsage, SharingMode,
+        },
+        command::operation::Operation,
+        Partial, Resource,
+    },
+    Context,
+};
+
+#[derive(Debug)]
+pub struct UniformBufferInfoBuilder<U: AnyBitPattern, O: Operation> {
+    len: Option<usize>,
+    _phantom: PhantomData<(U, O)>,
+}
+
+#[derive(Debug)]
+pub struct UniformBufferInfo<U: AnyBitPattern, O: Operation> {
+    len: usize,
+    queue_indices: [u32; 1],
+    _phantom: PhantomData<(U, O)>,
+}
+
+impl<U: AnyBitPattern, O: Operation> Default for UniformBufferInfoBuilder<U, O> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> UniformBufferInfoBuilder<U, O> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            len: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn with_len(self, len: usize) -> Self {
+        Self {
+            len: Some(len),
+            ..self
+        }
+    }
+
+    #[inline]
+    fn build(self, context: &Context) -> UniformBufferInfo<U, O> {
+        UniformBufferInfo {
+            len: self.len.unwrap(),
+            queue_indices: [O::get_queue_family_index(context)],
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> UniformBufferInfo<U, O> {
+    #[inline]
+    fn get_buffer_info<'a>(&'a self) -> BufferInfoBuilder<'a, HostCoherent> {
+        BufferInfoBuilder::<HostCoherent>::new()
+            .with_queue_families(&self.queue_indices)
+            .with_sharing_mode(SharingMode::Exclusive)
+            .with_usage(BufferUsage::UniformBuffer)
+            .with_size(self.len * size_of::<U>())
+    }
+}
+
+#[derive(Debug)]
+pub struct UniformBufferPartial<U: AnyBitPattern, O: Operation> {
+    partial: DropGuard<BufferPartial<HostCoherent>>,
+    _phantom: PhantomData<(U, O)>,
+}
+
+impl<U: AnyBitPattern, O: Operation> Partial for UniformBufferPartial<U, O> {
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
+        self.partial.register_memory_requirements(builder);
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Create for UniformBufferPartial<U, O> {
+    type Config<'a> = UniformBufferInfoBuilder<U, O>;
+
+    type CreateError = ResourceError;
+
+    #[inline]
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let partial = BufferPartial::create(config.build(context).get_buffer_info(), context)?;
+        Ok(UniformBufferPartial {
+            partial: DropGuard::new(partial),
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Destroy for UniformBufferPartial<U, O> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let _ = self.partial.destroy(context);
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct UniformBuffer<U: AnyBitPattern, O: Operation> {
+    buffer: PersistentBuffer,
+    _phantom: PhantomData<(U, O)>,
+}
+
+impl<U: AnyBitPattern, O: Operation> UniformBuffer<U, O> {
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.get_size() / size_of::<U>()
+    }
+}
+
+impl<'a, U: AnyBitPattern, O: Operation> From<&'a UniformBuffer<U, O>>
+    for &'a Buffer<HostCoherent>
+{
+    #[inline]
+    fn from(value: &'a UniformBuffer<U, O>) -> Self {
+        &value.buffer
+    }
+}
+
+impl<'a, U: AnyBitPattern, O: Operation> From<&'a mut UniformBuffer<U, O>>
+    for &'a mut Buffer<HostCoherent>
+{
+    #[inline]
+    fn from(value: &'a mut UniformBuffer<U, O>) -> Self {
+        &mut value.buffer
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Deref for UniformBuffer<U, O> {
+    type Target = Buffer<HostCoherent>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> DerefMut for UniformBuffer<U, O> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.buffer
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Create for UniformBuffer<U, O> {
+    type Config<'a> = (DropGuard<UniformBufferPartial<U, O>>, AllocatorIndex);
+    type CreateError = ResourceError;
+
+    #[inline]
+    fn create<'a, 'b>(
+        config: Self::Config<'a>,
+        context: Self::Context<'b>,
+    ) -> type_kit::CreateResult<Self> {
+        let (buffer_partial, allocator) = config;
+        let UniformBufferPartial { partial, .. } = unsafe { buffer_partial.unwrap() };
+        let buffer = PersistentBuffer::create((partial, allocator), context)?;
+        Ok(UniformBuffer {
+            buffer,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Destroy for UniformBuffer<U, O> {
+    type Context<'a> = &'a Context;
+
+    type DestroyError = ResourceError;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        let _ = self.buffer.destroy(context);
+        Ok(())
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Resource for UniformBuffer<U, O> {
+    type RawType = BufferRaw;
+    type RawCollection = TypeGuardVec<Self::RawType>;
+}
+
+impl<U: AnyBitPattern, O: Operation> FromGuard for UniformBuffer<U, O> {
+    type Inner = BufferRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        self.buffer.into_inner()
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            buffer: PersistentBuffer::from_inner(inner),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> Index<usize> for UniformBuffer<U, O> {
+    type Output = U;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        debug_assert!(index < self.size(), "Out of range UniformBuffer access!");
+        let ptr = self.buffer.ptr.unwrap() as *mut U;
+        unsafe { ptr.add(index).as_ref().unwrap() }
+    }
+}
+
+impl<U: AnyBitPattern, O: Operation> IndexMut<usize> for UniformBuffer<U, O> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        debug_assert!(index < self.size(), "Out of range UniformBuffer access!");
+        let ptr = self.buffer.ptr.unwrap() as *mut U;
+        unsafe { ptr.add(index).as_mut().unwrap() }
+    }
+}

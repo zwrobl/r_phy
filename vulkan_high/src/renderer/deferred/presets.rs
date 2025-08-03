@@ -1,6 +1,6 @@
 use graphics::{model::CommonVertex, renderer::camera::CameraMatrices};
 use type_kit::{Cons, Nil, TypedNil};
-use vulkan_low::device::raw::resources::{
+use vulkan_low::resources::{
     framebuffer::{
         presets::{ColorMultisampled, DepthStencilMultisampled, Resolve},
         AttachmentImage, AttachmentList, AttachmentReferenceBuilder, AttachmentTarget,

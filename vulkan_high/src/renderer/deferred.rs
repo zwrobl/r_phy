@@ -16,30 +16,27 @@ use type_kit::{
 };
 
 use vulkan_low::{
-    device::{
-        memory::DeviceLocal,
-        raw::{
-            allocator::{AllocatorBuilder, AllocatorIndex},
-            resources::{
-                descriptor::{DescriptorPool, DescriptorSetWriter},
-                framebuffer::{
-                    AttachmentReferences, AttachmentsBuilder, Extent2D, FramebufferBuilder,
-                    InputAttachment,
-                },
-                image::{Image, Image2D, ImagePartial, ImageView},
-                pipeline::{
-                    GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, Modules,
-                    ShaderDirectory,
-                },
-                render_pass::{RenderPass, Subpass},
-                swapchain::{Swapchain, SwapchainFramebufferConfigBuilder},
-                ResourceIndex, ResourceIndexListBuilder,
-            },
-            Partial,
-        },
-    },
     error::{ResourceError, ShaderResult, VkError},
-    index_list, Context,
+    index_list,
+    memory::{
+        allocator::{AllocatorBuilder, AllocatorIndex},
+        DeviceLocal,
+    },
+    resources::{
+        descriptor::{DescriptorPool, DescriptorSetWriter},
+        framebuffer::{
+            AttachmentReferences, AttachmentsBuilder, Extent2D, FramebufferBuilder, InputAttachment,
+        },
+        image::{Image, Image2D, ImagePartial, ImageView},
+        pipeline::{
+            GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, Modules, ShaderDirectory,
+        },
+        render_pass::{RenderPass, Subpass},
+        storage::ResourceIndexListBuilder,
+        swapchain::{Swapchain, SwapchainFramebufferConfigBuilder},
+        Partial, ResourceIndex,
+    },
+    Context,
 };
 
 use math::types::Matrix4;

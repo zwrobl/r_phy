@@ -3,22 +3,20 @@ use std::{error::Error, marker::PhantomData};
 use graphics::renderer::camera::CameraMatrices;
 use type_kit::{unpack_list, Cons};
 use vulkan_low::{
-    device::{
-        raw::resources::{
-            command::{
-                level::{Primary, Secondary},
-                operation::Graphics,
-                BeginCommand, FinishedCommand, Persistent,
-            },
-            descriptor::Descriptor,
-            framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
-            layout::presets::CameraDescriptorSet,
-            swapchain::SwapchainFrame,
-            ResourceIndexListBuilder,
+    index_list,
+    resources::{
+        command::{
+            level::{Primary, Secondary},
+            operation::Graphics,
+            BeginCommand, FinishedCommand, Persistent,
         },
-        Device,
+        descriptor::Descriptor,
+        framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
+        layout::presets::CameraDescriptorSet,
+        storage::ResourceIndexListBuilder,
+        swapchain::SwapchainFrame,
     },
-    index_list, Context,
+    Context,
 };
 
 use crate::{
@@ -128,7 +126,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
 
     pub fn record_primary_command(
         &self,
-        device: &Device,
+        context: &Context,
         primary_command: BeginCommand<Persistent, Primary, Graphics>,
         commands: CommandStorage<P>,
         swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
@@ -141,13 +139,13 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
             ..
         } = commands;
         let renderer = self.renderer;
-        let depth_prepass = device.finish_command(depth_prepass)?;
-        let skybox_pass = device.finish_command(skybox_pass)?;
+        let depth_prepass = context.finish_command(depth_prepass)?;
+        let skybox_pass = context.finish_command(skybox_pass)?;
         let write_pass = write_pass
             .into_iter()
-            .flat_map(|command| device.finish_command(command))
+            .flat_map(|command| context.finish_command(command))
             .collect::<Vec<_>>();
-        let shading_pass = device.finish_command(shading_pass)?;
+        let shading_pass = context.finish_command(shading_pass)?;
 
         let clear_values = ClearValueBuilder::new()
             .push(ClearNone)
@@ -156,7 +154,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
             .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]))
             .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]))
             .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]));
-        let primary_command = device.record_command(primary_command, |command| {
+        let primary_command = context.record_command(primary_command, |command| {
             let command = command
                 .begin_render_pass(swapchain_frame, &renderer.render_pass, &clear_values)
                 .write_secondary(&depth_prepass)
@@ -172,6 +170,6 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                 .write_secondary(&shading_pass)
                 .end_render_pass()
         });
-        Ok(device.finish_command(primary_command)?)
+        Ok(context.finish_command(primary_command)?)
     }
 }

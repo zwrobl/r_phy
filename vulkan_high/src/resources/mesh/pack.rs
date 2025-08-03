@@ -4,27 +4,26 @@ use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, 
 
 use graphics::model::{Mesh, Vertex};
 use vulkan_low::{
-    device::{
-        memory::DeviceLocal,
-        raw::{
-            allocator::{AllocatorBuilder, AllocatorIndex},
-            range::Range,
-            resources::{
-                buffer::{
-                    BufferInfoBuilder, BufferPartial, BufferUsage, SharingMode, StagingBuffer,
-                    StagingBufferBuilder, StagingBufferPartial,
-                },
-                command::{
-                    operation::{self, Operation},
-                    DrawIndexed,
-                },
-                ResourceIndexListBuilder,
-            },
-            Partial,
-        },
-    },
     error::{ResourceError, ResourceResult},
-    index_list, Context,
+    index_list,
+    memory::{
+        allocator::{AllocatorBuilder, AllocatorIndex},
+        range::Range,
+        DeviceLocal,
+    },
+    resources::{
+        buffer::{
+            BufferInfoBuilder, BufferPartial, BufferUsage, SharingMode, StagingBuffer,
+            StagingBufferBuilder, StagingBufferPartial,
+        },
+        command::{
+            operation::{self, Operation},
+            DrawIndexed,
+        },
+        storage::ResourceIndexListBuilder,
+        Partial,
+    },
+    Context,
 };
 
 use super::{

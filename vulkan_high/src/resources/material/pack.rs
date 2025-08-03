@@ -5,21 +5,20 @@ use type_kit::{
 };
 
 use vulkan_low::{
-    device::raw::{
-        allocator::{AllocatorBuilder, AllocatorIndex},
-        resources::{
-            buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-            command::operation::Graphics,
-            descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
-            image::{DescriptorImageInfo, Image2D, Image2DReader, Texture, TexturePartial},
-            layout::presets::{FragmentStage, PodUniform},
-            pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
-            ResourceIndex, ResourceIndexListBuilder,
-        },
-        Partial,
-    },
     error::{ResourceResult, VkResult},
-    index_list, Context,
+    index_list,
+    memory::allocator::{AllocatorBuilder, AllocatorIndex},
+    resources::{
+        buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
+        command::operation::Graphics,
+        descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
+        image::{DescriptorImageInfo, Image2D, Image2DReader, Texture, TexturePartial},
+        layout::presets::{FragmentStage, PodUniform},
+        pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
+        storage::ResourceIndexListBuilder,
+        Partial, ResourceIndex,
+    },
+    Context,
 };
 
 use super::{Material, TextureSamplers};

@@ -17,32 +17,25 @@ use graphics::{
 };
 use math::types::Matrix4;
 use vulkan_low::{
-    device::raw::{
-        allocator::{AllocatorBuilder, AllocatorIndex},
-        resources::{
-            buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-            layout::presets::CameraDescriptorSet,
-            pipeline::{GraphicsPipelineConfig, ModuleLoader},
-            render_pass::RenderPassConfig,
-            ResourceIndex,
-        },
-        Partial,
-    },
     error::{ResourceError, VkError, VkResult},
-    index_list, Context,
-};
-
-use vulkan_low::device::{
-    raw::resources::descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
-    raw::resources::swapchain::{SwapchainFrame, SwapchainImageSync},
-    raw::resources::{
+    index_list,
+    memory::allocator::{AllocatorBuilder, AllocatorIndex},
+    resources::{
+        buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
         command::{
             level::{Primary, Secondary},
             operation::Graphics,
             BeginCommand, Persistent, PersistentCommandPool,
         },
-        ResourceIndexListBuilder,
+        descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
+        layout::presets::CameraDescriptorSet,
+        pipeline::{GraphicsPipelineConfig, ModuleLoader},
+        render_pass::RenderPassConfig,
+        storage::ResourceIndexListBuilder,
+        swapchain::{SwapchainFrame, SwapchainImageSync},
+        Partial, ResourceIndex,
     },
+    Context,
 };
 
 use crate::resources::{

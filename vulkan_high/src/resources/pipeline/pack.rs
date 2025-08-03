@@ -1,11 +1,14 @@
 use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
-use vulkan_low::device::raw::resources::pipeline::{GraphicsPipeline, GraphicsPipelineConfig};
-
-use vulkan_low::device::raw::resources::{RawIndex, ResourceIndex};
-use vulkan_low::error::VkError;
-use vulkan_low::{device::raw::resources::pipeline::ModuleLoader, Context};
+use vulkan_low::{
+    error::VkError,
+    resources::{
+        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader},
+        RawIndex, ResourceIndex,
+    },
+    Context,
+};
 
 #[derive(Debug)]
 pub struct PipelinePack<T: GraphicsPipelineConfig> {

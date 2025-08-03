@@ -3,10 +3,8 @@ use std::{any::type_name, error::Error};
 use graphics::model::{Mesh, MeshTypeList, Vertex};
 use type_kit::{Cons, Create, Destroy, Nil, TypedNil};
 use vulkan_low::{
-    device::raw::{
-        allocator::{AllocatorBuilder, AllocatorIndex},
-        Partial,
-    },
+    memory::allocator::{AllocatorBuilder, AllocatorIndex},
+    resources::Partial,
     Context,
 };
 

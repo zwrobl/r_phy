@@ -1,6 +1,3 @@
-pub mod memory;
-pub mod raw;
-
 use super::{
     error::{DeviceNotSuitable, VkError, VkResult},
     Instance,
@@ -21,10 +18,10 @@ use std::{
 use type_kit::{Create, Destroy, DestroyResult};
 
 #[derive(Debug, Clone, Copy)]
-struct QueueFamilies {
-    graphics: u32,
-    compute: u32,
-    transfer: u32,
+pub struct QueueFamilies {
+    pub graphics: u32,
+    pub compute: u32,
+    pub transfer: u32,
 }
 
 impl QueueFamilies {
@@ -121,9 +118,9 @@ impl DeviceQueueBuilder {
 
 #[derive(Debug, Clone)]
 pub struct PhysicalDeviceProperties {
-    enabled_features: vk::PhysicalDeviceFeatures,
+    pub enabled_features: vk::PhysicalDeviceFeatures,
     generic: vk::PhysicalDeviceProperties,
-    memory: vk::PhysicalDeviceMemoryProperties,
+    pub memory: vk::PhysicalDeviceMemoryProperties,
     enabled_extension_names: Vec<*const c_char>,
     queue_families: Vec<(vk::QueueFamilyProperties, u32)>,
 }
@@ -214,15 +211,15 @@ impl PhysicalDeviceProperties {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct AttachmentFormats {
-    color: vk::Format,
-    depth_stencil: vk::Format,
+pub struct AttachmentFormats {
+    pub color: vk::Format,
+    pub depth_stencil: vk::Format,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct AttachmentProperties {
-    formats: AttachmentFormats,
-    msaa_samples: vk::SampleCountFlags,
+    pub formats: AttachmentFormats,
+    pub msaa_samples: vk::SampleCountFlags,
 }
 
 impl AttachmentProperties {
@@ -277,11 +274,11 @@ impl AttachmentProperties {
 }
 
 #[derive(Debug)]
-struct PhysicalDevice {
-    properties: PhysicalDeviceProperties,
-    surface_properties: PhysicalDeviceSurfaceProperties,
-    attachment_properties: AttachmentProperties,
-    queue_families: QueueFamilies,
+pub struct PhysicalDevice {
+    pub properties: PhysicalDeviceProperties,
+    pub surface_properties: PhysicalDeviceSurfaceProperties,
+    pub attachment_properties: AttachmentProperties,
+    pub queue_families: QueueFamilies,
     handle: vk::PhysicalDevice,
 }
 
@@ -292,14 +289,14 @@ impl PhysicalDevice {
 }
 
 #[derive(Debug)]
-struct DeviceQueues {
-    graphics: vk::Queue,
-    compute: vk::Queue,
-    transfer: vk::Queue,
+pub struct DeviceQueues {
+    pub graphics: vk::Queue,
+    pub compute: vk::Queue,
+    pub transfer: vk::Queue,
 }
 
 pub struct DeviceExtensions {
-    swapchain: khr::Swapchain,
+    pub swapchain: khr::Swapchain,
 }
 
 impl DeviceExtensions {
@@ -318,8 +315,8 @@ impl DeviceExtensions {
 }
 
 pub struct Device {
-    physical_device: PhysicalDevice,
-    device_queues: DeviceQueues,
+    pub physical_device: PhysicalDevice,
+    pub device_queues: DeviceQueues,
     device: ash::Device,
     extensions: DeviceExtensions,
 }

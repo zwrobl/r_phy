@@ -14,10 +14,7 @@ use std::convert::Infallible;
 
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
-use vulkan_low::{
-    device::raw::{allocator::AllocatorBuilder, Partial},
-    Context,
-};
+use vulkan_low::{memory::allocator::AllocatorBuilder, resources::Partial, Context};
 
 pub struct DummyPack {}
 

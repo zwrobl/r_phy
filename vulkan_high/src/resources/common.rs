@@ -10,12 +10,12 @@ use physics::shape;
 use strum::EnumCount;
 use type_kit::{Create, CreateResult, Destroy};
 use vulkan_low::{
-    device::raw::{
-        allocator::AllocatorIndex,
-        resources::command::{level::Level, operation::Operation, RecordingCommand},
+    error::ResourceError,
+    memory::allocator::{AllocatorBuilder, AllocatorIndex},
+    resources::{
+        command::{level::Level, operation::Operation, RecordingCommand},
         Partial,
     },
-    error::ResourceError,
     Context,
 };
 
@@ -69,10 +69,7 @@ pub struct CommonResourcesPartial {
 
 impl Partial for CommonResourcesPartial {
     #[inline]
-    fn register_memory_requirements<B: vulkan_low::device::raw::allocator::AllocatorBuilder>(
-        &self,
-        builder: &mut B,
-    ) {
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
         self.partial.register_memory_requirements(builder);
     }
 }

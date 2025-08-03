@@ -12,20 +12,15 @@ use strum::EnumCount;
 use graphics::model::{Mesh, Vertex};
 
 use vulkan_low::{
-    device::{
-        memory::DeviceLocal,
-        raw::{
-            range::ByteRange,
-            resources::{
-                buffer::{Buffer, BufferPartial},
-                command::{
-                    level::Level, operation::Operation, BufferBinding, IndexType, RecordingCommand,
-                },
-                ResourceIndex, ResourceIndexListBuilder,
-            },
-        },
+    index_list,
+    memory::{range::ByteRange, DeviceLocal},
+    resources::{
+        buffer::{Buffer, BufferPartial},
+        command::{level::Level, operation::Operation, BufferBinding, IndexType, RecordingCommand},
+        storage::ResourceIndexListBuilder,
+        ResourceIndex,
     },
-    index_list, Context,
+    Context,
 };
 
 #[derive(strum::EnumCount)]

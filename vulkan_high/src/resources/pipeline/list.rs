@@ -3,8 +3,8 @@ use std::any::type_name;
 use graphics::shader::ShaderType;
 use type_kit::{Cons, Create, Destroy, Nil, TypeList};
 use vulkan_low::{
-    device::raw::resources::pipeline::{GraphicsPipelineConfig, ModuleLoader},
     error::VkResult,
+    resources::pipeline::{GraphicsPipelineConfig, ModuleLoader},
     Context,
 };
 
