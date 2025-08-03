@@ -11,7 +11,7 @@ use std::{cell::RefCell, collections::HashMap, convert::Infallible, ffi::c_void,
 use ash::vk;
 use type_kit::{
     unpack_list, Cons, Create, Destroy, DestroyResult, FromGuard, GenCollection, GenIndex,
-    GenIndexRaw, GuardCollection, GuardIndex, TypeGuard, TypeGuardCollection,
+    GenIndexRaw, GenVec, GuardIndex, GuardVec, TypeGuard, TypeGuardVec,
 };
 
 use crate::{
@@ -86,7 +86,7 @@ impl<M: MemoryProperties> FromGuard for Allocation<M> {
 #[derive(Debug, Default)]
 struct MemoryMap {
     usage: HashMap<TypeGuard<GenIndexRaw>, usize>,
-    _memory: GuardCollection<MemoryRaw>,
+    _memory: GuardVec<MemoryRaw>,
 }
 
 impl MemoryMap {
@@ -94,7 +94,7 @@ impl MemoryMap {
     fn new() -> Self {
         Self {
             usage: HashMap::default(),
-            _memory: GuardCollection::default(),
+            _memory: GuardVec::default(),
         }
     }
 
@@ -159,7 +159,7 @@ impl Drop for MemoryMap {
 
 #[derive(Debug)]
 pub struct AllocationStore {
-    allocations: TypeGuardCollection<AllocationRaw>,
+    allocations: TypeGuardVec<AllocationRaw>,
     memory_map: MemoryMap,
 }
 
@@ -173,7 +173,7 @@ impl AllocationStore {
     #[inline]
     pub fn new() -> Self {
         Self {
-            allocations: TypeGuardCollection::default(),
+            allocations: TypeGuardVec::default(),
             memory_map: MemoryMap::new(),
         }
     }
@@ -357,12 +357,12 @@ impl Context {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AllocatorIndex {
-    index: GenIndex<AllocatorInstance, GenCollection<AllocatorInstance>>,
+    index: GenIndex<AllocatorInstance, GenVec<AllocatorInstance>>,
 }
 
 #[derive(Debug)]
 pub struct AllocationIndex<M: MemoryProperties> {
-    index: GuardIndex<Allocation<M>, TypeGuardCollection<AllocationRaw>>,
+    index: GuardIndex<Allocation<M>, TypeGuardVec<AllocationRaw>>,
 }
 
 impl<M: MemoryProperties> Clone for AllocationIndex<M> {
@@ -470,7 +470,7 @@ impl Context {
 }
 
 pub struct AllocatorStorage {
-    allocators: RefCell<GenCollection<AllocatorInstance>>,
+    allocators: RefCell<GenVec<AllocatorInstance>>,
 }
 
 impl Default for AllocatorStorage {
@@ -483,7 +483,7 @@ impl AllocatorStorage {
     #[inline]
     pub fn new() -> Self {
         Self {
-            allocators: RefCell::new(GenCollection::new()),
+            allocators: RefCell::new(GenVec::new()),
         }
     }
 

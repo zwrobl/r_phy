@@ -20,10 +20,10 @@ use layout::{DescriptorSetLayoutRaw, PipelineLayoutRaw};
 use pipeline::GraphicsPipelineRaw;
 use swapchain::SwapchainRaw;
 use type_kit::{
-    list_type, BorrowCollection, BorrowList, BorrowedGuard, CollectionDestroyError, Cons, Contains,
-    Create, Destroy, DestroyResult, FromGuard, GenCell, GenCollectionResult, GenIndex, GenIndexRaw,
-    GuardCollectionT, GuardIndex, IndexList, Marked, Marker, Nil, TypeGuard, TypeGuardCollection,
-    TypeMap, TypedIndex,
+    list_type, BorrowList, BorrowedGuard, CollectionDestroyError, Cons, Contains, Create, Destroy,
+    DestroyResult, FromGuard, GenCollection, GenCollectionResult, GenIndex, GenIndexRaw,
+    GuardCollectionT, GuardIndex, IndexList, Marked, Marker, Nil, TypeGuard, TypeGuardCell,
+    TypeGuardVec, TypeMap, TypedIndex,
 };
 
 use crate::{
@@ -98,15 +98,15 @@ impl<R: Resource> FromGuard for ResourceIndex<R> {
 
 pub type RawCollection<R> = <R as Resource>::RawCollection;
 pub type ResourceStorageList = list_type![
-    TypeGuardCollection<MemoryRaw>,
-    TypeGuardCollection<BufferRaw>,
-    TypeGuardCollection<ImageRaw>,
-    TypeGuardCollection<TextureRaw>,
-    TypeGuardCollection<GraphicsPipelineRaw>,
-    TypeGuardCollection<DescriptorPoolDataRaw>,
-    TypeGuardCollection<PersistentCommandPoolRaw>,
-    TypeGuardCollection<FramebufferRaw>,
-    GenCell<TypeGuard<SwapchainRaw>>,
+    TypeGuardVec<MemoryRaw>,
+    TypeGuardVec<BufferRaw>,
+    TypeGuardVec<ImageRaw>,
+    TypeGuardVec<TextureRaw>,
+    TypeGuardVec<GraphicsPipelineRaw>,
+    TypeGuardVec<DescriptorPoolDataRaw>,
+    TypeGuardVec<PersistentCommandPoolRaw>,
+    TypeGuardVec<FramebufferRaw>,
+    TypeGuardCell<SwapchainRaw>,
     Nil
 ];
 
@@ -181,7 +181,7 @@ impl ResourceStorage {
     pub unsafe fn pop_raw_resource<R, M: Marker>(&self, index: RawIndex) -> ResourceResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
+        ResourceStorageList: Contains<TypeGuardVec<R>, M>,
     {
         let index = unsafe { GenIndex::<TypeGuard<R>, _>::from_inner(index) };
         let resource = self.storage.borrow_mut().get_mut().pop(index)?.into_inner();
@@ -218,7 +218,7 @@ impl ResourceStorage {
     fn destroy_vec_resource_storage<R, M: Marker>(&self, context: &Context) -> DestroyResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
+        ResourceStorageList: Contains<TypeGuardVec<R>, M>,
     {
         let items = self.storage.borrow_mut().get_mut().drain();
         items
@@ -230,7 +230,7 @@ impl ResourceStorage {
     fn destroy_cell_resource_storage<R, M: Marker>(&self, context: &Context) -> DestroyResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<GenCell<TypeGuard<R>>, M>,
+        ResourceStorageList: Contains<TypeGuardCell<R>, M>,
     {
         let resource = self.storage.borrow_mut().get_mut().drain();
         if let Some(mut item) = resource {

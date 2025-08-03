@@ -41,7 +41,7 @@ use std::{any::type_name, convert::Infallible};
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardCollection};
+use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardVec};
 
 use crate::{
     device::raw::{
@@ -75,7 +75,7 @@ pub struct GraphicsPipelineRaw {
 
 impl<T: GraphicsPipelineConfig> Resource for GraphicsPipeline<T> {
     type RawType = GraphicsPipelineRaw;
-    type RawCollection = TypeGuardCollection<Self::RawType>;
+    type RawCollection = TypeGuardVec<Self::RawType>;
 }
 
 impl<T: GraphicsPipelineConfig> FromGuard for GraphicsPipeline<T> {

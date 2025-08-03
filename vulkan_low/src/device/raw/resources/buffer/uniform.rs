@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardCollection};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardVec};
 
 use crate::{
     device::{
@@ -209,7 +209,7 @@ impl<U: AnyBitPattern, O: Operation> Destroy for UniformBuffer<U, O> {
 
 impl<U: AnyBitPattern, O: Operation> Resource for UniformBuffer<U, O> {
     type RawType = BufferRaw;
-    type RawCollection = TypeGuardCollection<Self::RawType>;
+    type RawCollection = TypeGuardVec<Self::RawType>;
 }
 
 impl<U: AnyBitPattern, O: Operation> FromGuard for UniformBuffer<U, O> {

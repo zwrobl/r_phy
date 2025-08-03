@@ -16,7 +16,7 @@ use crate::{
     error::ResourceError,
     Context,
 };
-use type_kit::{Cons, Create, Destroy, FromGuard, Nil, TypeGuardCollection};
+use type_kit::{Cons, Create, Destroy, FromGuard, Nil, TypeGuardVec};
 
 use crate::device::memory::DeviceLocal;
 
@@ -839,7 +839,7 @@ impl<C: RenderPassConfig> Copy for FramebufferHandle<C> {}
 
 impl<C: RenderPassConfig> Resource for Framebuffer<C> {
     type RawType = FramebufferRaw;
-    type RawCollection = TypeGuardCollection<Self::RawType>;
+    type RawCollection = TypeGuardVec<Self::RawType>;
 }
 
 impl<C: RenderPassConfig> FromGuard for Framebuffer<C> {

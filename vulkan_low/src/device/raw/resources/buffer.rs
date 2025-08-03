@@ -9,9 +9,7 @@ pub use uniform::*;
 use std::{convert::Infallible, ffi::c_void, marker::PhantomData};
 
 use ash::vk;
-use type_kit::{
-    Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardCollection,
-};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardVec};
 
 use crate::{
     device::{
@@ -245,7 +243,7 @@ impl<M: MemoryProperties> FromGuard for Buffer<M> {
 
 impl<M: MemoryProperties> Resource for Buffer<M> {
     type RawType = BufferRaw;
-    type RawCollection = TypeGuardCollection<Self::RawType>;
+    type RawCollection = TypeGuardVec<Self::RawType>;
 }
 
 impl<M: MemoryProperties> Create for Buffer<M> {

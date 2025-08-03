@@ -36,7 +36,7 @@ use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
     Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize,
-    GenCollectionResult, Initialize, Marker, TypeGuardCollection,
+    GenCollectionResult, Initialize, Marker, TypeGuardVec,
 };
 
 use ash::vk;
@@ -284,7 +284,7 @@ impl Context {
     pub unsafe fn destroy_raw_resource<R, M: Marker>(&self, index: RawIndex) -> ResourceResult<()>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
+        ResourceStorageList: Contains<TypeGuardVec<R>, M>,
     {
         let mut resource = self.storage.pop_raw_resource(index)?;
         let _ = resource.destroy(self);
