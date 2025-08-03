@@ -211,7 +211,7 @@ impl<B: DescriptorBindingList> DescriptorLayoutBuilder<B> {
         Self::default()
     }
 
-    fn next_descriptor_binding<'a, T: DescriptorBindingList>(
+    fn next_descriptor_binding<T: DescriptorBindingList>(
         binding: u32,
         mut descriptor_bindings: Vec<DescriptorSetLayoutBinding>,
     ) -> Vec<DescriptorSetLayoutBinding> {

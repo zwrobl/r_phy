@@ -67,9 +67,9 @@ impl QueueFamilies {
             }
         }
         Ok(Self {
-            graphics: graphics.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex(&"Graphics"))?,
-            compute: compute.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex(&"Compute"))?,
-            transfer: transfer.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex(&"Transfer"))?,
+            graphics: graphics.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex("Graphics"))?,
+            compute: compute.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex("Compute"))?,
+            transfer: transfer.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex("Transfer"))?,
         })
     }
 }

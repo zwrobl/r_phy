@@ -50,6 +50,10 @@ impl<M: MemoryProperties> Allocation<M> {
         Self { range, memory }
     }
 
+    /// # Safety
+    /// This method allows user to create an Allocation instance of a specific memory type
+    /// from an instance of Allocation of arbitrary memory type. This should be used only
+    /// if it is known that the target memory type is indeed the same as the original one.
     pub unsafe fn cast<T: MemoryProperties>(self) -> Allocation<T> {
         Allocation {
             range: self.range,
@@ -105,7 +109,7 @@ impl MemoryMap {
         &mut self,
         allocation: Allocation<M>,
     ) -> ResourceResult<Option<ResourceIndex<Memory<M>>>> {
-        let memory = allocation.memory.clone().into_guard();
+        let memory = allocation.memory.into_guard();
         let count = self
             .usage
             .get_mut(&memory)
@@ -157,6 +161,12 @@ impl Drop for MemoryMap {
 pub struct AllocationStore {
     allocations: TypeGuardCollection<AllocationRaw>,
     memory_map: MemoryMap,
+}
+
+impl Default for AllocationStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AllocationStore {
@@ -218,13 +228,13 @@ where
         + Create<CreateError = ResourceError>
         + Into<AllocatorInstance>,
 {
-    fn allocate<'a, M: MemoryProperties>(
+    fn allocate<M: MemoryProperties>(
         &mut self,
         context: &Context,
         req: AllocReqTyped<M>,
     ) -> ResourceResult<AllocationIndex<M>>;
 
-    fn free<'a, M: MemoryProperties>(
+    fn free<M: MemoryProperties>(
         &mut self,
         context: &Context,
         allocation: AllocationIndex<M>,
@@ -463,6 +473,12 @@ pub struct AllocatorStorage {
     allocators: RefCell<GenCollection<AllocatorInstance>>,
 }
 
+impl Default for AllocatorStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AllocatorStorage {
     #[inline]
     pub fn new() -> Self {
@@ -475,7 +491,7 @@ impl AllocatorStorage {
     pub fn create_allocator<'a, 'b, A: Allocator>(
         &self,
         context: &'a Context,
-        config: A::Config<'a>,
+        config: A::Config<'b>,
     ) -> ResourceResult<AllocatorIndex> {
         let allocator = A::create(config, context)?.into();
         let index = self.allocators.borrow_mut().push(allocator)?;

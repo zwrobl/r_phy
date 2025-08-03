@@ -42,7 +42,7 @@ impl<T> TypeMap<T> {
     }
 
     #[inline]
-    pub fn insert<'a, 'b, I: FromGuard<Inner = T>>(&mut self, item: I) {
+    pub fn insert<I: FromGuard<Inner = T>>(&mut self, item: I) {
         self.data.insert(TypeId::of::<I>(), item.into_inner());
     }
 }
@@ -66,7 +66,7 @@ where
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> crate::DestroyResult<Self> {
-        let keys: Vec<_> = self.data.keys().map(|key| *key).collect();
+        let keys: Vec<_> = self.data.keys().copied().collect();
         keys.iter().try_for_each(|key| {
             let mut item = self.data.remove(key).unwrap();
             item.destroy(context).map_err(|err| (item, err))

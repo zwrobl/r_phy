@@ -131,7 +131,7 @@ impl<V: ImageType> Create for Texture<V> {
             while let Some(read_result) = reader.read(staging_area) {
                 let dst_layer = read_result?;
                 staging_buffer.transfer_image_data(
-                    &context,
+                    context,
                     &mut image,
                     dst_layer,
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,

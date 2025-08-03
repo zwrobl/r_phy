@@ -149,6 +149,12 @@ impl<T: Sized> Clone for StaticAllocationIndex<T> {
 
 impl<T: Sized> Copy for StaticAllocationIndex<T> {}
 
+impl Default for StaticHeapAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StaticHeapAllocator {
     pub fn new() -> Self {
         Self {
@@ -171,8 +177,7 @@ impl StaticHeapAllocator {
         if self.index == index.allocator_index {
             self.allocations
                 .get(index.item_index)
-                .map(|&ptr| ptr.map(|alloc| unsafe { alloc.cast::<T>().as_ref() }))
-                .flatten()
+                .and_then(|&ptr| ptr.map(|alloc| unsafe { alloc.cast::<T>().as_ref() }))
         } else {
             None
         }
@@ -182,8 +187,7 @@ impl StaticHeapAllocator {
         if self.index == index.allocator_index {
             self.allocations
                 .get(index.item_index)
-                .map(|&ptr| ptr.map(|alloc| unsafe { alloc.cast::<T>().as_mut() }))
-                .flatten()
+                .and_then(|&ptr| ptr.map(|alloc| unsafe { alloc.cast::<T>().as_mut() }))
         } else {
             None
         }

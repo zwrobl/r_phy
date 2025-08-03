@@ -338,20 +338,20 @@ impl Destroy for SwapchainRaw {
     type DestroyError = Infallible;
 
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.framebuffers.take().map(|mut framebuffers| {
+        if let Some(mut framebuffers) = self.framebuffers.take() {
             let framebuffers = unsafe { Box::from_raw(framebuffers.as_mut()) };
             (0..framebuffers.len()).for_each(|index| {
                 let _ = unsafe {
                     context.destroy_raw_resource::<FramebufferRaw, _>(framebuffers[index])
                 };
             })
-        });
-        self.images.take().map(|mut images| {
+        };
+        if let Some(mut images) = self.images.take() {
             let mut images = unsafe { Box::from_raw(images.as_mut()) };
             images.iter_mut().for_each(|image| {
                 let _ = image.view.destroy(context);
             })
-        });
+        };
         unsafe {
             context
                 .get_extensions()

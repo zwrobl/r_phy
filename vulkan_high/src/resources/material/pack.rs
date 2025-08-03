@@ -11,9 +11,7 @@ use vulkan_low::{
             buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
             command::operation::Graphics,
             descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
-            image::{
-                DescriptorImageInfo, Image2D, Image2DReader, ImageReader, Texture, TexturePartial,
-            },
+            image::{DescriptorImageInfo, Image2D, Image2DReader, Texture, TexturePartial},
             layout::presets::{FragmentStage, PodUniform},
             pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
             ResourceIndex, ResourceIndexListBuilder,
@@ -48,19 +46,25 @@ impl<'b, M: Material> Destroy for MaterialUniformPartial<'b, M> {
     }
 }
 
+type PackTexturesPartial<'a> = Vec<DropGuard<TexturePartial<Image2D, Image2DReader<'a>>>>;
+type PackTextures = Vec<ResourceIndex<Texture<Image2D>>>;
+
+pub type PackUniform<M> =
+    UniformBuffer<PodUniform<<M as graphics::model::Material>::Uniform, FragmentStage>, Graphics>;
+
 pub struct MaterialPackData<M: Material> {
-    textures: Option<Vec<ResourceIndex<Texture<Image2D>>>>,
-    uniforms: Option<ResourceIndex<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>>,
+    textures: Option<PackTextures>,
+    uniforms: Option<ResourceIndex<PackUniform<M>>>,
     descriptors: ResourceIndex<DescriptorPool<M::DescriptorLayout>>,
 }
 
-pub struct MaterialPackPartial<'a, M: Material, R: ImageReader<Type = Image2D>> {
-    textures: Option<Vec<DropGuard<TexturePartial<Image2D, R>>>>,
+pub struct MaterialPackPartial<'a, M: Material> {
+    textures: Option<PackTexturesPartial<'a>>,
     uniforms: Option<MaterialUniformPartial<'a, M>>,
     num_materials: usize,
 }
 
-impl<'a, M: Material, R: ImageReader<Type = Image2D>> Partial for MaterialPackPartial<'a, M, R> {
+impl<'a, M: Material> Partial for MaterialPackPartial<'a, M> {
     #[inline]
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
         self.uniforms.register_memory_requirements(builder);
@@ -68,7 +72,7 @@ impl<'a, M: Material, R: ImageReader<Type = Image2D>> Partial for MaterialPackPa
     }
 }
 
-impl<'b, M: Material, R: ImageReader<Type = Image2D>> Destroy for MaterialPackPartial<'b, M, R> {
+impl<'b, M: Material> Destroy for MaterialPackPartial<'b, M> {
     type Context<'a> = &'a Context;
 
     type DestroyError = Infallible;
@@ -131,7 +135,7 @@ impl<M: Material> MaterialPackRef<M> {
                 index_list![self.descriptors, pipeline_index],
                 |unpack_list![pipeline, material_descriptor]| {
                     let descriptor = material_descriptor.get(descriptor_index as usize);
-                    let binding = descriptor.get_binding_data(&pipeline)?;
+                    let binding = descriptor.get_binding_data(pipeline)?;
                     Result::<_, Box<dyn Error>>::Ok(binding)
                 },
             )
@@ -156,16 +160,10 @@ impl<M: Material> MaterialPackRef<M> {
     }
 }
 
-// impl<'a, M: Material> MaterialPackRef<'a, M> {
-//     pub fn get_descriptor(&self, index: usize) -> Descriptor<M::DescriptorLayout> {
-//         self.descriptors.get(index)
-//     }
-// }
-
 fn prepare_material_pack_textures<'a, M: Material>(
     context: &Context,
     materials: &'a [M],
-) -> VkResult<Option<Vec<DropGuard<TexturePartial<Image2D, Image2DReader<'a>>>>>> {
+) -> VkResult<Option<PackTexturesPartial<'a>>> {
     if M::NUM_IMAGES > 0 {
         let textures = materials
             .iter()
@@ -193,7 +191,7 @@ fn allocate_material_pack_textures_memory<'a>(
     context: &Context,
     textures: Vec<DropGuard<TexturePartial<Image2D, Image2DReader<'a>>>>,
     allocator: AllocatorIndex,
-) -> ResourceResult<Vec<ResourceIndex<Texture<Image2D>>>> {
+) -> ResourceResult<PackTextures> {
     textures
         .into_iter()
         .map(|texture| context.create_resource((texture, allocator)))
@@ -226,12 +224,9 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
     context: &Context,
     partial: MaterialUniformPartial<'a, M>,
     allocator: AllocatorIndex,
-) -> Result<
-    ResourceIndex<UniformBuffer<PodUniform<M::Uniform, FragmentStage>, Graphics>>,
-    Box<dyn Error>,
-> {
+) -> Result<ResourceIndex<PackUniform<M>>, Box<dyn Error>> {
     let MaterialUniformPartial { uniform, data } = partial;
-    let uniform_buffer = context.create_resource::<UniformBuffer<_, _>, _>((uniform, allocator))?;
+    let uniform_buffer = context.create_resource::<PackUniform<M>, _>((uniform, allocator))?;
     context
         .operate_mut(
             index_list![uniform_buffer],
@@ -249,7 +244,7 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
 pub fn prepare_material_pack<'a, M: Material>(
     context: &Context,
     materials: &'a [M],
-) -> Result<MaterialPackPartial<'a, M, Image2DReader<'a>>, Box<dyn Error>> {
+) -> Result<MaterialPackPartial<'a, M>, Box<dyn Error>> {
     let textures = prepare_material_pack_textures(context, materials)?;
     let uniforms = prepare_material_pack_uniforms(context, materials)?;
     Ok(MaterialPackPartial {
@@ -261,7 +256,7 @@ pub fn prepare_material_pack<'a, M: Material>(
 
 pub fn allocate_material_pack_memory<'a, M: Material>(
     context: &Context,
-    partial: MaterialPackPartial<'a, M, Image2DReader<'a>>,
+    partial: MaterialPackPartial<'a, M>,
     allocator: AllocatorIndex,
 ) -> Result<MaterialPack<M>, Box<dyn Error>> {
     let MaterialPackPartial {

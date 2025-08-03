@@ -512,10 +512,7 @@ mod cell {
 
         #[inline]
         pub(super) fn is_occupied(&self) -> bool {
-            match &self.cell {
-                IndexCell::Occupied(..) => true,
-                _ => false,
-            }
+            matches!(self.cell, IndexCell::Occupied(..))
         }
     }
 
@@ -716,6 +713,11 @@ impl<T> GenCollection<T> {
     }
 
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -852,6 +854,7 @@ impl<T, C> DerefMut for Borrowed<T, C> {
 }
 
 pub trait BorrowCollection<T>: 'static + Sized {
+    fn is_empty(&self) -> bool;
     fn len(&self) -> usize;
     fn push(&mut self, item: T) -> GenCollectionResult<GenIndex<T, Self>>;
     fn pop(&mut self, index: GenIndex<T, Self>) -> GenCollectionResult<T>;
@@ -893,6 +896,11 @@ impl<T, C: BorrowCollection<TypeGuard<T>>> GuardCollectionT<T> for C {}
 
 impl<T: 'static> BorrowCollection<T> for GenCollection<T> {
     #[inline]
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+
+    #[inline]
     fn len(&self) -> usize {
         self.len()
     }
@@ -919,7 +927,7 @@ impl<T: 'static> BorrowCollection<T> for GenCollection<T> {
 
     #[inline]
     fn borrow(&mut self, index: GenIndex<T, Self>) -> GenCollectionResult<Borrowed<T, Self>> {
-        let item_index = self.get_cell_mut_unlocked(index.clone())?.borrow()?;
+        let item_index = self.get_cell_mut_unlocked(index)?.borrow()?;
         let item = unsafe { self.items[item_index].assume_init_read() };
         Ok(Borrowed { item, index })
     }
@@ -1058,9 +1066,9 @@ impl<T: 'static> IntoIterator for GenCollection<T> {
     #[inline]
     fn into_iter(mut self) -> Self::IntoIter {
         GenCollectionIntoIter {
-            items: std::mem::replace(&mut self.items, vec![]),
-            indices: std::mem::replace(&mut self.indices, vec![]),
-            mapping: std::mem::replace(&mut self.mapping, vec![]),
+            items: std::mem::take(&mut self.items),
+            indices: std::mem::take(&mut self.indices),
+            mapping: std::mem::take(&mut self.mapping),
             next: 0,
         }
     }
@@ -1153,7 +1161,7 @@ impl<'a, T: FromGuard> Deref for ScopedInnerRef<'a, T> {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        self.inner
     }
 }
 
@@ -1177,14 +1185,14 @@ impl<'a, T: FromGuard> Deref for ScopedInnerMut<'a, T> {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        self.inner
     }
 }
 
 impl<'a, T: FromGuard> DerefMut for ScopedInnerMut<'a, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+        self.inner
     }
 }
 
@@ -1545,6 +1553,14 @@ impl<C, B: BorrowList<C>> Destroy for BorrowedContext<C, B> {
 }
 
 impl<T: TypeList> GenCollectionList<T> {
+    #[inline]
+    pub fn is_empty<I, C: BorrowCollection<I>, M: Marker>(&self) -> bool
+    where
+        T: Contains<C, M>,
+    {
+        self.collection.get().is_empty()
+    }
+
     #[inline]
     pub fn len<I, C: BorrowCollection<I>, M: Marker>(&self) -> usize
     where
@@ -2116,7 +2132,7 @@ impl<T: 'static> GenCell<T> {
 
     #[inline]
     pub fn drain(&mut self) -> Option<T> {
-        if let Ok(_) = self.cell.unlock_unchecked().pop(None) {
+        if self.cell.unlock_unchecked().pop(None).is_ok() {
             Some(unsafe { self.item.assume_init_read() })
         } else {
             None
@@ -2168,8 +2184,17 @@ impl<T: Clone + Copy> GenCell<TypeGuard<T>> {
 
 impl<T: 'static> BorrowCollection<T> for GenCell<T> {
     #[inline]
+    fn is_empty(&self) -> bool {
+        !self.cell.is_occupied()
+    }
+
+    #[inline]
     fn len(&self) -> usize {
-        self.cell.is_occupied().then_some(1).unwrap_or(0)
+        if self.cell.is_occupied() {
+            1
+        } else {
+            0
+        }
     }
 
     #[inline]
@@ -2190,9 +2215,7 @@ impl<T: 'static> BorrowCollection<T> for GenCell<T> {
                 let _ = self.cell.unlock_mut(generation)?.pop(None)?;
                 Ok(unsafe { self.item.assume_init_read() })
             }
-            GenIndex { index, .. } => {
-                Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
-            }
+            GenIndex { index, .. } => Err(GenCollectionError::InvalidIndex { index, len: 1 }),
         }
     }
 
@@ -2207,9 +2230,7 @@ impl<T: 'static> BorrowCollection<T> for GenCell<T> {
                 let _ = self.cell.unlock(generation)?.item_index()?;
                 Ok(unsafe { self.item.assume_init_ref() })
             }
-            GenIndex { index, .. } => {
-                Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
-            }
+            GenIndex { index, .. } => Err(GenCollectionError::InvalidIndex { index, len: 1 }),
         }
     }
 
@@ -2224,9 +2245,7 @@ impl<T: 'static> BorrowCollection<T> for GenCell<T> {
                 let _ = self.cell.unlock(generation)?.item_index()?;
                 Ok(unsafe { self.item.assume_init_mut() })
             }
-            GenIndex { index, .. } => {
-                Err(GenCollectionError::InvalidIndex { index, len: 1 }.into())
-            }
+            GenIndex { index, .. } => Err(GenCollectionError::InvalidIndex { index, len: 1 }),
         }
     }
 
@@ -2276,7 +2295,7 @@ impl<T: Destroy> Destroy for GenCell<T> {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        if let Ok(_) = self.cell.unlock_unchecked().pop(None) {
+        if self.cell.unlock_unchecked().pop(None).is_ok() {
             unsafe { self.item.assume_init_mut() }.destroy(context)
         } else {
             Ok(())

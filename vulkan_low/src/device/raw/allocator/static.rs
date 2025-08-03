@@ -1,4 +1,4 @@
-use std::{convert::Infallible, marker::PhantomData, ops::BitAndAssign, u32};
+use std::{convert::Infallible, marker::PhantomData, ops::BitAndAssign};
 
 use ash::vk;
 use type_kit::{
@@ -70,7 +70,7 @@ pub struct LinearBufferBuilder<M: MemoryProperties> {
 
 impl<M: MemoryProperties> LinearBufferBuilder<M> {
     fn try_build(self, context: &Context) -> ResourceResult<Option<LinearBuffer<M>>> {
-        if self.info.range.len() != 0 && self.info.memory_type_bits != 0 {
+        if !self.info.range.is_empty() && self.info.memory_type_bits != 0 {
             let alloc_info =
                 context.get_memory_allocate_info(M::alloc_req_typed(vk::MemoryRequirements {
                     size: self.info.range.len() as vk::DeviceSize,
@@ -113,6 +113,12 @@ impl AllocatorBuilder for StaticConfig {
     #[inline]
     fn with_allocation<M: MemoryProperties>(&mut self, req: AllocReqTyped<M>) -> &mut Self {
         self.push_allocation(req)
+    }
+}
+
+impl Default for StaticConfig {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -238,7 +244,7 @@ impl Static {
 
 impl Allocator for Static {
     #[inline]
-    fn allocate<'a, M: MemoryProperties>(
+    fn allocate<M: MemoryProperties>(
         &mut self,
         _context: &Context,
         req: AllocReqTyped<M>,
@@ -248,13 +254,12 @@ impl Allocator for Static {
             AllocReq::HostCoherent(req) => self.allocate_memory_type(req)?.into_inner(),
             AllocReq::HostVisible(req) => self.allocate_memory_type(req)?.into_inner(),
         };
-        Ok(self
-            .store
-            .push(unsafe { Allocation::<M>::from_inner(allocation) })?)
+        self.store
+            .push(unsafe { Allocation::<M>::from_inner(allocation) })
     }
 
     #[inline]
-    fn free<'a, M: MemoryProperties>(
+    fn free<M: MemoryProperties>(
         &mut self,
         _context: &Context,
         allocation: AllocationIndex<M>,

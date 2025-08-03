@@ -143,7 +143,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         let num_uniforms = self.num_sets * descriptor_count;
         debug_assert_eq!(
             num_uniforms,
-            buffer.len(),
+            buffer.size(),
             "UniformBuffer object not large enough for DescriptorPool write!"
         );
         let buffer_write_base_index = self.bufer_writes.len();
@@ -173,7 +173,7 @@ impl<T: DescriptorLayout> DescriptorSetWriter<T> {
         self
     }
 
-    pub fn write_images<'a, B>(mut self, images: &'a [DescriptorImageInfo]) -> Self
+    pub fn write_images<B>(mut self, images: &[DescriptorImageInfo]) -> Self
     where
         B: DescriptorBinding,
     {

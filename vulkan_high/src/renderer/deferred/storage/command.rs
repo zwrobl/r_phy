@@ -66,7 +66,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                 let depth_prepass = {
                     let command = context
                         .begin_secondary_command::<_, _, _, GBufferDepthPrepas<AttachmentsGBuffer>>(
-                            secondary_commands.next().1,
+                            secondary_commands.next_command().1,
                             renderer.render_pass,
                             swapchain_frame.framebuffer,
                         )?;
@@ -83,13 +83,12 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                 let shading_pass = {
                     let command = context
                         .begin_secondary_command::<_, _, _, GBufferShadingPass<_>>(
-                            secondary_commands.next().1,
+                            secondary_commands.next_command().1,
                             renderer.render_pass,
                             swapchain_frame.framebuffer,
                         )?;
-                    let binding_data = descriptors
-                        .get(0)
-                        .get_binding_data(&shading_pass_pipeline)?;
+                    let binding_data =
+                        descriptors.get(0).get_binding_data(shading_pass_pipeline)?;
                     context.record_command(command, |command| {
                         let command = command
                             .bind_pipeline(shading_pass_pipeline.get_binding_data())
@@ -100,7 +99,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                 let skybox_pass = {
                     let command = context
                         .begin_secondary_command::<_, _, _, GBufferSkyboxPass<_>>(
-                            secondary_commands.next().1,
+                            secondary_commands.next_command().1,
                             renderer.render_pass,
                             swapchain_frame.framebuffer,
                         )?;

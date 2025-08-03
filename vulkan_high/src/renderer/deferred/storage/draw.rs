@@ -207,7 +207,7 @@ impl PipelineState {
         });
         let camera_binding_data = context
             .operate_ref(index_list![pipeline_index], |unpack_list![pipeline]| {
-                let binding = camera.get_binding_data(&pipeline)?;
+                let binding = camera.get_binding_data(pipeline)?;
                 Result::<_, Box<dyn Error>>::Ok(binding)
             })
             .unwrap()
@@ -262,6 +262,12 @@ pub struct DrawStorage {
     pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
 }
 
+impl Default for DrawStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DrawStorage {
     pub fn new() -> Self {
         Self {
@@ -294,7 +300,7 @@ impl DrawStorage {
         let (pipeline_bind_data, push_constant_mapper) = context
             .operate_ref(index_list![pipeline], |unpack_list![pipeline]| {
                 let binding = pipeline.get_binding_data();
-                let mapper = PushConstantRangeMapper::new(&pipeline);
+                let mapper = PushConstantRangeMapper::new(pipeline);
                 Result::<_, Infallible>::Ok((binding, mapper))
             })
             .unwrap()
@@ -420,7 +426,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                 draw_graph.into_iter().for_each(|pipeline_state| {
                     let command = context
                         .begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
-                            secondary_commands.next().1,
+                            secondary_commands.next_command().1,
                             self.renderer.render_pass,
                             swapchain_frame.framebuffer,
                         )

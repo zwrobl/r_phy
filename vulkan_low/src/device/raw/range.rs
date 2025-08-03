@@ -20,11 +20,11 @@ impl ByteRange {
 
     pub fn align<T>(offset: usize) -> usize {
         let alignment = std::mem::align_of::<T>();
-        ((offset + alignment - 1) / alignment) * alignment
+        offset.div_ceil(alignment) * alignment
     }
 
     pub fn align_raw(offset: usize, alignment: usize) -> usize {
-        ((offset + alignment - 1) / alignment) * alignment
+        offset.div_ceil(alignment) * alignment
     }
 
     pub fn extend<T: AnyBitPattern>(&mut self, len: usize) -> ByteRange {
@@ -61,6 +61,10 @@ impl ByteRange {
         } else {
             None
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.beg >= self.end
     }
 
     pub fn len(&self) -> usize {

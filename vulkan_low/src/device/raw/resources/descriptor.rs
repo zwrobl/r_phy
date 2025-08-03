@@ -88,7 +88,7 @@ impl<T: DescriptorLayout> DescriptorPool<T> {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.sets.len()
     }
 }
@@ -238,9 +238,9 @@ impl Destroy for DescriptorPoolDataRaw {
         unsafe {
             context.destroy_descriptor_pool(self.pool, None);
         };
-        self.sets
-            .take()
-            .map(|mut sets| drop(unsafe { Box::from_raw(sets.as_mut()) }));
+        if let Some(mut sets) = self.sets.take() {
+            drop(unsafe { Box::from_raw(sets.as_mut()) });
+        }
         Ok(())
     }
 }

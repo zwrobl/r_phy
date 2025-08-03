@@ -222,9 +222,9 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         let _ = self.device.wait_idle();
-        let _ = self.storage.destroy_storage(&self);
-        let _ = self.allocators.destroy_storage(&self);
-        let _ = self.unique_storage.destroy_storage(&self);
+        let _ = self.storage.destroy_storage(self);
+        let _ = self.allocators.destroy_storage(self);
+        let _ = self.unique_storage.destroy_storage(self);
         let _ = self.device.destroy(&self.instance);
         let _ = self.surface.destroy(&self.instance);
         #[cfg(debug_assertions)]
@@ -263,7 +263,7 @@ impl Context {
     }
 
     #[inline]
-    pub fn destroy_resource<'a, R: Resource, M: Marker>(
+    pub fn destroy_resource<R: Resource, M: Marker>(
         &self,
         index: ResourceIndex<R>,
     ) -> ResourceResult<()>
@@ -277,13 +277,13 @@ impl Context {
         Ok(())
     }
 
+    /// # Safety
+    /// This method allows user to remove resource of type R using raw index.
+    /// The caller must ensure that the index corresponds to a valid resource of type R.
     #[inline]
-    pub unsafe fn destroy_raw_resource<R: 'static, M: Marker>(
-        &self,
-        index: RawIndex,
-    ) -> ResourceResult<()>
+    pub unsafe fn destroy_raw_resource<R, M: Marker>(&self, index: RawIndex) -> ResourceResult<()>
     where
-        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
         ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
     {
         let mut resource = self.storage.pop_raw_resource(index)?;
@@ -292,14 +292,13 @@ impl Context {
     }
 
     #[inline]
-    pub fn get_or_create_unique_resource<'a, R: TypeUniqueResource, M: Marker>(
+    pub fn get_or_create_unique_resource<R: TypeUniqueResource, M: Marker>(
         &self,
     ) -> ResourceResult<R>
     where
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
-        self.unique_storage
-            .get_or_create_type_unique_resource(&self)
+        self.unique_storage.get_or_create_type_unique_resource(self)
     }
 
     #[inline]

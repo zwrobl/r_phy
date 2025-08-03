@@ -16,6 +16,12 @@ use super::AllocationIndex;
 #[derive(Debug, Clone, Copy)]
 pub struct PageConfig {}
 
+impl Default for PageConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageConfig {
     #[inline]
     pub fn new() -> Self {
@@ -25,6 +31,12 @@ impl PageConfig {
 
 #[derive(Debug)]
 pub struct Page {}
+
+impl Default for Page {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Page {
     pub fn new() -> Self {

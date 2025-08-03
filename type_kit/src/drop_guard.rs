@@ -294,7 +294,7 @@ where
     for<'a> Self::Item: Into<I::Config<'a>>,
 {
     #[inline]
-    fn initialize<'a>(self) -> impl Iterator<Item = CreateResult<I>> {
+    fn initialize(self) -> impl Iterator<Item = CreateResult<I>> {
         self.into_iter()
             .map(move |config| I::create(config.into(), I::Context::default()))
     }
@@ -306,7 +306,7 @@ where
     for<'a> Self::Item: DerefMut<Target = I>,
 {
     #[inline]
-    fn finalize<'a>(self) -> DestroyResult<I> {
+    fn finalize(self) -> DestroyResult<I> {
         self.into_iter()
             .try_for_each(|mut item| item.destroy(I::Context::default()))
     }
@@ -436,8 +436,9 @@ impl<T: Destroy> DropGuard<T> {
         Self { inner }
     }
 
-    // This method is unsafe because it allows you to take ownership of the inner resource,
-    // bypassing enforcement of the destruction call before drop for the inner type
+    /// # Safety
+    /// This method allows you to take ownership of the inner resource,
+    /// bypassing enforcement of the destruction call before drop for the inner type
     #[inline]
     pub unsafe fn unwrap(mut self) -> T {
         #[cfg(debug_assertions)]
@@ -529,7 +530,7 @@ impl<T: Destroy> Destroy for DropGuard<T> {
             if let Some(mut inner) = self.inner.take() {
                 inner
                     .destroy(context)
-                    .map_err(|err| DropGuardError::DestroyError(err))?;
+                    .map_err(DropGuardError::DestroyError)?;
                 self.inner = None;
                 Ok(())
             } else {

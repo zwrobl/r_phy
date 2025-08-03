@@ -122,7 +122,7 @@ impl CameraUniform {
     pub fn prepare<R: Frame>(context: &Context, renderer: &R) -> VkResult<CameraUniformPartial> {
         let partial = UniformBufferPartial::create(
             UniformBufferInfoBuilder::new().with_len(renderer.get_num_frames()),
-            &context,
+            context,
         )?;
         Ok(CameraUniformPartial {
             buffer: DropGuard::new(partial),
@@ -165,10 +165,10 @@ impl Create for CameraUniform {
         let (descriptors, len) = context.operate_ref(
             index_list![uniform_buffer],
             |unpack_list![uniform_buffer]| {
-                let len = uniform_buffer.len();
+                let len = uniform_buffer.size();
                 let descriptors = context.create_resource(
                     DescriptorSetWriter::<CameraDescriptorSet>::new(len)
-                        .write_buffer(&uniform_buffer),
+                        .write_buffer(uniform_buffer),
                 )?;
                 Result::<_, ResourceError>::Ok((descriptors, len))
             },

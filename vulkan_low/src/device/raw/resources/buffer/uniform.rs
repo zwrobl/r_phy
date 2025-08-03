@@ -40,6 +40,12 @@ pub struct UniformBufferInfo<U: AnyBitPattern, O: Operation> {
     _phantom: PhantomData<(U, O)>,
 }
 
+impl<U: AnyBitPattern, O: Operation> Default for UniformBufferInfoBuilder<U, O> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<U: AnyBitPattern, O: Operation> UniformBufferInfoBuilder<U, O> {
     #[inline]
     pub fn new() -> Self {
@@ -131,7 +137,7 @@ pub struct UniformBuffer<U: AnyBitPattern, O: Operation> {
 
 impl<U: AnyBitPattern, O: Operation> UniformBuffer<U, O> {
     #[inline]
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.get_size() / size_of::<U>()
     }
 }
@@ -227,7 +233,7 @@ impl<U: AnyBitPattern, O: Operation> Index<usize> for UniformBuffer<U, O> {
     type Output = U;
 
     fn index(&self, index: usize) -> &Self::Output {
-        debug_assert!(index < self.len(), "Out of range UniformBuffer access!");
+        debug_assert!(index < self.size(), "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
         unsafe { ptr.add(index).as_ref().unwrap() }
     }
@@ -235,7 +241,7 @@ impl<U: AnyBitPattern, O: Operation> Index<usize> for UniformBuffer<U, O> {
 
 impl<U: AnyBitPattern, O: Operation> IndexMut<usize> for UniformBuffer<U, O> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        debug_assert!(index < self.len(), "Out of range UniformBuffer access!");
+        debug_assert!(index < self.size(), "Out of range UniformBuffer access!");
         let ptr = self.buffer.ptr.unwrap() as *mut U;
         unsafe { ptr.add(index).as_mut().unwrap() }
     }

@@ -45,14 +45,15 @@ impl<'a, V: Vertex, T: Vertex> TryFrom<&'a Option<MeshPack<V>>> for MeshPackRef<
 
 impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<Option<MeshPack<V>>, N> {
     fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T>> {
-        (&self.head)
-            .try_into()
-            .ok()
-            .or_else(|| self.tail.try_get::<T>())
+        if let Ok(pack) = (&self.head).try_into() {
+            Some(pack)
+        } else {
+            self.tail.try_get::<T>()
+        }
     }
 
     fn get<T: Vertex>(&self) -> MeshPackRef<T> {
-        if let Some(pack) = (&self.head).try_into().ok() {
+        if let Ok(pack) = (&self.head).try_into() {
             pack
         } else {
             self.tail.get::<T>()

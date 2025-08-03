@@ -57,8 +57,8 @@ use crate::{
     },
 };
 
-const DEPTH_PREPASS_SHADER: &'static str = "_resources/shaders/spv/deferred/depth_prepass";
-const GBUFFER_COMBINE_SHADER: &'static str = "_resources/shaders/spv/deferred/gbuffer_combine";
+const DEPTH_PREPASS_SHADER: &str = "_resources/shaders/spv/deferred/depth_prepass";
+const GBUFFER_COMBINE_SHADER: &str = "_resources/shaders/spv/deferred/gbuffer_combine";
 
 pub struct DeferredShader<S: ShaderType> {
     shader: S,
@@ -200,7 +200,7 @@ impl<'a, P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<'
                     self.frames.primary_commands
                 ],
                 |unpack_list![primary_commands, descriptors, camera_uniform, swapchain]| {
-                    let (index, primary_command) = primary_commands.next();
+                    let (index, primary_command) = primary_commands.next_command();
                     // Here begin_primary_command is required to be caled before swapchain get_frame,
                     // as begin_command waits for the fence associated with the command execution
                     // if the order is reversed, the acquire_next_image will get the semaphore which may have operation still pending
@@ -421,7 +421,7 @@ impl Create for DeferredRendererFrameData {
                         DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
                             .write_images::<InputAttachment>(
                                 &GBufferShadingPass::<AttachmentsGBuffer>::references()
-                                    .get_input_attachments(&*framebuffer)
+                                    .get_input_attachments(framebuffer)
                                     .iter()
                                     .map(|attachment| attachment.into())
                                     .collect::<Vec<_>>(),

@@ -59,7 +59,7 @@ impl Vertex for CommonVertex {
     }
 
     fn components() -> &'static [Component] {
-        const COMPONENTS: &'static [Component] = &[
+        const COMPONENTS: &[Component] = &[
             Component {
                 size: size_of::<Vector3>(),
                 offset: offset_of!(CommonVertex, pos),
@@ -99,7 +99,7 @@ impl Vertex for SimpleVertex {
     }
 
     fn components() -> &'static [Component] {
-        const COMPONENTS: &'static [Component] = &[
+        const COMPONENTS: &[Component] = &[
             Component {
                 size: size_of::<Vector3>(),
                 offset: offset_of!(SimpleVertex, pos),

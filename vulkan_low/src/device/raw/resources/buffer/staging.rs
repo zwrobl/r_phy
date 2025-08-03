@@ -177,7 +177,7 @@ impl StagingBuffer {
         Ok(())
     }
 
-    pub fn transfer_image_data<'b, V: ImageType>(
+    pub fn transfer_image_data<V: ImageType>(
         &self,
         context: &Context,
         dst: &mut Image<V, DeviceLocal>,

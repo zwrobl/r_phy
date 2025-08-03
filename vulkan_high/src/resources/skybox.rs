@@ -36,7 +36,7 @@ pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
     pub pipeline: ResourceIndex<GraphicsPipeline<L>>,
 }
 
-const SKYBOX_SHADER: &'static str = "_resources/shaders/spv/skybox";
+const SKYBOX_SHADER: &str = "_resources/shaders/spv/skybox";
 
 impl Create for SkyboxPartial {
     type Config<'a> = &'a Path;
@@ -133,7 +133,7 @@ pub fn draw_skybox<
             |unpack_list![descriptor, pipeline]| {
                 let command = command
                     .bind_pipeline(pipeline.get_binding_data())
-                    .bind_descriptor_set(&descriptor.get(0).get_binding_data(&pipeline).unwrap())
+                    .bind_descriptor_set(&descriptor.get(0).get_binding_data(pipeline).unwrap())
                     .push_constants(pipeline.get_push_range(&camera_matrices));
                 let command = common_meshes.draw(context, command, CommonMesh::Cube);
                 Result::<_, Infallible>::Ok(command)

@@ -20,7 +20,7 @@ struct ShaderModule {
 }
 
 impl ShaderModule {
-    const ENTRY_POINT: &'static CStr = unsafe { CStr::from_bytes_with_nul_unchecked(b"main\0") };
+    const ENTRY_POINT: &CStr = c"main";
 
     fn get_stage_create_info(&self) -> vk::PipelineShaderStageCreateInfo {
         vk::PipelineShaderStageCreateInfo {

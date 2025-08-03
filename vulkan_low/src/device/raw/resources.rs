@@ -141,7 +141,7 @@ impl ResourceStorage {
     }
 
     #[inline]
-    pub fn push_resource<'a, R: Resource, M: Marker>(
+    pub fn push_resource<R: Resource, M: Marker>(
         &self,
         resource: R,
     ) -> ResourceResult<ResourceIndex<R>>
@@ -174,13 +174,13 @@ impl ResourceStorage {
         Ok(resource)
     }
 
+    /// # Safety
+    /// This method allows user to remove resource of type R using raw index.
+    /// The caller must ensure that the index corresponds to a valid resource of type R.
     #[inline]
-    pub unsafe fn pop_raw_resource<R: 'static, M: Marker>(
-        &self,
-        index: RawIndex,
-    ) -> ResourceResult<R>
+    pub unsafe fn pop_raw_resource<R, M: Marker>(&self, index: RawIndex) -> ResourceResult<R>
     where
-        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
         ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
     {
         let index = unsafe { GenIndex::<TypeGuard<R>, _>::from_inner(index) };
@@ -215,12 +215,9 @@ impl ResourceStorage {
     }
 
     #[inline]
-    fn destroy_vec_resource_storage<R: 'static, M: Marker>(
-        &self,
-        context: &Context,
-    ) -> DestroyResult<R>
+    fn destroy_vec_resource_storage<R, M: Marker>(&self, context: &Context) -> DestroyResult<R>
     where
-        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
         ResourceStorageList: Contains<TypeGuardCollection<R>, M>,
     {
         let items = self.storage.borrow_mut().get_mut().drain();
@@ -230,12 +227,9 @@ impl ResourceStorage {
     }
 
     #[inline]
-    fn destroy_cell_resource_storage<R: 'static, M: Marker>(
-        &self,
-        context: &Context,
-    ) -> DestroyResult<R>
+    fn destroy_cell_resource_storage<R, M: Marker>(&self, context: &Context) -> DestroyResult<R>
     where
-        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
         ResourceStorageList: Contains<GenCell<TypeGuard<R>>, M>,
     {
         let resource = self.storage.borrow_mut().get_mut().drain();
@@ -262,6 +256,13 @@ impl ResourceStorage {
 
 pub struct ResourceIndexListBuilder<I: ResourceIndexList> {
     list: I,
+}
+
+impl Default for ResourceIndexListBuilder<Nil> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ResourceIndexListBuilder<Nil> {
@@ -385,7 +386,7 @@ impl TypeUniqueResourceStorage {
     }
 
     #[inline]
-    pub fn get_type_unique_resource<'a, R: TypeUniqueResource, M: Marker>(&self) -> Option<R>
+    pub fn get_type_unique_resource<R: TypeUniqueResource, M: Marker>(&self) -> Option<R>
     where
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
@@ -393,7 +394,7 @@ impl TypeUniqueResourceStorage {
     }
 
     #[inline]
-    pub fn create_type_unique_resource<'a, R: TypeUniqueResource, M: Marker>(
+    pub fn create_type_unique_resource<R: TypeUniqueResource, M: Marker>(
         &self,
         context: &Context,
     ) -> ResourceResult<R>
@@ -406,7 +407,7 @@ impl TypeUniqueResourceStorage {
     }
 
     #[inline]
-    pub fn get_or_create_type_unique_resource<'a, R: TypeUniqueResource, M: Marker>(
+    pub fn get_or_create_type_unique_resource<R: TypeUniqueResource, M: Marker>(
         &self,
         context: &Context,
     ) -> ResourceResult<R>
@@ -422,7 +423,7 @@ impl TypeUniqueResourceStorage {
     }
 
     #[inline]
-    pub fn destroy_type_unique_resource<'a, R: TypeUniqueResource, M: Marker>(
+    pub fn destroy_type_unique_resource<R: TypeUniqueResource, M: Marker>(
         &self,
         context: &Context,
     ) -> ResourceResult<()>
@@ -435,12 +436,12 @@ impl TypeUniqueResourceStorage {
     }
 
     #[inline]
-    fn destroy_type_unique_resource_storage<R: 'static, M: Marker>(
+    fn destroy_type_unique_resource_storage<R, M: Marker>(
         &self,
         context: &Context,
     ) -> Result<(), CollectionDestroyError<R>>
     where
-        for<'a> R: Destroy<Context<'a> = &'a Context>,
+        for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
         TypeUniqueResourceStorageList: Contains<TypeMap<R>, M>,
     {
         self.storage.borrow_mut().get_mut().destroy(context)

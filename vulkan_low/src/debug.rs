@@ -69,8 +69,7 @@ impl DebugUtils {
     }
 
     fn iterate_required_layers() -> impl Iterator<Item = &'static CStr> {
-        const REQUIRED_LAYERS: [&CStr; 1] =
-            [unsafe { &CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") }];
+        const REQUIRED_LAYERS: [&CStr; 1] = [c"VK_LAYER_KHRONOS_validation"];
         REQUIRED_LAYERS.into_iter()
     }
 

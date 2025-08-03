@@ -1,6 +1,6 @@
 pub mod presets;
 
-use std::{convert::Infallible, fmt::Debug, marker::PhantomData, ops::Deref, ptr::NonNull, usize};
+use std::{convert::Infallible, fmt::Debug, marker::PhantomData, ops::Deref, ptr::NonNull};
 
 use ash::vk;
 
@@ -423,7 +423,7 @@ impl<A: AttachmentList> AttachmentReferences for AttachmentReferenceBuilder<A> {
             .into_iter()
             .zip(&framebuffer.attachments)
             .filter_map(|(reference, &attachment)| {
-                if let Some(usage) = reference.map(|r| r.try_get_usage()).flatten() {
+                if let Some(usage) = reference.and_then(|r| r.try_get_usage()) {
                     if usage == AttachmentUsage::Input {
                         return Some(InputAttachment {
                             image_view: attachment,
@@ -917,9 +917,9 @@ impl Destroy for FramebufferRaw {
         unsafe {
             context.destroy_framebuffer(self.framebuffer, None);
         }
-        self.attachments
-            .take()
-            .map(|mut attachments| drop(unsafe { Box::from_raw(attachments.as_mut()) }));
+        if let Some(mut attachments) = self.attachments.take() {
+            drop(unsafe { Box::from_raw(attachments.as_mut()) });
+        }
         Ok(())
     }
 }

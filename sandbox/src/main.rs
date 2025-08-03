@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_shader_type::<CommonVertex, UnlitMaterial>()
         .with_shader_type::<CommonVertex, PbrMaterial>();
     let empty_material = context_builder.add_material(EmptyMaterial::default());
-    let cube_mesh = context_builder.add_mesh::<CommonVertex, _>(Cube::new(1.0f32).into());
+    let cube_mesh = context_builder.add_mesh(Cube::new(1.0f32).into());
     let checker_shader = context_builder.add_shader(Shader::<CommonVertex, EmptyMaterial>::new(
         "_resources/shaders/spv/deferred/gbuffer_write/checker",
     ));

@@ -213,7 +213,7 @@ impl Material for PbrMaterial {
     type Uniform = PbrFactors;
 
     fn images(&self) -> Option<impl Iterator<Item = &Image>> {
-        Some(self.images.images.as_slice().into_iter())
+        Some(self.images.images.iter())
     }
 
     fn uniform(&self) -> Option<&Self::Uniform> {

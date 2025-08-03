@@ -26,6 +26,7 @@ use crate::frame::{CameraUniform, Frame, FrameContext};
 use crate::renderer::deferred::{
     DeferredRenderer, DeferredRendererContext, DeferredRendererPartial,
 };
+use crate::renderer::RendererShader;
 use crate::resources::{
     CommonResources, CommonResourcesPartial, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
     MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
@@ -55,6 +56,12 @@ impl VulkanRendererConfigBuilder {
 pub struct VulkanRendererBuilder<R: Destroy + Frame> {
     config: Option<VulkanRendererConfig>,
     _phantom: PhantomData<R>,
+}
+
+impl<R: Destroy + Frame> Default for VulkanRendererBuilder<R> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<R: Destroy + Frame> VulkanRendererBuilder<R> {
@@ -144,8 +151,8 @@ where
         let Self {
             materials, meshes, ..
         } = self;
-        let meshes = meshes.allocate(&context, allocator)?;
-        let materials = materials.allocate(&context, allocator)?;
+        let meshes = meshes.allocate(context, allocator)?;
+        let materials = materials.allocate(context, allocator)?;
         Ok(VulkanResourcePack { materials, meshes })
     }
 }
@@ -189,13 +196,20 @@ where
     }
 }
 
+type PackPartial<'a, M, V, MB, MV> = VulkanResourcePackPartial<
+    'a,
+    M,
+    V,
+    <MB as MaterialPackListBuilder>::Partial<'a>,
+    <MV as MeshPackListBuilder>::Partial<'a>,
+>;
+
 impl<M: MaterialPackList, V: MeshPackList> VulkanResourcePack<M, V> {
     fn prepare<'a, MB: MaterialPackListBuilder<Pack = M>, MV: MeshPackListBuilder<Pack = V>>(
         context: &Context,
         materials: &'a MB,
         meshes: &'a MV,
-    ) -> Result<VulkanResourcePackPartial<'a, M, V, MB::Partial<'a>, MV::Partial<'a>>, Box<dyn Error>>
-    {
+    ) -> Result<PackPartial<'a, M, V, MB, MV>, Box<dyn Error>> {
         let materials = materials.prepare(context)?;
         let meshes = meshes.prepare(context)?;
         Ok(VulkanResourcePackPartial {
@@ -299,7 +313,7 @@ impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
         )?;
         let resources = resources.load(&renderer.context, allocator)?;
         Ok(VulkanRendererContext {
-            renderer: &renderer,
+            renderer,
             renderer_context,
             resources,
             allocator,
@@ -329,6 +343,8 @@ fn push_and_get_index<V>(vec: &mut Vec<V>, value: V) -> u32 {
     index.try_into().unwrap()
 }
 
+type ShaderCollection<V, M> = Vec<RendererShader<DeferredRenderer, V, M>>;
+
 impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackListBuilder>
     VulkanContextBuilder<S, M, V>
 {
@@ -356,8 +372,7 @@ impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
 
     pub fn with_shader_type<N: Vertex, T: Material>(
         self,
-    ) -> VulkanContextBuilder<Cons<Vec<<DeferredRenderer as Frame>::Shader<Shader<N, T>>>, S>, M, V>
-    {
+    ) -> VulkanContextBuilder<Cons<ShaderCollection<N, T>, S>, M, V> {
         VulkanContextBuilder {
             shaders: Cons {
                 head: vec![],
@@ -387,7 +402,7 @@ impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
         shader: Shader<N, T>,
     ) -> ShaderHandle<Shader<N, T>>
     where
-        S: Contains<Vec<<DeferredRenderer as Frame>::Shader<Shader<N, T>>>, K>,
+        S: Contains<ShaderCollection<N, T>, K>,
     {
         ShaderHandle::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
     }

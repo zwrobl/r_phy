@@ -14,6 +14,10 @@ pub struct PipelinePack<T: GraphicsPipelineConfig> {
 }
 
 impl<T: GraphicsPipelineConfig> PipelinePack<T> {
+    pub fn is_empty(&self) -> bool {
+        self.pipelines.is_empty()
+    }
+
     pub fn len(&self) -> usize {
         self.pipelines.len()
     }
@@ -47,6 +51,10 @@ impl<'a, T: GraphicsPipelineConfig, N: GraphicsPipelineConfig> TryFrom<&'a Pipel
 }
 
 impl<'a, T: GraphicsPipelineConfig> PipelinePackRef<'a, T> {
+    pub fn is_empty(&self) -> bool {
+        self.pipelines.is_empty()
+    }
+
     pub fn len(&self) -> usize {
         self.pipelines.len()
     }

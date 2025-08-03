@@ -5,7 +5,6 @@ use type_kit::{Cons, Destroy, Nil, TypedNil};
 use vulkan_low::{
     device::raw::{
         allocator::{AllocatorBuilder, AllocatorIndex},
-        resources::image::Image2DReader,
         Partial,
     },
     Context,
@@ -34,7 +33,7 @@ impl MaterialPackListBuilder for Nil {
 
 impl<M: Material, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<Vec<M>, N> {
     type Pack = Cons<Option<MaterialPack<M>>, N::Pack>;
-    type Partial<'a> = Cons<Option<MaterialPackPartial<'a, M, Image2DReader<'a>>>, N::Partial<'a>>;
+    type Partial<'a> = Cons<Option<MaterialPackPartial<'a, M>>, N::Partial<'a>>;
 
     fn prepare<'a>(&'a self, context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
         let materials = self.get();
@@ -77,7 +76,7 @@ impl MaterialPackListPartial for TypedNil<DummyPack> {
 }
 
 impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
-    for Cons<Option<MaterialPackPartial<'a, M, Image2DReader<'a>>>, N>
+    for Cons<Option<MaterialPackPartial<'a, M>>, N>
 {
     type Pack = Cons<Option<MaterialPack<M>>, N::Pack>;
 
@@ -135,14 +134,15 @@ impl MaterialPackList for TypedNil<DummyPack> {
 
 impl<M: Material, N: MaterialPackList> MaterialPackList for Cons<Option<MaterialPack<M>>, N> {
     fn try_get<T: Material>(&self) -> Option<MaterialPackRef<T>> {
-        (&self.head)
-            .try_into()
-            .ok()
-            .or_else(|| self.tail.try_get::<T>())
+        if let Ok(pack) = (&self.head).try_into() {
+            Some(pack)
+        } else {
+            self.tail.try_get::<T>()
+        }
     }
 
     fn get<T: Material>(&self) -> MaterialPackRef<T> {
-        if let Some(pack) = (&self.head).try_into().ok() {
+        if let Ok(pack) = (&self.head).try_into() {
             pack
         } else {
             self.tail.get::<T>()

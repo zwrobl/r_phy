@@ -21,6 +21,12 @@ pub struct ImageViewCreateInfo<V: ImageType> {
     _phantom: PhantomData<V>,
 }
 
+impl<V: ImageType> Default for ImageViewCreateInfo<V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<V: ImageType> ImageViewCreateInfo<V> {
     pub fn new() -> Self {
         Self {

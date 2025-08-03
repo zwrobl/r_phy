@@ -122,16 +122,16 @@ pub mod level {
         type DestroyError = Infallible;
 
         fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-            self.buffers
-                .take()
-                .map(|mut buffers| drop(unsafe { Box::from_raw(buffers.as_mut()) }));
-            self.fences.take().map(|mut fences| {
+            if let Some(mut buffers) = self.buffers.take() {
+                drop(unsafe { Box::from_raw(buffers.as_mut()) });
+            }
+            if let Some(mut fences) = self.fences.take() {
                 unsafe { Box::from_raw(fences.as_mut()) }
                     .iter()
                     .for_each(|&fence| unsafe {
                         context.destroy_fence(fence, None);
                     })
-            });
+            }
             Ok(())
         }
     }
@@ -273,9 +273,9 @@ pub mod level {
         type DestroyError = Infallible;
 
         fn destroy<'a>(&mut self, _context: Self::Context<'a>) -> DestroyResult<Self> {
-            self.buffers
-                .take()
-                .map(|mut buffers| drop(unsafe { Box::from_raw(buffers.as_mut()) }));
+            if let Some(mut buffers) = self.buffers.take() {
+                drop(unsafe { Box::from_raw(buffers.as_mut()) });
+            }
             Ok(())
         }
     }
@@ -507,7 +507,7 @@ pub struct PersistentCommandPool<L: Level, O: Operation> {
 }
 
 impl<L: Level, O: Operation> PersistentCommandPool<L, O> {
-    pub fn next(&mut self) -> (usize, NewCommand<Persistent, L, O>) {
+    pub fn next_command(&mut self) -> (usize, NewCommand<Persistent, L, O>) {
         let (index, data) = L::allocate_persistent_command_buffer(&mut self.allocator);
         let command = Command {
             data,
@@ -922,7 +922,7 @@ impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
         RecordingCommand(command, device)
     }
 
-    pub fn copy_image<'b, 'c, V: ImageType, M: MemoryProperties, B: MemoryProperties>(
+    pub fn copy_image<V: ImageType, M: MemoryProperties, B: MemoryProperties>(
         self,
         src: &Buffer<B>,
         dst: &mut Image<V, M>,
@@ -1200,7 +1200,7 @@ impl<O: Operation> Create for TransientCommandPool<O> {
         let pool = unsafe {
             context.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(O::get_queue_family_index(&context))
+                    .queue_family_index(O::get_queue_family_index(context))
                     .flags(vk::CommandPoolCreateFlags::TRANSIENT),
                 None,
             )?

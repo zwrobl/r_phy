@@ -170,6 +170,9 @@ pub trait FromGuard: 'static + Sized {
 
     fn into_inner(self) -> Self::Inner;
 
+    /// # Safety
+    /// This method allows user to create an instance of `Self` from its inner type.
+    /// The caller must ensure that the inner type was indeed constructed from an instance of `Self`.
     unsafe fn from_inner(inner: Self::Inner) -> Self;
 
     #[inline]

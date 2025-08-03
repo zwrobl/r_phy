@@ -120,7 +120,7 @@ impl<V: Vertex> Create for MeshPack<V> {
                     DropGuard::new(StagingBufferPartial::create(builder, context)?),
                     context.default_allocator(),
                 ),
-                &context,
+                context,
             )?;
             let mut vertex_writer = staging_buffer.write_range::<V>(vertex_range);
             let vertex_ranges = meshes
@@ -133,9 +133,9 @@ impl<V: Vertex> Create for MeshPack<V> {
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
             context.operate_mut(index_list![buffer], |unpack_list![buffer]| {
-                staging_buffer.transfer_buffer_data(&context, buffer, 0)
+                staging_buffer.transfer_buffer_data(context, buffer, 0)
             })??;
-            let _ = staging_buffer.destroy(&context);
+            let _ = staging_buffer.destroy(context);
             (vertex_ranges, index_ranges)
         };
         let meshes = vertex_ranges

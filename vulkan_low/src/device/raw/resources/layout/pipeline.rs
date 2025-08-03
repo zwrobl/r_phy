@@ -289,6 +289,9 @@ pub struct PipelineLayout<L: Layout> {
 }
 
 impl<L: Layout> PipelineLayout<L> {
+    /// # Safety
+    /// This allows user to create a type-safe PipelineLayout instance from a raw Vulkan pipeline layout handle.
+    /// The caller must ensure that the raw handle is valid and corresponds to a PipelineLayout instance.
     #[inline]
     pub unsafe fn wrap(layout: vk::PipelineLayout) -> Self {
         Self {
