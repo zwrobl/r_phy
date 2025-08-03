@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{any::type_name, error::Error};
 
 use graphics::model::{Mesh, MeshTypeList, Vertex};
 use type_kit::{Cons, Create, Destroy, Nil, TypedNil};
@@ -16,50 +16,72 @@ use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
 pub trait MeshPackList: for<'a> Destroy<Context<'a> = &'a Context> {
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>>;
+    fn get<V: Vertex>(&self) -> MeshPackRef<V>;
 }
 
 impl MeshPackList for TypedNil<DummyPack> {
     fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>> {
         None
     }
+    fn get<V: Vertex>(&self) -> MeshPackRef<V> {
+        panic!(
+            "No mesh pack found for the requested type: {}",
+            type_name::<V>()
+        );
+    }
+}
+
+impl<'a, V: Vertex, T: Vertex> TryFrom<&'a Option<MeshPack<V>>> for MeshPackRef<'a, T> {
+    type Error = &'static str;
+
+    fn try_from(value: &'a Option<MeshPack<V>>) -> Result<Self, Self::Error> {
+        if let Some(pack) = value {
+            pack.try_into()
+        } else {
+            Err("Option<MeshPack> is None")
+        }
+    }
 }
 
 impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<Option<MeshPack<V>>, N> {
     fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T>> {
-        self.head
-            .as_ref()
-            .and_then(|pack| pack.try_into().ok())
+        (&self.head)
+            .try_into()
+            .ok()
             .or_else(|| self.tail.try_get::<T>())
+    }
+
+    fn get<T: Vertex>(&self) -> MeshPackRef<T> {
+        if let Some(pack) = (&self.head).try_into().ok() {
+            pack
+        } else {
+            self.tail.get::<T>()
+        }
     }
 }
 
 pub trait MeshPackListBuilder: MeshTypeList {
     type Pack: MeshPackList;
+    type Partial<'a>: MeshPackListPartial<Pack = Self::Pack>
+        + for<'b> Destroy<Context<'b> = &'b Context>;
 
-    fn prepare(
-        &self,
-        context: &Context,
-    ) -> Result<impl MeshPackListPartial<Pack = Self::Pack>, Box<dyn Error>>;
+    fn prepare<'a>(&'a self, context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>>;
 }
 
 impl MeshPackListBuilder for Nil {
     type Pack = TypedNil<DummyPack>;
+    type Partial<'a> = TypedNil<DummyPack>;
 
-    fn prepare(
-        &self,
-        _context: &Context,
-    ) -> Result<impl MeshPackListPartial<Pack = Self::Pack>, Box<dyn Error>> {
-        Ok(Nil::new())
+    fn prepare<'a>(&'a self, _context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
+        Ok(TypedNil::new())
     }
 }
 
 impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>>, N> {
     type Pack = Cons<Option<MeshPack<V>>, N::Pack>;
+    type Partial<'a> = Cons<Option<MeshPackPartial<'a, V>>, N::Partial<'a>>;
 
-    fn prepare(
-        &self,
-        context: &Context,
-    ) -> Result<impl MeshPackListPartial<Pack = Self::Pack>, Box<dyn Error>> {
+    fn prepare<'a>(&'a self, context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
         let meshes = self.get();
         let partial = if !meshes.is_empty() {
             Some(MeshPackPartial::create(self.get(), context)?)
@@ -85,7 +107,7 @@ pub trait MeshPackListPartial: Sized {
     ) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
-impl MeshPackListPartial for Nil {
+impl MeshPackListPartial for TypedNil<DummyPack> {
     type Pack = TypedNil<DummyPack>;
 
     fn allocate(

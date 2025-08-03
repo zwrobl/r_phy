@@ -1,6 +1,8 @@
 use std::{any::TypeId, convert::Infallible, error::Error, marker::PhantomData};
 
-use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard};
+use type_kit::{
+    unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard, GenCollectionResult,
+};
 
 use vulkan_low::{
     device::raw::{
@@ -8,11 +10,12 @@ use vulkan_low::{
         resources::{
             buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
             command::operation::Graphics,
-            descriptor::{DescriptorPool, DescriptorSetWriter},
+            descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
             image::{
                 DescriptorImageInfo, Image2D, Image2DReader, ImageReader, Texture, TexturePartial,
             },
             layout::presets::{FragmentStage, PodUniform},
+            pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
             ResourceIndex, ResourceIndexListBuilder,
         },
         Partial,
@@ -94,7 +97,7 @@ impl<'a, M: Material> From<&'a mut MaterialPack<M>> for &'a mut MaterialPackData
 }
 
 pub struct MaterialPackRef<M: Material> {
-    pub descriptors: ResourceIndex<DescriptorPool<M::DescriptorLayout>>,
+    descriptors: ResourceIndex<DescriptorPool<M::DescriptorLayout>>,
     _phantom: PhantomData<M>,
 }
 
@@ -112,6 +115,44 @@ impl<'a, M: Material, T: Material> TryFrom<&'a MaterialPack<M>> for MaterialPack
         } else {
             Err("Invalid Material type")
         }
+    }
+}
+
+impl<M: Material> MaterialPackRef<M> {
+    #[inline]
+    pub fn get_descriptor_binding_data<P: GraphicsPipelineConfig>(
+        &self,
+        context: &Context,
+        descriptor_index: u32,
+        pipeline_index: ResourceIndex<GraphicsPipeline<P>>,
+    ) -> GenCollectionResult<DescriptorBindingData> {
+        context
+            .operate_ref(
+                index_list![self.descriptors, pipeline_index],
+                |unpack_list![pipeline, material_descriptor]| {
+                    let descriptor = material_descriptor.get(descriptor_index as usize);
+                    let binding = descriptor.get_binding_data(&pipeline)?;
+                    Result::<_, Box<dyn Error>>::Ok(binding)
+                },
+            )
+            .map(|result| result.unwrap())
+    }
+
+    #[inline]
+    pub fn get_descriptor(
+        &self,
+        context: &Context,
+        index: u32,
+    ) -> GenCollectionResult<Descriptor<M::DescriptorLayout>> {
+        context
+            .operate_ref(
+                index_list![self.descriptors],
+                |unpack_list![material_descriptor]| {
+                    let descriptor = material_descriptor.get(index as usize);
+                    Result::<_, Infallible>::Ok(descriptor)
+                },
+            )
+            .map(|result| result.unwrap())
     }
 }
 

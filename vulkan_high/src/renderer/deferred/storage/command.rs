@@ -22,16 +22,17 @@ use vulkan_low::{
 };
 
 use crate::{
-    renderer::deferred::presets::{
-        AttachmentsGBuffer, DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass,
-        GBufferSkyboxPass,
+    renderer::deferred::{
+        presets::{
+            AttachmentsGBuffer, DeferedRenderPass, GBufferDepthPrepas, GBufferShadingPass,
+            GBufferSkyboxPass,
+        },
+        DeferredRendererContext,
     },
     resources::{bind_mesh_pack, draw_skybox, GraphicsPipelinePackList},
 };
 
-use super::DeferredRendererContext;
-
-pub(super) struct Commands<P: GraphicsPipelinePackList> {
+pub struct CommandStorage<P: GraphicsPipelinePackList> {
     pub write_pass: Vec<BeginCommand<Persistent, Secondary, Graphics>>,
     pub depth_prepass: BeginCommand<Persistent, Secondary, Graphics>,
     pub shading_pass: BeginCommand<Persistent, Secondary, Graphics>,
@@ -39,15 +40,15 @@ pub(super) struct Commands<P: GraphicsPipelinePackList> {
     pub _phantom: PhantomData<P>,
 }
 
-impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
-    pub(super) fn prepare_commands(
+impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
+    pub fn prepare_commands(
         &mut self,
         context: &Context,
         swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
         camera_descriptor: Descriptor<CameraDescriptorSet>,
         camera_matrices: &CameraMatrices,
-    ) -> Result<Commands<P>, Box<dyn Error>> {
-        let renderer = self.renderer.borrow();
+    ) -> Result<CommandStorage<P>, Box<dyn Error>> {
+        let renderer = self.renderer;
         let (depth_prepass, shading_pass, skybox_pass) = context.operate_mut(
             index_list![
                 renderer.frame_data.descriptors,
@@ -119,7 +120,7 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
             },
         )??;
         let write_pass = Vec::with_capacity(P::LEN);
-        Ok(Commands {
+        Ok(CommandStorage {
             write_pass,
             depth_prepass,
             shading_pass,
@@ -128,21 +129,21 @@ impl<P: GraphicsPipelinePackList> DeferredRendererContext<P> {
         })
     }
 
-    pub(super) fn record_primary_command(
+    pub fn record_primary_command(
         &self,
         device: &Device,
         primary_command: BeginCommand<Persistent, Primary, Graphics>,
-        commands: Commands<P>,
+        commands: CommandStorage<P>,
         swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
     ) -> Result<FinishedCommand<Persistent, Primary, Graphics>, Box<dyn Error>> {
-        let Commands {
+        let CommandStorage {
             write_pass,
             depth_prepass,
             shading_pass,
             skybox_pass,
             ..
         } = commands;
-        let renderer = self.renderer.borrow();
+        let renderer = self.renderer;
         let depth_prepass = device.finish_command(depth_prepass)?;
         let skybox_pass = device.finish_command(skybox_pass)?;
         let write_pass = write_pass

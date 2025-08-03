@@ -1,3 +1,5 @@
+use std::any::type_name;
+
 use graphics::shader::ShaderType;
 use type_kit::{Cons, Create, Destroy, Nil, TypeList};
 use vulkan_low::{
@@ -40,6 +42,7 @@ pub trait GraphicsPipelinePackList: TypeList + 'static {
     fn destroy(&mut self, _context: &Context);
 
     fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>>;
+    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<P>;
 }
 
 impl GraphicsPipelinePackList for Nil {
@@ -47,6 +50,13 @@ impl GraphicsPipelinePackList for Nil {
 
     fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>> {
         None
+    }
+
+    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<P> {
+        panic!(
+            "No pipeline pack found for the requested type: {}",
+            type_name::<P>()
+        );
     }
 }
 
@@ -63,6 +73,14 @@ impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> Graphi
             Some(pipelines)
         } else {
             self.tail.try_get::<P>()
+        }
+    }
+
+    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<P> {
+        if let Ok(pipelines) = (&self.head).try_into() {
+            pipelines
+        } else {
+            self.tail.get::<P>()
         }
     }
 }

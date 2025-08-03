@@ -629,6 +629,14 @@ impl Device {
         BeginCommand(command)
     }
 
+    pub fn start_recording<T, L: Level, O: Operation>(
+        &self,
+        command: BeginCommand<T, L, O>,
+    ) -> RecordingCommand<T, L, O> {
+        let BeginCommand(command) = command;
+        RecordingCommand(command, self)
+    }
+
     pub fn finish_command<T, L: Level, O: Operation>(
         &self,
         command: BeginCommand<T, L, O>,
@@ -688,6 +696,11 @@ pub struct DrawIndexed {
 }
 
 impl<'a, T, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
+    pub fn stop_recording(self) -> BeginCommand<T, L, O> {
+        let RecordingCommand(command, _) = self;
+        BeginCommand(command)
+    }
+
     pub fn next_render_pass(self) -> Self {
         let RecordingCommand(command, device) = self;
         unsafe {

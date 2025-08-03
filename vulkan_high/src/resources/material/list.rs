@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{any::type_name, error::Error};
 
 use graphics::model::{MaterialCollection, MaterialTypeList};
 use type_kit::{Cons, Destroy, Nil, TypedNil};
@@ -17,31 +17,26 @@ use super::{Material, MaterialPack, MaterialPackPartial, MaterialPackRef};
 
 pub trait MaterialPackListBuilder: MaterialTypeList {
     type Pack: MaterialPackList;
+    type Partial<'a>: MaterialPackListPartial<Pack = Self::Pack>
+        + for<'b> Destroy<Context<'b> = &'b Context>;
 
-    fn prepare(
-        &self,
-        device: &Context,
-    ) -> Result<impl MaterialPackListPartial<Pack = Self::Pack>, Box<dyn Error>>;
+    fn prepare<'a>(&'a self, device: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>>;
 }
 
 impl MaterialPackListBuilder for Nil {
     type Pack = TypedNil<DummyPack>;
+    type Partial<'a> = TypedNil<DummyPack>;
 
-    fn prepare(
-        &self,
-        _device: &Context,
-    ) -> Result<impl MaterialPackListPartial<Pack = Self::Pack>, Box<dyn Error>> {
-        Ok(Nil::new())
+    fn prepare<'a>(&'a self, _device: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
+        Ok(TypedNil::new())
     }
 }
 
 impl<M: Material, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<Vec<M>, N> {
     type Pack = Cons<Option<MaterialPack<M>>, N::Pack>;
+    type Partial<'a> = Cons<Option<MaterialPackPartial<'a, M, Image2DReader<'a>>>, N::Partial<'a>>;
 
-    fn prepare(
-        &self,
-        context: &Context,
-    ) -> Result<impl MaterialPackListPartial<Pack = Self::Pack>, Box<dyn Error>> {
+    fn prepare<'a>(&'a self, context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
         let materials = self.get();
         let partial = if !materials.is_empty() {
             Some(prepare_material_pack(context, materials)?)
@@ -67,7 +62,7 @@ pub trait MaterialPackListPartial: Sized {
     ) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
-impl MaterialPackListPartial for Nil {
+impl MaterialPackListPartial for TypedNil<DummyPack> {
     type Pack = TypedNil<DummyPack>;
 
     fn register_memory_requirements<B: AllocatorBuilder>(&self, _builder: &mut B) {}
@@ -109,21 +104,48 @@ impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
     }
 }
 
+impl<M: Material, T: Material> TryFrom<&Option<MaterialPack<M>>> for MaterialPackRef<T> {
+    type Error = &'static str;
+
+    fn try_from(value: &Option<MaterialPack<M>>) -> Result<Self, Self::Error> {
+        if let Some(pack) = value {
+            pack.try_into()
+        } else {
+            Err("Option<MaterialPack> is None")
+        }
+    }
+}
 pub trait MaterialPackList: for<'a> Destroy<Context<'a> = &'a Context> {
     fn try_get<M: Material>(&self) -> Option<MaterialPackRef<M>>;
+    fn get<M: Material>(&self) -> MaterialPackRef<M>;
 }
 
 impl MaterialPackList for TypedNil<DummyPack> {
     fn try_get<T: Material>(&self) -> Option<MaterialPackRef<T>> {
         None
     }
+
+    fn get<T: Material>(&self) -> MaterialPackRef<T> {
+        panic!(
+            "No material pack found for the requested type: {}",
+            type_name::<T>()
+        );
+    }
 }
 
 impl<M: Material, N: MaterialPackList> MaterialPackList for Cons<Option<MaterialPack<M>>, N> {
     fn try_get<T: Material>(&self) -> Option<MaterialPackRef<T>> {
-        self.head
-            .as_ref()
-            .and_then(|pack| pack.try_into().ok())
+        (&self.head)
+            .try_into()
+            .ok()
             .or_else(|| self.tail.try_get::<T>())
+    }
+
+    fn get<T: Material>(&self) -> MaterialPackRef<T> {
+        if let Some(pack) = (&self.head).try_into().ok() {
+            pack
+        } else {
+            self.tail.get::<T>()
+        }
     }
 }

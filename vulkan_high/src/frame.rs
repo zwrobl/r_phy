@@ -51,17 +51,16 @@ use crate::resources::{
 
 pub trait Frame: 'static {
     type Shader<S: ShaderType>: ShaderType + GraphicsPipelineConfig + ModuleLoader;
-    type Context<P: GraphicsPipelinePackList>: FrameContext
-        + for<'a> Create<Context<'a> = &'a Context>;
+    type Context<'a, P: GraphicsPipelinePackList>: FrameContext;
     type Partial;
 
     fn load_context<'a, P: GraphicsPipelinePackList>(
-        &self,
-        context: &Context,
+        &'a self,
+        context: &'a Context,
         allocator: AllocatorIndex,
         partial: Self::Partial,
         pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
-    ) -> CreateResult<Self::Context<P>>;
+    ) -> Result<Self::Context<'a, P>, Box<dyn Error>>;
 
     fn get_num_frames(&self) -> usize;
 }
@@ -73,7 +72,7 @@ pub trait FrameContext: Sized {
 
     fn begin_frame(
         &mut self,
-        device: &Context,
+        context: &Context,
         camera: &CameraMatrices,
     ) -> Result<(), Box<dyn Error>>;
 
@@ -92,7 +91,7 @@ pub trait FrameContext: Sized {
         mesh_packs: &V,
     );
 
-    fn end_frame(&mut self, device: &Context) -> Result<(), Box<dyn Error>>;
+    fn end_frame(&mut self, context: &Context) -> Result<(), Box<dyn Error>>;
 }
 
 pub struct CameraUniformPartial {

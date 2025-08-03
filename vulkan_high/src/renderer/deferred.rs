@@ -1,11 +1,9 @@
-mod commands;
-mod draw_graph;
 mod presets;
+mod storage;
 
-use std::{cell::RefCell, convert::Infallible, error::Error, path::Path, rc::Rc, sync::Once};
+use std::{convert::Infallible, error::Error, path::Path, sync::Once};
 
-use commands::Commands;
-use draw_graph::DrawGraph;
+use storage::{CommandStorage, DrawStorage};
 
 use graphics::{
     model::{CommonVertex, Drawable, Mesh, MeshBuilder},
@@ -152,47 +150,57 @@ struct DeferredRendererResources {
     skybox: DropGuard<Skybox<GBufferSkyboxPipeline<AttachmentsGBuffer>>>,
 }
 
-pub struct DeferredRendererContext<P: GraphicsPipelinePackList> {
-    renderer: Rc<RefCell<DropGuard<DeferredRenderer>>>,
+pub struct DeferredRendererContext<'a, P: GraphicsPipelinePackList> {
+    renderer: &'a DeferredRenderer,
     pipelines: DeferredRendererPipelines<P>,
     frames: FramePool<Self>,
     current_frame: Option<FrameData<Self>>,
 }
 
 pub struct DeferredRendererFrameState<P: GraphicsPipelinePackList> {
-    commands: Commands<P>,
-    draw_graph: DrawGraph,
+    commands: CommandStorage<P>,
+    draw_graph: DrawStorage,
 }
 
 pub struct DeferredRenderer {
     render_pass: RenderPass<DeferedRenderPass<AttachmentsGBuffer>>,
-    frame_data: DropGuard<DeferredRendererFrameData>,
-    resources: DropGuard<DeferredRendererResources>,
+    frame_data: DeferredRendererFrameData,
+    resources: DeferredRendererResources,
 }
 
-impl Frame for Rc<RefCell<DropGuard<DeferredRenderer>>> {
+impl Frame for DeferredRenderer {
     type Shader<S: ShaderType> = DeferredShader<S>;
-    type Context<P: GraphicsPipelinePackList> = DeferredRendererContext<P>;
+    type Context<'a, P: GraphicsPipelinePackList> = DeferredRendererContext<'a, P>;
     type Partial = CameraUniformPartial;
 
     fn load_context<'a, P: GraphicsPipelinePackList>(
-        &self,
-        context: &Context,
+        &'a self,
+        context: &'a Context,
         allocator: AllocatorIndex,
         partial: Self::Partial,
         pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
-    ) -> CreateResult<Self::Context<P>> {
-        let renderer = self.clone();
+    ) -> Result<Self::Context<'a, P>, Box<dyn Error>> {
         let pipelines = pipelines.build(context)?;
-        DeferredRendererContext::create((renderer, pipelines, partial, allocator), context)
+        let (pipelines, frames) = {
+            (
+                DeferredRendererPipelines::create(pipelines, context)?,
+                FramePool::create((partial, allocator), context)?,
+            )
+        };
+        Ok(DeferredRendererContext {
+            renderer: self,
+            pipelines,
+            frames,
+            current_frame: None,
+        })
     }
 
     fn get_num_frames(&self) -> usize {
-        self.borrow().frame_data.num_frames
+        self.frame_data.num_frames
     }
 }
 
-impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
+impl<'a, P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<'a, P> {
     const REQUIRED_COMMANDS: usize = P::LEN + 3;
     type RenderPass = DeferedRenderPass<AttachmentsGBuffer>;
     type State = DeferredRendererFrameState<P>;
@@ -205,7 +213,7 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let (primary_command, swapchain_frame, camera_descriptor) = {
             context.operate_mut(
                 index_list![
-                    self.renderer.borrow().frame_data.swapchain,
+                    self.renderer.frame_data.swapchain,
                     self.frames.camera_uniform.uniform_buffer,
                     self.frames.camera_uniform.descriptors,
                     self.frames.primary_commands
@@ -231,7 +239,7 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
             camera_descriptor,
             camera_matrices,
         )?;
-        let draw_graph = DrawGraph::new();
+        let draw_graph = DrawStorage::new();
         self.current_frame.replace(FrameData {
             swapchain_frame,
             primary_command,
@@ -278,7 +286,7 @@ impl<P: GraphicsPipelinePackList> FrameContext for DeferredRendererContext<P> {
         let commands = self.record_draw_calls(context, renderer_state, &swapchain_frame)?;
         let primary_command =
             self.record_primary_command(context, primary_command, commands, &swapchain_frame)?;
-        let renderer = self.renderer.borrow();
+        let renderer = self.renderer;
         context.operate_ref(
             index_list![renderer.frame_data.swapchain],
             |unpack_list![swapchain]| {
@@ -583,8 +591,8 @@ impl Create for DeferredRenderer {
         let resources = DeferredRendererResources::create((skybox, meshes, allocator), context)?;
         Ok(DeferredRenderer {
             render_pass,
-            frame_data: DropGuard::new(frame_data),
-            resources: DropGuard::new(resources),
+            frame_data,
+            resources,
         })
     }
 }
@@ -600,33 +608,7 @@ impl Destroy for DeferredRenderer {
     }
 }
 
-impl<P: GraphicsPipelinePackList> Create for DeferredRendererContext<P> {
-    type Config<'a> = (
-        Rc<RefCell<DropGuard<DeferredRenderer>>>,
-        P,
-        CameraUniformPartial,
-        AllocatorIndex,
-    );
-    type CreateError = VkError;
-
-    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let (renderer, pipelines, camera_partial, allocator) = config;
-        let (pipelines, frames) = {
-            (
-                DeferredRendererPipelines::create(pipelines, context)?,
-                FramePool::create((camera_partial, allocator), context)?,
-            )
-        };
-        Ok(DeferredRendererContext {
-            renderer: renderer.clone(),
-            pipelines,
-            frames,
-            current_frame: None,
-        })
-    }
-}
-
-impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererContext<P> {
+impl<'c, P: GraphicsPipelinePackList> Destroy for DeferredRendererContext<'c, P> {
     type Context<'a> = &'a Context;
     type DestroyError = DropGuardError<Infallible>;
 

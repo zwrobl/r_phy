@@ -124,7 +124,7 @@ impl Context {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct PipelineBindData {
     pub bind_point: vk::PipelineBindPoint,
     pub pipeline: vk::Pipeline,
