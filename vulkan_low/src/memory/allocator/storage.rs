@@ -7,12 +7,12 @@ use type_kit::{
 };
 
 use crate::{
-    error::ResourceResult,
     memory::{
         allocator::{
             AllocationBorrow, AllocationIndex, AllocationIndexTyped, Allocator, Page, Static,
             Unpooled,
         },
+        error::MemoryResult,
         AllocReqTyped, BindResource, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
     },
     Context,
@@ -125,7 +125,7 @@ impl Context {
     pub fn map_allocation<M: MemoryProperties>(
         &self,
         allocation: AllocationEntryTyped<M>,
-    ) -> ResourceResult<*mut c_void> {
+    ) -> MemoryResult<*mut c_void> {
         let ptr = self.operate_alloc(allocation, |allocation| {
             let range = allocation.range;
             // TODO: Improve error handling type hierary to avoid unsafe unwrap
@@ -143,7 +143,7 @@ impl Context {
     pub fn unmap_allocation<M: MemoryProperties>(
         &self,
         allocation: AllocationEntryTyped<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         self.operate_alloc(allocation, |allocation| allocation.unmap(self))
     }
 
@@ -152,7 +152,7 @@ impl Context {
         &self,
         resource: R,
         allocation: AllocationEntryTyped<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         self.operate_alloc(allocation, |allocation| {
             let range = allocation.range;
             match resource.into() {
@@ -168,7 +168,7 @@ impl Context {
     }
 
     #[inline]
-    pub(crate) fn free_allocation_raw(&self, allocation: AllocationEntry) -> ResourceResult<()> {
+    pub(crate) fn free_allocation_raw(&self, allocation: AllocationEntry) -> MemoryResult<()> {
         let AllocationEntry {
             allocator,
             allocation,
@@ -229,7 +229,7 @@ impl AllocatorStorage {
     pub fn push_allocator<'a, 'b, A: Allocator<Storage = GenVec<A>>, M: Marker>(
         &self,
         allocator: A,
-    ) -> ResourceResult<AllocatorIndexTyped<A>>
+    ) -> MemoryResult<AllocatorIndexTyped<A>>
     where
         AllocatorStorageList: Contains<A::Storage, M>,
     {
@@ -246,7 +246,7 @@ impl AllocatorStorage {
     pub fn pop_allocator<A: Allocator<Storage = GenVec<A>>, M: Marker>(
         &self,
         index: AllocatorIndexTyped<A>,
-    ) -> ResourceResult<A>
+    ) -> MemoryResult<A>
     where
         AllocatorStorageList: Contains<A::Storage, M>,
     {
@@ -260,7 +260,7 @@ impl AllocatorStorage {
         context: &Context,
         req: AllocReqTyped<M>,
         allocator: Option<AllocatorIndex>,
-    ) -> ResourceResult<AllocationEntryTyped<M>> {
+    ) -> MemoryResult<AllocationEntryTyped<M>> {
         let allocator = allocator.unwrap_or(self.default_allocator.into());
         match allocator {
             AllocatorIndex::Static(index) => {
@@ -279,7 +279,7 @@ impl AllocatorStorage {
         context: &Context,
         index: AllocatorIndexTyped<A>,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationEntryTyped<M>>
+    ) -> MemoryResult<AllocationEntryTyped<M>>
     where
         AllocatorStorageList: Contains<A::Storage, T>,
     {
@@ -301,7 +301,7 @@ impl AllocatorStorage {
         &self,
         context: &Context,
         index: AllocationEntryTyped<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         let AllocationEntryTyped {
             allocator,
             allocation,
@@ -325,7 +325,7 @@ impl AllocatorStorage {
         context: &Context,
         allocator_index: AllocatorIndexTyped<A>,
         allocation_index: AllocationIndexTyped<M>,
-    ) -> ResourceResult<()>
+    ) -> MemoryResult<()>
     where
         AllocatorStorageList: Contains<A::Storage, T>,
     {
@@ -341,7 +341,7 @@ impl AllocatorStorage {
         &self,
         index: AllocationEntryTyped<M>,
         f: F,
-    ) -> ResourceResult<R> {
+    ) -> MemoryResult<R> {
         let AllocationEntryTyped {
             allocator,
             allocation,
@@ -371,7 +371,7 @@ impl AllocatorStorage {
         allocator_index: AllocatorIndexTyped<A>,
         allocation_index: AllocationIndexTyped<M>,
         f: F,
-    ) -> ResourceResult<R>
+    ) -> MemoryResult<R>
     where
         AllocatorStorageList: Contains<A::Storage, T>,
     {
@@ -391,7 +391,7 @@ impl AllocatorStorage {
     }
 
     #[inline]
-    pub fn destroy_storage(&self, context: &Context) -> ResourceResult<()> {
+    pub fn destroy_storage(&self, context: &Context) -> MemoryResult<()> {
         let _ = self.allocators.borrow_mut().destroy(context);
         Ok(())
     }

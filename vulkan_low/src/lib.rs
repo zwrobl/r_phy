@@ -11,6 +11,7 @@ use crate::{
             AllocationBorrow, AllocationEntryTyped, Allocator, AllocatorIndex, AllocatorIndexTyped,
             AllocatorStorage, AllocatorStorageList,
         },
+        error::MemoryResult,
         AllocReqTyped, MemoryProperties,
     },
     resources::{
@@ -37,7 +38,7 @@ use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
     Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize,
-    GenCollectionResult, GenVec, Initialize, Marker, TypeGuardVec,
+    GenCollectionResult, GenVec, GuardVec, Initialize, Marker,
 };
 
 use ash::vk;
@@ -276,7 +277,7 @@ impl Context {
     pub unsafe fn destroy_raw_resource<R, M: Marker>(&self, index: RawIndex) -> ResourceResult<()>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<TypeGuardVec<R>, M>,
+        ResourceStorageList: Contains<GuardVec<R>, M>,
     {
         let mut resource = self.storage.pop_raw_resource(index)?;
         let _ = resource.destroy(self);
@@ -297,7 +298,7 @@ impl Context {
     pub fn create_allocator<'a, A: Allocator<Storage = GenVec<A>>, M: Marker>(
         &'a self,
         config: A::Config<'a>,
-    ) -> ResourceResult<AllocatorIndexTyped<A>>
+    ) -> MemoryResult<AllocatorIndexTyped<A>>
     where
         AllocatorStorageList: Contains<A::Storage, M>,
     {
@@ -309,7 +310,7 @@ impl Context {
     pub fn destroy_allocator<A: Allocator<Storage = GenVec<A>>, M: Marker>(
         &self,
         index: AllocatorIndexTyped<A>,
-    ) -> ResourceResult<()>
+    ) -> MemoryResult<()>
     where
         AllocatorStorageList: Contains<A::Storage, M>,
     {
@@ -323,12 +324,12 @@ impl Context {
         &self,
         req: AllocReqTyped<M>,
         allocator: impl Into<Option<AllocatorIndex>>,
-    ) -> ResourceResult<AllocationEntryTyped<M>> {
+    ) -> MemoryResult<AllocationEntryTyped<M>> {
         self.allocators.allocate(self, req, allocator.into())
     }
 
     #[inline]
-    pub fn free<M: MemoryProperties>(&self, index: AllocationEntryTyped<M>) -> ResourceResult<()> {
+    pub fn free<M: MemoryProperties>(&self, index: AllocationEntryTyped<M>) -> MemoryResult<()> {
         self.allocators.free(self, index)
     }
 
@@ -337,7 +338,7 @@ impl Context {
         &self,
         index: AllocationEntryTyped<M>,
         f: F,
-    ) -> ResourceResult<R> {
+    ) -> MemoryResult<R> {
         self.allocators.operate_mut(index, f)
     }
 

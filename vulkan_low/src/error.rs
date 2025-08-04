@@ -5,43 +5,12 @@ use std::{
     io, sync,
 };
 
-use ash::vk;
+use ash::{vk, LoadingError};
 use png::{BitDepth, ColorType};
 use type_kit::{GenCollectionError, GuardCollectionError, TypeGuardConversionError};
 use winit::raw_window_handle::HandleError;
 
-use crate::resources::image::ImageCubeFace;
-
-#[derive(Debug, Clone, Copy)]
-pub enum AllocatorError {
-    InvalidConfiguration,
-    UnsupportedMemoryType,
-    InvalidAllocationIndex,
-    OutOfMemory,
-    LegacyAllocError(AllocError),
-}
-
-impl Display for AllocatorError {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            AllocatorError::LegacyAllocError(error) => write!(f, "{}", error),
-            AllocatorError::InvalidConfiguration => write!(f, "Invalid configuration"),
-            AllocatorError::UnsupportedMemoryType => write!(f, "Unsupported memory type"),
-            AllocatorError::InvalidAllocationIndex => write!(f, "Invalid allocation index"),
-            AllocatorError::OutOfMemory => write!(f, "Ount of memory"),
-        }
-    }
-}
-
-impl From<AllocError> for AllocatorError {
-    fn from(error: AllocError) -> Self {
-        AllocatorError::LegacyAllocError(error)
-    }
-}
-
-impl Error for AllocatorError {}
-
-pub type AllocatorResult<T> = Result<T, AllocatorError>;
+use crate::{memory::error::MemoryError, resources::image::ImageCubeFace};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CollectionError {
@@ -58,14 +27,81 @@ impl Display for CollectionError {
     }
 }
 
+impl Error for CollectionError {}
+
+impl From<GenCollectionError> for CollectionError {
+    #[inline]
+    fn from(error: GenCollectionError) -> Self {
+        CollectionError::GenCollection(error)
+    }
+}
+
+impl From<GuardCollectionError> for CollectionError {
+    #[inline]
+    fn from(error: GuardCollectionError) -> Self {
+        CollectionError::GuardCollection(error)
+    }
+}
+
+#[derive(Debug)]
+pub enum ExtError {
+    Vulkan(vk::Result),
+    Loading(LoadingError),
+    Window(HandleError),
+    Collection(CollectionError),
+}
+
+impl Display for ExtError {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExtError::Vulkan(error) => write!(f, "VkResult: {}", error),
+            ExtError::Loading(error) => write!(f, "{}", error),
+            ExtError::Window(error) => write!(f, "{}", error),
+            ExtError::Collection(error) => write!(f, "{}", error),
+        }
+    }
+}
+
+impl Error for ExtError {}
+
+impl From<vk::Result> for ExtError {
+    #[inline]
+    fn from(error: vk::Result) -> Self {
+        ExtError::Vulkan(error)
+    }
+}
+
+impl From<LoadingError> for ExtError {
+    #[inline]
+    fn from(error: LoadingError) -> Self {
+        ExtError::Loading(error)
+    }
+}
+
+impl From<HandleError> for ExtError {
+    #[inline]
+    fn from(error: HandleError) -> Self {
+        ExtError::Window(error)
+    }
+}
+
+impl<E: Into<CollectionError>> From<E> for ExtError {
+    #[inline]
+    fn from(error: E) -> Self {
+        ExtError::Collection(error.into())
+    }
+}
+
+pub type ExtResult<T> = Result<T, ExtError>;
+
 #[derive(Debug)]
 pub enum ResourceError {
-    AllocatorError(AllocatorError),
+    AllocatorError(MemoryError),
     TypeConversion(TypeGuardConversionError),
-    CollectionError(CollectionError),
     ImageError(ImageError),
     ShaderError(ShaderError),
-    VkError(vk::Result),
+    AshError(ExtError),
 }
 
 impl Display for ResourceError {
@@ -73,9 +109,8 @@ impl Display for ResourceError {
         match self {
             ResourceError::AllocatorError(error) => write!(f, "{}", error),
             ResourceError::TypeConversion(error) => write!(f, "{}", error),
-            ResourceError::CollectionError(error) => write!(f, "{}", error),
             ResourceError::ImageError(error) => write!(f, "{}", error),
-            ResourceError::VkError(error) => write!(f, "Vulkan error: {:?}", error),
+            ResourceError::AshError(error) => write!(f, "{}", error),
             ResourceError::ShaderError(error) => write!(f, "{}", error),
         }
     }
@@ -89,8 +124,8 @@ impl From<ShaderError> for ResourceError {
     }
 }
 
-impl From<AllocatorError> for ResourceError {
-    fn from(error: AllocatorError) -> Self {
+impl From<MemoryError> for ResourceError {
+    fn from(error: MemoryError) -> Self {
         ResourceError::AllocatorError(error)
     }
 }
@@ -101,27 +136,15 @@ impl From<TypeGuardConversionError> for ResourceError {
     }
 }
 
-impl From<GenCollectionError> for ResourceError {
-    fn from(error: GenCollectionError) -> Self {
-        ResourceError::CollectionError(CollectionError::GenCollection(error))
-    }
-}
-
-impl From<GuardCollectionError> for ResourceError {
-    fn from(error: GuardCollectionError) -> Self {
-        ResourceError::CollectionError(CollectionError::GuardCollection(error))
-    }
-}
-
 impl From<ImageError> for ResourceError {
     fn from(error: ImageError) -> Self {
         ResourceError::ImageError(error)
     }
 }
 
-impl From<vk::Result> for ResourceError {
-    fn from(error: vk::Result) -> Self {
-        ResourceError::VkError(error)
+impl<E: Into<ExtError>> From<E> for ResourceError {
+    fn from(error: E) -> Self {
+        ResourceError::AshError(error.into())
     }
 }
 
@@ -219,33 +242,6 @@ impl From<png::DecodingError> for ImageError {
 
 pub type ImageResult<T> = Result<T, ImageError>;
 
-#[derive(Debug, Clone, Copy)]
-pub enum AllocError {
-    OutOfMemory,
-    UnsupportedMemoryType,
-    VulkanError(vk::Result),
-}
-
-impl Display for AllocError {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            AllocError::OutOfMemory => write!(f, "Out of memory"),
-            AllocError::UnsupportedMemoryType => write!(f, "Unsupported memory type"),
-            AllocError::VulkanError(err) => write!(f, "Vulkan error: {}", err),
-        }
-    }
-}
-
-impl From<vk::Result> for AllocError {
-    fn from(err: vk::Result) -> Self {
-        AllocError::VulkanError(err)
-    }
-}
-
-impl Error for AllocError {}
-
-pub type AllocResult<T> = Result<T, AllocError>;
-
 #[derive(Debug)]
 pub enum DeviceNotSuitable {
     InvalidDeviceType,
@@ -272,17 +268,14 @@ impl From<vk::Result> for DeviceNotSuitable {
 
 #[derive(Debug)]
 pub enum VkError {
-    AllocatorError(AllocatorError),
+    AllocatorError(MemoryError),
     ResourceError(ResourceError),
     ShaderError(ShaderError),
     ImageError(ImageError),
-    AllocationError(AllocError),
     NoSuitablePhysicalDevice(Vec<DeviceNotSuitable>),
     ExtensionNotSupported(&'static CStr),
     LayerNotSupported(&'static CStr),
-    VkError(vk::Result),
-    LoadError(ash::LoadingError),
-    WindowError(HandleError),
+    ExtError(ExtError),
     // Temporary LockError handling, storing the PoisonError.to_string() to elide the lock Guard type
     LockError(String),
 }
@@ -295,7 +288,6 @@ impl Display for VkError {
             VkError::ShaderError(error) => write!(f, "Shader error: {}", error),
             VkError::LockError(error) => write!(f, "Lock error: {}", error),
             VkError::ImageError(error) => write!(f, "Image error: {}", error),
-            VkError::AllocationError(error) => write!(f, "Allocation error: {}", error),
             VkError::NoSuitablePhysicalDevice(devices) => {
                 write!(f, "No suitable device found: {:?}", devices)
             }
@@ -309,36 +301,16 @@ impl Display for VkError {
             VkError::LayerNotSupported(layer) => {
                 write!(f, "Layer not supported: {}", layer.to_string_lossy())
             }
-            VkError::VkError(error) => write!(f, "Vulkan error: {:?}", error),
-            VkError::LoadError(error) => write!(f, "Loading error: {:?}", error),
-            VkError::WindowError(error) => write!(f, "Window error: {:?}", error),
+            VkError::ExtError(error) => write!(f, "Ash error: {}", error),
         }
     }
 }
 
 impl Error for VkError {}
 
-impl From<vk::Result> for VkError {
-    fn from(error: vk::Result) -> Self {
-        VkError::VkError(error)
-    }
-}
-
-impl From<ash::LoadingError> for VkError {
-    fn from(error: ash::LoadingError) -> Self {
-        VkError::LoadError(error)
-    }
-}
-
-impl From<HandleError> for VkError {
-    fn from(error: HandleError) -> Self {
-        VkError::WindowError(error)
-    }
-}
-
-impl From<AllocError> for VkError {
-    fn from(error: AllocError) -> Self {
-        VkError::AllocationError(error)
+impl<E: Into<ExtError>> From<E> for VkError {
+    fn from(error: E) -> Self {
+        VkError::ExtError(error.into())
     }
 }
 
@@ -366,12 +338,10 @@ impl From<ResourceError> for VkError {
     }
 }
 
-impl From<AllocatorError> for VkError {
-    fn from(error: AllocatorError) -> Self {
+impl From<MemoryError> for VkError {
+    fn from(error: MemoryError) -> Self {
         VkError::AllocatorError(error)
     }
 }
 
 pub type VkResult<T> = Result<T, VkError>;
-
-pub type AshResult<T> = Result<T, vk::Result>;

@@ -3,11 +3,11 @@ use std::convert::Infallible;
 use type_kit::{Create, Destroy, DestroyResult, GenCell};
 
 use crate::{
-    error::{ResourceError, ResourceResult},
     memory::{
         allocator::{
             AllocationBorrow, AllocationStore, AllocatorIndex, AllocatorIndexTyped, NoReleaseRange,
         },
+        error::{MemoryError, MemoryResult},
         AllocReqTyped, MemoryProperties,
     },
     Context,
@@ -31,7 +31,7 @@ impl Default for Unpooled {
 
 impl Create for Unpooled {
     type Config<'a> = ();
-    type CreateError = ResourceError;
+    type CreateError = MemoryError;
 
     fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> type_kit::CreateResult<Self> {
         Ok(Unpooled {
@@ -58,7 +58,7 @@ impl Allocator for Unpooled {
         &mut self,
         context: &Context,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndexTyped<M>> {
+    ) -> MemoryResult<AllocationIndexTyped<M>> {
         let memory = self.store.allocate(context, req)?;
         let allocation = self.store.suballocate(req, memory)?;
         Ok(allocation)
@@ -69,7 +69,7 @@ impl Allocator for Unpooled {
         &mut self,
         context: &Context,
         allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         if let Some(mut memory) = self.store.pop(allocation)? {
             let _ = memory.destroy(context);
         }
@@ -80,7 +80,7 @@ impl Allocator for Unpooled {
     fn borrow<M: MemoryProperties>(
         &mut self,
         allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<AllocationBorrow<M>> {
+    ) -> MemoryResult<AllocationBorrow<M>> {
         self.store.borrow(allocation)
     }
 
@@ -88,7 +88,7 @@ impl Allocator for Unpooled {
     fn put_back<M: MemoryProperties>(
         &mut self,
         allocation: AllocationBorrow<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         self.store.put_back(allocation)
     }
 

@@ -1,16 +1,16 @@
 use std::{collections::HashMap, convert::Infallible, fmt::Debug};
 
 use type_kit::{
-    Create, Destroy, DestroyResult, DropGuard, FromGuard, GenCollection, TypeGuard, TypeGuardVec,
+    Create, Destroy, DestroyResult, DropGuard, FromGuard, GenCollection, GuardVec, TypeGuard,
 };
 
 use crate::{
-    error::{AllocatorError, AllocatorResult, ResourceResult},
     memory::{
         allocator::{
             Allocation, AllocationBorrow, AllocationIndexTyped, AllocationRaw, MemoryIndex,
             MemoryIndexRaw,
         },
+        error::{MemoryError, MemoryResult},
         range::ByteRange,
         AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties, MemoryRaw,
     },
@@ -71,7 +71,7 @@ impl MemoryRange for NoReleaseRange {
 #[derive(Debug)]
 struct MemoryMap<R: MemoryRange> {
     usage: HashMap<TypeGuard<MemoryIndexRaw>, R>,
-    memory: TypeGuardVec<MemoryRaw>,
+    memory: GuardVec<MemoryRaw>,
 }
 
 impl<R: MemoryRange> Default for MemoryMap<R> {
@@ -86,23 +86,24 @@ impl<R: MemoryRange> MemoryMap<R> {
     fn new() -> Self {
         Self {
             usage: HashMap::default(),
-            memory: TypeGuardVec::default(),
+            memory: GuardVec::default(),
         }
     }
 
-    fn get_usage<M: MemoryProperties>(
-        &mut self,
-        memory: MemoryIndex<M>,
-    ) -> AllocatorResult<&mut R> {
+    fn get_usage<M: MemoryProperties>(&mut self, memory: MemoryIndex<M>) -> MemoryResult<&mut R> {
         self.usage
             .get_mut(&memory.into_guard())
-            .ok_or(AllocatorError::InvalidAllocationIndex)
+            .ok_or(MemoryError::InvalidMemoryIndex {
+                index: memory.into_guard(),
+            })
     }
 
-    fn pop_usage<M: MemoryProperties>(&mut self, memory: MemoryIndex<M>) -> AllocatorResult<R> {
+    fn pop_usage<M: MemoryProperties>(&mut self, memory: MemoryIndex<M>) -> MemoryResult<R> {
         self.usage
             .remove(&memory.into_guard())
-            .ok_or(AllocatorError::InvalidAllocationIndex)
+            .ok_or(MemoryError::InvalidMemoryIndex {
+                index: memory.into_guard(),
+            })
     }
 
     #[inline]
@@ -110,16 +111,16 @@ impl<R: MemoryRange> MemoryMap<R> {
         &mut self,
         memory: MemoryIndex<M>,
         req: &AllocReqTyped<M>,
-    ) -> ResourceResult<Allocation<M>> {
+    ) -> MemoryResult<Allocation<M>> {
         if let Some(range) = self.get_usage::<M>(memory)?.try_alloc(req) {
             Ok(Allocation::new(memory, range))
         } else {
-            Err(AllocatorError::OutOfMemory.into())
+            Err(MemoryError::OutOfMemory.into())
         }
     }
 
     #[inline]
-    fn push<M: MemoryProperties>(&mut self, memory: Memory<M>) -> ResourceResult<MemoryIndex<M>> {
+    fn push<M: MemoryProperties>(&mut self, memory: Memory<M>) -> MemoryResult<MemoryIndex<M>> {
         let size = memory.size();
         let index = self.memory.push(memory.into_guard())?;
         self.usage
@@ -131,7 +132,7 @@ impl<R: MemoryRange> MemoryMap<R> {
     fn pop<M: MemoryProperties>(
         &mut self,
         memory: Allocation<M>,
-    ) -> ResourceResult<Option<DropGuard<Memory<M>>>> {
+    ) -> MemoryResult<Option<DropGuard<Memory<M>>>> {
         let Allocation { range, memory } = memory;
         let usage = self.get_usage::<M>(memory)?;
         usage.dealloc(range);
@@ -140,8 +141,7 @@ impl<R: MemoryRange> MemoryMap<R> {
             // TODO: From now discard the guard if failed to convert
             // In Future error type that can express type conversion failure
             // should be generic over the converted Type and be able to contain the guard type
-            let memory =
-                Memory::<M>::try_from_guard(self.memory.pop(memory)?).map_err(|(_, err)| err)?;
+            let memory = Memory::<M>::try_from_guard(self.memory.pop(memory)?)?;
             Ok(Some(DropGuard::new(memory)))
         } else {
             Ok(None)
@@ -152,8 +152,8 @@ impl<R: MemoryRange> MemoryMap<R> {
     fn borrow<M: MemoryProperties>(
         &mut self,
         allocation: Allocation<M>,
-    ) -> ResourceResult<AllocationBorrow<M>> {
-        let memory = self.memory.borrow(allocation.memory)?.try_into().unwrap();
+    ) -> MemoryResult<AllocationBorrow<M>> {
+        let memory = self.memory.borrow(allocation.memory)?.try_into()?;
         Ok(AllocationBorrow {
             range: allocation.range,
             memory,
@@ -164,7 +164,7 @@ impl<R: MemoryRange> MemoryMap<R> {
     fn put_back<M: MemoryProperties>(
         &mut self,
         allocation: AllocationBorrow<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         let AllocationBorrow { memory, .. } = allocation;
         self.memory.put_back(memory.into())?;
         Ok(())
@@ -213,7 +213,7 @@ impl<R: MemoryRange> Destroy for MemoryMap<R> {
 
 #[derive(Debug)]
 pub struct AllocationStore<R: MemoryRange> {
-    allocations: TypeGuardVec<AllocationRaw>,
+    allocations: GuardVec<AllocationRaw>,
     memory_map: MemoryMap<R>,
 }
 
@@ -227,7 +227,7 @@ impl<R: MemoryRange> AllocationStore<R> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            allocations: TypeGuardVec::default(),
+            allocations: GuardVec::default(),
             memory_map: MemoryMap::new(),
         }
     }
@@ -237,7 +237,7 @@ impl<R: MemoryRange> AllocationStore<R> {
         &mut self,
         context: &Context,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<MemoryIndex<M>> {
+    ) -> MemoryResult<MemoryIndex<M>> {
         let alloc_info = context.get_memory_allocate_info(req)?;
         let memory = Memory::<M>::create(alloc_info, context)?;
         let index = self.memory_map.push(memory)?;
@@ -249,7 +249,7 @@ impl<R: MemoryRange> AllocationStore<R> {
         &mut self,
         req: AllocReqTyped<M>,
         memory: MemoryIndex<M>,
-    ) -> ResourceResult<AllocationIndexTyped<M>> {
+    ) -> MemoryResult<AllocationIndexTyped<M>> {
         let allocation = self.memory_map.try_suballocate(memory, &req)?;
         let index = self.allocations.push(allocation.into_guard())?;
         Ok(AllocationIndexTyped { index })
@@ -259,7 +259,7 @@ impl<R: MemoryRange> AllocationStore<R> {
     pub fn pop<M: MemoryProperties>(
         &mut self,
         index: AllocationIndexTyped<M>,
-    ) -> ResourceResult<Option<DropGuard<Memory<M>>>> {
+    ) -> MemoryResult<Option<DropGuard<Memory<M>>>> {
         let allocation = self.allocations.pop(index.index)?;
         let allocation = unsafe { Allocation::<M>::from_inner(allocation.into_inner()) };
         self.memory_map.pop(allocation)
@@ -269,9 +269,8 @@ impl<R: MemoryRange> AllocationStore<R> {
     pub fn borrow<M: MemoryProperties>(
         &mut self,
         index: AllocationIndexTyped<M>,
-    ) -> ResourceResult<AllocationBorrow<M>> {
-        let allocation =
-            Allocation::<M>::try_from_guard(*self.allocations.get(index.index)?).unwrap();
+    ) -> MemoryResult<AllocationBorrow<M>> {
+        let allocation = Allocation::<M>::try_from_guard(*self.allocations.get(index.index)?)?;
         self.memory_map.borrow(allocation)
     }
 
@@ -279,7 +278,7 @@ impl<R: MemoryRange> AllocationStore<R> {
     pub fn put_back<M: MemoryProperties>(
         &mut self,
         allocation: AllocationBorrow<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         self.memory_map.put_back(allocation)
     }
 }

@@ -1,9 +1,9 @@
 use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, TypeGuardVec};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, GuardVec};
 
 use crate::{
-    error::{AshResult, ResourceError},
+    error::{ExtResult, ResourceError},
     memory::{range::ByteRange, MemoryProperties},
     resources::{
         buffer::Buffer,
@@ -37,7 +37,7 @@ pub mod level {
     use ash::vk;
     use type_kit::{Destroy, DestroyResult};
 
-    use crate::{device::Device, error::AshResult, Context};
+    use crate::{device::Device, error::ExtResult, Context};
 
     #[derive(Debug, Clone, Copy)]
     pub enum PersistentAllocatorRaw {
@@ -95,7 +95,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> AshResult<PersistentAllocator>;
+        ) -> ExtResult<PersistentAllocator>;
 
         fn destory_persistent_alocator(device: &Device, allocator: &mut PersistentAllocator);
 
@@ -212,7 +212,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> AshResult<PersistentAllocator> {
+        ) -> ExtResult<PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -352,7 +352,7 @@ pub mod level {
             device: &Device,
             command_pool: vk::CommandPool,
             size: usize,
-        ) -> AshResult<PersistentAllocator> {
+        ) -> ExtResult<PersistentAllocator> {
             let allocate_info = vk::CommandBufferAllocateInfo {
                 command_pool,
                 level: Self::LEVEL,
@@ -453,7 +453,7 @@ pub struct PersistentCommandPoolRaw {
 
 impl<L: Level, O: Operation> Resource for PersistentCommandPool<L, O> {
     type RawType = PersistentCommandPoolRaw;
-    type RawCollection = TypeGuardVec<Self::RawType>;
+    type RawCollection = GuardVec<Self::RawType>;
 }
 
 impl<L: Level, O: Operation> FromGuard for PersistentCommandPool<L, O> {
@@ -591,7 +591,7 @@ impl Device {
     pub fn begin_primary_command<T, O: Operation>(
         &self,
         command: NewCommand<T, Primary, O>,
-    ) -> AshResult<BeginCommand<T, Primary, O>> {
+    ) -> ExtResult<BeginCommand<T, Primary, O>> {
         let NewCommand(command) = command;
         unsafe {
             self.wait_for_fences(&[command.data.fence], true, u64::MAX)?;
@@ -631,7 +631,7 @@ impl Device {
     pub fn finish_command<T, L: Level, O: Operation>(
         &self,
         command: BeginCommand<T, L, O>,
-    ) -> AshResult<FinishedCommand<T, L, O>> {
+    ) -> ExtResult<FinishedCommand<T, L, O>> {
         let BeginCommand(command) = command;
         unsafe {
             self.end_command_buffer(L::buffer(&command.data))?;
@@ -1092,7 +1092,7 @@ impl Device {
         command: FinishedCommand<T, Primary, O>,
         wait: SubmitSemaphoreState,
         signal: &[vk::Semaphore],
-    ) -> AshResult<SubmitedCommand<'a, T, Primary, O>> {
+    ) -> ExtResult<SubmitedCommand<'a, T, Primary, O>> {
         let FinishedCommand(command) = command;
         unsafe {
             self.queue_submit(
@@ -1124,7 +1124,7 @@ impl<'a, T, L: Level, O: Operation> From<&'a SubmitedCommand<'a, T, L, O>>
 }
 
 impl<'a, O: Operation> SubmitedCommand<'a, Transient, Primary, O> {
-    pub fn wait(self) -> AshResult<Self> {
+    pub fn wait(self) -> ExtResult<Self> {
         let SubmitedCommand(command, device) = self;
         unsafe {
             device.wait_for_fences(&[command.data.fence], true, u64::MAX)?;
@@ -1231,7 +1231,7 @@ impl Destroy for TransientCommandPoolRaw {
 impl Context {
     pub fn allocate_transient_command<O: Operation>(
         &self,
-    ) -> AshResult<NewCommand<Transient, Primary, O>> {
+    ) -> ExtResult<NewCommand<Transient, Primary, O>> {
         let pool = O::get_transient_command_pool(self);
         let &buffer = unsafe {
             self.allocate_command_buffers(

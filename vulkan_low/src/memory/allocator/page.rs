@@ -3,9 +3,9 @@ use std::convert::Infallible;
 use type_kit::{Create, Destroy, DestroyResult, GenVec};
 
 use crate::{
-    error::{ResourceError, ResourceResult},
     memory::{
         allocator::{AllocationBorrow, Allocator, AllocatorIndex, AllocatorIndexTyped},
+        error::{MemoryError, MemoryResult},
         AllocReqTyped, MemoryProperties,
     },
     Context,
@@ -46,7 +46,7 @@ impl Page {
 
 impl Create for Page {
     type Config<'a> = PageConfig;
-    type CreateError = ResourceError;
+    type CreateError = MemoryError;
 
     fn create<'a, 'b>(
         _config: Self::Config<'a>,
@@ -73,7 +73,7 @@ impl Allocator for Page {
         &mut self,
         _context: &Context,
         _req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndexTyped<M>> {
+    ) -> MemoryResult<AllocationIndexTyped<M>> {
         todo!()
     }
 
@@ -82,7 +82,7 @@ impl Allocator for Page {
         &mut self,
         _context: &Context,
         _allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         todo!()
     }
 
@@ -90,7 +90,7 @@ impl Allocator for Page {
     fn borrow<M: MemoryProperties>(
         &mut self,
         _allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<AllocationBorrow<M>> {
+    ) -> MemoryResult<AllocationBorrow<M>> {
         todo!()
     }
 
@@ -98,7 +98,7 @@ impl Allocator for Page {
     fn put_back<'a, M: MemoryProperties>(
         &mut self,
         _allocation: super::AllocationBorrow<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         todo!()
     }
 

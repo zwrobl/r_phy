@@ -19,7 +19,7 @@ use crate::{
     resources::Partial,
     Context,
 };
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardVec};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use super::Resource;
 
@@ -284,7 +284,7 @@ impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
 
 impl<V: ImageType, M: MemoryProperties> Resource for Image<V, M> {
     type RawType = ImageRaw;
-    type RawCollection = TypeGuardVec<Self::RawType>;
+    type RawCollection = GuardVec<Self::RawType>;
 }
 
 impl<V: ImageType, M: MemoryProperties> Create for Image<V, M> {

@@ -11,7 +11,7 @@ use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard};
 
 use crate::{
-    error::{AshResult, ResourceError},
+    error::{ExtResult, ResourceError},
     memory::{
         allocator::{AllocatorBuilder, AllocatorIndex},
         range::{ByteRange, Range},
@@ -142,7 +142,7 @@ impl StagingBuffer {
         context: &Context,
         dst: impl Into<&'b mut Buffer<DeviceLocal>>,
         dst_offset: vk::DeviceSize,
-    ) -> AshResult<()> {
+    ) -> ExtResult<()> {
         let command = context.allocate_transient_command::<operation::Transfer>()?;
         let command = context.begin_primary_command(command)?;
         let command = context.record_command(command, |command| {
@@ -176,7 +176,7 @@ impl StagingBuffer {
         dst: &mut Image<V, DeviceLocal>,
         dst_array_layer: u32,
         dst_final_layout: vk::ImageLayout,
-    ) -> AshResult<()> {
+    ) -> ExtResult<()> {
         let image_info = dst.get_image_info();
         let mip_info = image_info.mip_info.unwrap_or_default();
         let old_layout = dst.get_vk_layout();

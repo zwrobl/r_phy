@@ -9,7 +9,7 @@ use std::{
     ptr::NonNull,
 };
 
-use type_kit::{Create, Destroy, DestroyResult, FromGuard, TypeGuardVec};
+use type_kit::{Create, Destroy, DestroyResult, FromGuard, GuardVec};
 pub use writer::*;
 
 use ash::vk;
@@ -151,7 +151,7 @@ impl<T: DescriptorLayout> Descriptor<T> {
 
 impl<L: DescriptorLayout> Resource for DescriptorPool<L> {
     type RawType = DescriptorPoolDataRaw;
-    type RawCollection = TypeGuardVec<Self::RawType>;
+    type RawCollection = GuardVec<Self::RawType>;
 }
 
 impl<L: DescriptorLayout> FromGuard for DescriptorPool<L> {

@@ -15,7 +15,7 @@ use crate::{
     },
     Context,
 };
-use type_kit::{Cons, Create, Destroy, FromGuard, Nil, TypeGuardVec};
+use type_kit::{Cons, Create, Destroy, FromGuard, GuardVec, Nil};
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -836,7 +836,7 @@ impl<C: RenderPassConfig> Copy for FramebufferHandle<C> {}
 
 impl<C: RenderPassConfig> Resource for Framebuffer<C> {
     type RawType = FramebufferRaw;
-    type RawCollection = TypeGuardVec<Self::RawType>;
+    type RawCollection = GuardVec<Self::RawType>;
 }
 
 impl<C: RenderPassConfig> FromGuard for Framebuffer<C> {

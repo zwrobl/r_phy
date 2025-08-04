@@ -1,4 +1,5 @@
 pub mod allocator;
+pub mod error;
 pub mod range;
 
 use std::{convert::Infallible, ffi::c_void, fmt::Debug, marker::PhantomData, ops::Deref};
@@ -7,8 +8,10 @@ use ash::{self, vk};
 use type_kit::{Create, Destroy, DestroyResult, FromGuard};
 
 use crate::{
-    error::{AllocatorError, AllocatorResult, ResourceError, VkResult},
-    memory::allocator::{AllocationIndex, AllocationIndexTyped},
+    memory::{
+        allocator::{AllocationIndex, AllocationIndexTyped},
+        error::{MemoryError, MemoryResult},
+    },
     Context,
 };
 
@@ -182,7 +185,7 @@ impl Context {
     pub fn get_memory_type_index<M: MemoryProperties>(
         &self,
         req: AllocReqTyped<M>,
-    ) -> AllocatorResult<u32> {
+    ) -> MemoryResult<u32> {
         let memory_type_bits = req.requirements().memory_type_bits;
         let memory_properties = req.properties();
 
@@ -201,7 +204,7 @@ impl Context {
                     None
                 }
             })
-            .ok_or(AllocatorError::UnsupportedMemoryType)
+            .ok_or(MemoryError::UnsupportedMemoryType)
     }
 }
 
@@ -216,7 +219,7 @@ impl Context {
     pub fn get_memory_allocate_info<M: MemoryProperties>(
         &self,
         req: AllocReqTyped<M>,
-    ) -> AllocatorResult<MemoryAllocateInfo<M>> {
+    ) -> MemoryResult<MemoryAllocateInfo<M>> {
         Ok(MemoryAllocateInfo {
             info: vk::MemoryAllocateInfo {
                 allocation_size: req.requirements().size,
@@ -247,7 +250,7 @@ pub struct Memory<M: MemoryProperties> {
 
 impl<M: MemoryProperties> Create for Memory<M> {
     type Config<'a> = MemoryAllocateInfo<M>;
-    type CreateError = ResourceError;
+    type CreateError = MemoryError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
@@ -274,7 +277,7 @@ impl<M: MemoryProperties> Memory<M> {
         self.memory.size as usize
     }
 
-    pub fn map(&mut self, context: &Context) -> VkResult<*mut c_void> {
+    pub fn map(&mut self, context: &Context) -> MemoryResult<*mut c_void> {
         if self.memory.map_count == 0 && self.memory.ptr.is_none() {
             let ptr = unsafe {
                 context.map_memory(

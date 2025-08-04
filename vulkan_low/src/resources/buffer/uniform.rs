@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, TypeGuardVec};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
     error::ResourceError,
@@ -206,7 +206,7 @@ impl<U: AnyBitPattern, O: Operation> Destroy for UniformBuffer<U, O> {
 
 impl<U: AnyBitPattern, O: Operation> Resource for UniformBuffer<U, O> {
     type RawType = BufferRaw;
-    type RawCollection = TypeGuardVec<Self::RawType>;
+    type RawCollection = GuardVec<Self::RawType>;
 }
 
 impl<U: AnyBitPattern, O: Operation> FromGuard for UniformBuffer<U, O> {

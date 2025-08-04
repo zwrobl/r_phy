@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_guard_collection_entry_valid_index() {
-        let mut collection = TypeGuardVec::<u32>::default();
+        let mut collection = GuardVec::<u32>::default();
         let index_a = collection.push(A(42).into_guard()).unwrap();
         let index_b = collection.push(B(31).into_guard()).unwrap();
 
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     fn test_guard_collection_entry_invalid_index_type_checked_in_debug() {
-        let mut collection = TypeGuardVec::<u32>::default();
+        let mut collection = GuardVec::<u32>::default();
         let index_a = collection.push(A(42).into_guard()).unwrap();
         let index_b = collection.push(B(31).into_guard()).unwrap();
 
@@ -245,7 +245,7 @@ mod tests {
     #[test]
     #[cfg(not(debug_assertions))]
     fn test_guard_collection_entry_invalid_index_type_check_skip_in_release() {
-        let mut collection = TypeGuardVec::<u32>::default();
+        let mut collection = GuardVec::<u32>::default();
         let index_a = collection.push(A(42).into_guard()).unwrap();
         let index_b = collection.push(B(31).into_guard()).unwrap();
 
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_guard_collection_mut_entry_update_on_drop() {
-        let mut collection = TypeGuardVec::<u32>::default();
+        let mut collection = GuardVec::<u32>::default();
         let index = collection.push(A(42).into_guard()).unwrap();
 
         {
@@ -1169,7 +1169,7 @@ impl<'a, T: FromGuard> DerefMut for ScopedInnerMut<'a, T> {
 }
 
 pub type GuardIndex<T, C> = GenIndex<Guard<T>, C>;
-pub type TypeGuardVec<T> = GenVec<TypeGuard<T>>;
+pub type GuardVec<T> = GenVec<TypeGuard<T>>;
 
 #[derive(Debug, Clone, Copy)]
 pub enum GuardCollectionError {
@@ -1229,13 +1229,13 @@ impl<T: FromGuard, C> TypedIndex<T, C> {
     #[inline]
     pub fn mark<L, M: Marker>(self) -> Marked<Self, M>
     where
-        L: Contains<TypeGuardVec<T::Inner>, M>,
+        L: Contains<GuardVec<T::Inner>, M>,
     {
         Marked::new(self)
     }
 }
 
-impl<I: Clone + Copy + 'static> TypeGuardVec<I> {
+impl<I: Clone + Copy + 'static> GuardVec<I> {
     #[inline]
     pub fn entry<'a, T: FromGuard<Inner = I>>(
         &'a self,
@@ -1260,7 +1260,7 @@ impl<I: Clone + Copy + 'static> TypeGuardVec<I> {
 pub type ScopedInnerResult<'a, T> = Result<ScopedInnerRef<'a, T>, GuardCollectionError>;
 pub type ScopedInnerMutResult<'a, T> = Result<ScopedInnerMut<'a, T>, GuardCollectionError>;
 
-impl<I: 'static> TypeGuardVec<I> {
+impl<I: 'static> GuardVec<I> {
     #[inline]
     pub fn inner_ref<'a, T: FromGuard<Inner = I>>(
         &'a self,
@@ -1292,9 +1292,6 @@ where
         self.into_iter().try_for_each(|item| item.destroy(context))
     }
 }
-
-pub type DropGuardVec<T> = DropGuard<GenVec<T>>;
-pub type GuardVec<T> = DropGuard<TypeGuardVec<T>>;
 
 pub trait IndexList<C: 'static> {
     type Owned;
@@ -1837,8 +1834,10 @@ impl<T: FromGuard, C> From<BorrowedGuard<T, C>> for Borrowed<Guard<T>, C> {
     }
 }
 
+pub type BorrowGuardError<I, C> = (Borrowed<TypeGuard<I>, C>, TypeGuardConversionError);
+
 impl<T: FromGuard, C> TryFrom<Borrowed<Guard<T>, C>> for BorrowedGuard<T, C> {
-    type Error = (Borrowed<Guard<T>, C>, TypeGuardConversionError);
+    type Error = BorrowGuardError<T::Inner, C>;
 
     #[inline]
     fn try_from(value: Borrowed<Guard<T>, C>) -> Result<Self, Self::Error> {
@@ -1974,7 +1973,7 @@ mod test_type_guard_borrow_list {
         unpack_list, Cons, Nil,
     };
 
-    type TestTypeGuardCollection = list_type![TypeGuardVec<u32>, Nil];
+    type TestTypeGuardCollection = list_type![GuardVec<u32>, Nil];
     type TestTypeGuardCollectionList = GenCollectionList<TestTypeGuardCollection>;
 
     #[test]
@@ -2053,7 +2052,7 @@ mod test_type_guard_borrow_list {
             });
             assert!(borrow.destroy(&mut collection).is_ok());
         }
-        let collection_u32: &TypeGuardVec<u32> = collection.get();
+        let collection_u32: &GuardVec<u32> = collection.get();
         assert_eq!(collection_u32.len(), 2);
     }
 }
@@ -2064,7 +2063,7 @@ pub struct GenCell<T> {
     item: MaybeUninit<T>,
 }
 
-pub type TypeGuardCell<T> = GenCell<TypeGuard<T>>;
+pub type GuardCell<T> = GenCell<TypeGuard<T>>;
 
 impl<T: 'static> Default for GenCell<T> {
     #[inline]

@@ -17,20 +17,21 @@ use std::{
 };
 
 use type_kit::{
-    BorrowedGuard, Create, Destroy, FromGuard, GenCollection, GenIndexRaw, GuardIndex, TypeGuardVec,
+    BorrowedGuard, Create, Destroy, FromGuard, GenCollection, GenIndexRaw, GuardIndex, GuardVec,
 };
 
 use crate::{
-    error::{ResourceError, ResourceResult},
     memory::{
-        range::ByteRange, AllocReq, AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, Memory,
-        MemoryProperties, MemoryRaw,
+        error::{MemoryError, MemoryResult},
+        range::ByteRange,
+        AllocReq, AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties,
+        MemoryRaw,
     },
     Context,
 };
 
-type MemoryIndex<M> = GuardIndex<Memory<M>, TypeGuardVec<MemoryRaw>>;
-type MemoryIndexRaw = GenIndexRaw;
+pub type MemoryIndex<M> = GuardIndex<Memory<M>, GuardVec<MemoryRaw>>;
+pub type MemoryIndexRaw = GenIndexRaw;
 #[derive(Debug, Clone, Copy)]
 pub struct AllocationRaw {
     range: ByteRange,
@@ -45,7 +46,7 @@ pub struct Allocation<M: MemoryProperties> {
 
 pub struct AllocationBorrow<M: MemoryProperties> {
     range: ByteRange,
-    memory: BorrowedGuard<Memory<M>, TypeGuardVec<MemoryRaw>>,
+    memory: BorrowedGuard<Memory<M>, GuardVec<MemoryRaw>>,
 }
 
 impl<M: MemoryProperties> Deref for AllocationBorrow<M> {
@@ -110,7 +111,7 @@ pub trait AllocatorBuilder {
 pub trait Allocator: 'static + Sized
 where
     for<'a> Self: Destroy<Context<'a> = &'a Context, DestroyError = Infallible>
-        + Create<CreateError = ResourceError>,
+        + Create<CreateError = MemoryError>,
 {
     type Storage: GenCollection<Self>
         + for<'a> Destroy<Context<'a> = &'a Context, DestroyError = Infallible>;
@@ -119,30 +120,30 @@ where
         &mut self,
         context: &Context,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndexTyped<M>>;
+    ) -> MemoryResult<AllocationIndexTyped<M>>;
 
     fn free<M: MemoryProperties>(
         &mut self,
         context: &Context,
         allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<()>;
+    ) -> MemoryResult<()>;
 
     fn borrow<'a, M: MemoryProperties>(
         &mut self,
         allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<AllocationBorrow<M>>;
+    ) -> MemoryResult<AllocationBorrow<M>>;
 
     fn put_back<'a, M: MemoryProperties>(
         &mut self,
         allocation: AllocationBorrow<M>,
-    ) -> ResourceResult<()>;
+    ) -> MemoryResult<()>;
 
     fn wrap_index(index: AllocatorIndexTyped<Self>) -> AllocatorIndex;
 }
 
 #[derive(Debug)]
 pub struct AllocationIndexTyped<M: MemoryProperties> {
-    index: GuardIndex<Allocation<M>, TypeGuardVec<AllocationRaw>>,
+    index: GuardIndex<Allocation<M>, GuardVec<AllocationRaw>>,
 }
 
 impl<M: MemoryProperties> Clone for AllocationIndexTyped<M> {

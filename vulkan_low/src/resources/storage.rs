@@ -13,8 +13,8 @@ use super::{
 };
 use type_kit::{
     list_type, BorrowList, BorrowedGuard, CollectionDestroyError, Cons, Contains, Create, Destroy,
-    DestroyResult, FromGuard, GenCollection, GenCollectionResult, GenIndex, IndexList, Marked,
-    Marker, Nil, TypeGuard, TypeGuardCell, TypeGuardVec, TypeMap, TypedIndex,
+    DestroyResult, FromGuard, GenCollection, GenCollectionResult, GenIndex, GuardCell, GuardVec,
+    IndexList, Marked, Marker, Nil, TypeGuard, TypeMap, TypedIndex,
 };
 
 use crate::{
@@ -25,14 +25,14 @@ use crate::{
 
 pub type RawCollection<R> = <R as Resource>::RawCollection;
 pub type ResourceStorageList = list_type![
-    TypeGuardVec<BufferRaw>,
-    TypeGuardVec<ImageRaw>,
-    TypeGuardVec<TextureRaw>,
-    TypeGuardVec<GraphicsPipelineRaw>,
-    TypeGuardVec<DescriptorPoolDataRaw>,
-    TypeGuardVec<PersistentCommandPoolRaw>,
-    TypeGuardVec<FramebufferRaw>,
-    TypeGuardCell<SwapchainRaw>,
+    GuardVec<BufferRaw>,
+    GuardVec<ImageRaw>,
+    GuardVec<TextureRaw>,
+    GuardVec<GraphicsPipelineRaw>,
+    GuardVec<DescriptorPoolDataRaw>,
+    GuardVec<PersistentCommandPoolRaw>,
+    GuardVec<FramebufferRaw>,
+    GuardCell<SwapchainRaw>,
     Nil
 ];
 
@@ -107,7 +107,7 @@ impl ResourceStorage {
     pub unsafe fn pop_raw_resource<R, M: Marker>(&self, index: RawIndex) -> ResourceResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<TypeGuardVec<R>, M>,
+        ResourceStorageList: Contains<GuardVec<R>, M>,
     {
         let index = unsafe { GenIndex::<TypeGuard<R>, _>::from_inner(index) };
         let resource = self.storage.borrow_mut().get_mut().pop(index)?.into_inner();
@@ -144,7 +144,7 @@ impl ResourceStorage {
     fn destroy_vec_resource_storage<R, M: Marker>(&self, context: &Context) -> DestroyResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<TypeGuardVec<R>, M>,
+        ResourceStorageList: Contains<GuardVec<R>, M>,
     {
         let items = self.storage.borrow_mut().get_mut().drain();
         items
@@ -156,7 +156,7 @@ impl ResourceStorage {
     fn destroy_cell_resource_storage<R, M: Marker>(&self, context: &Context) -> DestroyResult<R>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<TypeGuardCell<R>, M>,
+        ResourceStorageList: Contains<GuardCell<R>, M>,
     {
         let resource = self.storage.borrow_mut().get_mut().drain();
         if let Some(mut item) = resource {

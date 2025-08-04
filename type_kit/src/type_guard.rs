@@ -163,7 +163,8 @@ pub type Valid<T> = TypeGuardUnlocked<<T as FromGuard>::Inner, T>;
 pub type ValidRef<'a, T> = TypeGuardUnlockedRef<'a, <T as FromGuard>::Inner, T>;
 pub type ValidMut<'a, T> = TypeGuardUnlockedMut<'a, <T as FromGuard>::Inner, T>;
 pub type Guard<T> = TypeGuard<<T as FromGuard>::Inner>;
-pub type GuardResult<T> = Result<T, (Guard<T>, TypeGuardConversionError)>;
+pub type GuardError<T> = (TypeGuard<T>, TypeGuardConversionError);
+pub type GuardResult<T> = Result<T, GuardError<<T as FromGuard>::Inner>>;
 
 pub trait FromGuard: 'static + Sized {
     type Inner;

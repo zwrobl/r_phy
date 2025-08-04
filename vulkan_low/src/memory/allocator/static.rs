@@ -7,12 +7,12 @@ use type_kit::{
 };
 
 use crate::{
-    error::{AllocatorError, ResourceError, ResourceResult},
     memory::{
         allocator::{
             AllocReq, AllocationBorrow, AllocationStore, Allocator, AllocatorBuilder,
             AllocatorIndex, AllocatorIndexTyped, MemoryIndex, NoReleaseRange,
         },
+        error::{MemoryError, MemoryResult},
         range::ByteRange,
         AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
     },
@@ -45,7 +45,7 @@ impl<M: MemoryProperties> LinearBuffer<M> {
         &mut self,
         req: AllocReqTyped<M>,
         store: &mut AllocationStore<NoReleaseRange>,
-    ) -> ResourceResult<AllocationIndexTyped<M>> {
+    ) -> MemoryResult<AllocationIndexTyped<M>> {
         store.suballocate(req, self.memory)
     }
 }
@@ -61,7 +61,7 @@ impl<M: MemoryProperties> LinearBufferBuilder<M> {
         self,
         context: &Context,
         storage: &mut AllocationStore<NoReleaseRange>,
-    ) -> ResourceResult<Option<LinearBuffer<M>>> {
+    ) -> MemoryResult<Option<LinearBuffer<M>>> {
         if !self.info.range.is_empty() && self.info.memory_type_bits != 0 {
             let req = M::alloc_req_typed(vk::MemoryRequirements {
                 size: self.info.range.len() as vk::DeviceSize,
@@ -160,7 +160,7 @@ pub struct Static {
 
 impl Create for Static {
     type Config<'a> = StaticConfig;
-    type CreateError = ResourceError;
+    type CreateError = MemoryError;
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
@@ -197,7 +197,7 @@ impl Static {
     fn allocate_memory_type<M: MemoryProperties, T: Marker>(
         &mut self,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndexTyped<M>>
+    ) -> MemoryResult<AllocationIndexTyped<M>>
     where
         Buffers: Contains<Option<LinearBuffer<M>>, T>,
     {
@@ -205,7 +205,7 @@ impl Static {
             .get_mut::<Option<LinearBuffer<M>>, _>()
             .as_mut()
             .map(|buffer| buffer.allocate(req, &mut self.store))
-            .ok_or(ResourceError::AllocatorError(AllocatorError::OutOfMemory))?
+            .ok_or(MemoryError::OutOfMemory)?
     }
 }
 
@@ -217,7 +217,7 @@ impl Allocator for Static {
         &mut self,
         _context: &Context,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndexTyped<M>> {
+    ) -> MemoryResult<AllocationIndexTyped<M>> {
         let allocation = match req.into() {
             AllocReq::DeviceLocal(req) => self.allocate_memory_type(req)?.into_inner(),
             AllocReq::HostCoherent(req) => self.allocate_memory_type(req)?.into_inner(),
@@ -231,7 +231,7 @@ impl Allocator for Static {
         &mut self,
         context: &Context,
         allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         if let Some(mut memory) = self.store.pop(allocation)? {
             let _ = memory.destroy(context);
         }
@@ -242,7 +242,7 @@ impl Allocator for Static {
     fn borrow<M: MemoryProperties>(
         &mut self,
         allocation: AllocationIndexTyped<M>,
-    ) -> ResourceResult<AllocationBorrow<M>> {
+    ) -> MemoryResult<AllocationBorrow<M>> {
         self.store.borrow(allocation)
     }
 
@@ -250,7 +250,7 @@ impl Allocator for Static {
     fn put_back<'a, M: MemoryProperties>(
         &mut self,
         allocation: super::AllocationBorrow<M>,
-    ) -> ResourceResult<()> {
+    ) -> MemoryResult<()> {
         self.store.put_back(allocation)
     }
 
