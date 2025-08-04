@@ -4,7 +4,6 @@ pub mod descriptor;
 pub mod framebuffer;
 pub mod image;
 pub mod layout;
-pub mod memory;
 pub mod pipeline;
 pub mod render_pass;
 pub mod storage;

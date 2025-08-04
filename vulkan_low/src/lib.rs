@@ -8,7 +8,8 @@ mod surface;
 use crate::{
     memory::{
         allocator::{
-            Allocation, AllocationEntry, Allocator, AllocatorIndex, AllocatorStorage, Unpooled,
+            AllocationBorrow, AllocationEntry, Allocator, AllocatorIndex, AllocatorStorage,
+            Unpooled,
         },
         AllocReqTyped, MemoryProperties,
     },
@@ -329,11 +330,12 @@ impl Context {
     }
 
     #[inline]
-    pub fn get_allocation<M: MemoryProperties>(
+    pub fn operate_alloc<M: MemoryProperties, R, F: FnOnce(&mut AllocationBorrow<M>) -> R>(
         &self,
         index: AllocationEntry<M>,
-    ) -> ResourceResult<Allocation<M>> {
-        self.allocators.get_allocation(index)
+        f: F,
+    ) -> ResourceResult<R> {
+        self.allocators.operate_mut(index, f)
     }
 
     #[inline]

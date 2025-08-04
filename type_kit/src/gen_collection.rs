@@ -783,6 +783,7 @@ impl<T> GenVec<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct Borrowed<T, C> {
     item: T,
     index: GenIndex<T, C>,

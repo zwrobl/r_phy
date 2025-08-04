@@ -7,7 +7,6 @@ use super::{
     framebuffer::FramebufferRaw,
     image::{ImageRaw, TextureRaw},
     layout::{DescriptorSetLayoutRaw, PipelineLayoutRaw},
-    memory::MemoryRaw,
     pipeline::GraphicsPipelineRaw,
     render_pass::RenderPassRaw,
     swapchain::SwapchainRaw,
@@ -26,7 +25,6 @@ use crate::{
 
 pub type RawCollection<R> = <R as Resource>::RawCollection;
 pub type ResourceStorageList = list_type![
-    TypeGuardVec<MemoryRaw>,
     TypeGuardVec<BufferRaw>,
     TypeGuardVec<ImageRaw>,
     TypeGuardVec<TextureRaw>,
@@ -172,7 +170,6 @@ impl ResourceStorage {
         self.destroy_vec_resource_storage::<TextureRaw, _>(context)?;
         self.destroy_vec_resource_storage::<ImageRaw, _>(context)?;
         self.destroy_vec_resource_storage::<BufferRaw, _>(context)?;
-        self.destroy_vec_resource_storage::<MemoryRaw, _>(context)?;
         self.destroy_vec_resource_storage::<GraphicsPipelineRaw, _>(context)?;
         self.destroy_vec_resource_storage::<DescriptorPoolDataRaw, _>(context)?;
         self.destroy_vec_resource_storage::<PersistentCommandPoolRaw, _>(context)?;

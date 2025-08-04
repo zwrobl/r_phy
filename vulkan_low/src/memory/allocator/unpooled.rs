@@ -5,11 +5,9 @@ use type_kit::{Create, Destroy, DestroyResult};
 use crate::{
     error::{ResourceError, ResourceResult},
     memory::{
-        allocator::{Allocation, AllocationStore, AllocatorInstance},
-        range::ByteRange,
+        allocator::{AllocationBorrow, AllocationStore, AllocatorInstance},
         AllocReqTyped, MemoryProperties,
     },
-    resources::{memory::Memory, ResourceIndex},
     Context,
 };
 
@@ -54,12 +52,9 @@ impl Allocator for Unpooled {
         context: &Context,
         req: AllocReqTyped<M>,
     ) -> ResourceResult<AllocationIndex<M>> {
-        let requirements = req.requirements();
-        let alloc_info = context.get_memory_allocate_info(req)?;
-        let memory: ResourceIndex<Memory<M>> = context.create_resource(alloc_info)?;
-        let range = ByteRange::new(requirements.size as usize);
-        let index = self.store.push(Allocation::new(memory, range))?;
-        Ok(index)
+        let memory = self.store.allocate(context, req)?;
+        let allocation = self.store.suballocate(req, memory)?;
+        Ok(allocation)
     }
 
     #[inline]
@@ -68,17 +63,25 @@ impl Allocator for Unpooled {
         context: &Context,
         allocation: AllocationIndex<M>,
     ) -> ResourceResult<()> {
-        if let Some(memory) = self.store.pop(allocation)? {
-            context.destroy_resource(memory)?;
+        if let Some(mut memory) = self.store.pop(allocation)? {
+            let _ = memory.destroy(context);
         }
         Ok(())
     }
 
     #[inline]
-    fn get_allocation<M: MemoryProperties>(
-        &self,
+    fn borrow<M: MemoryProperties>(
+        &mut self,
         allocation: AllocationIndex<M>,
-    ) -> ResourceResult<Allocation<M>> {
-        self.store.get_allocation(allocation)
+    ) -> ResourceResult<AllocationBorrow<M>> {
+        self.store.borrow(allocation)
+    }
+
+    #[inline]
+    fn put_back<M: MemoryProperties>(
+        &mut self,
+        allocation: AllocationBorrow<M>,
+    ) -> ResourceResult<()> {
+        self.store.put_back(allocation)
     }
 }

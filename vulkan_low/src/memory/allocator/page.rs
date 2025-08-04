@@ -5,7 +5,7 @@ use type_kit::{Create, Destroy, DestroyResult};
 use crate::{
     error::{ResourceError, ResourceResult},
     memory::{
-        allocator::{Allocation, Allocator, AllocatorInstance},
+        allocator::{AllocationBorrow, Allocator, AllocatorInstance},
         AllocReqTyped, MemoryProperties,
     },
     Context,
@@ -91,10 +91,17 @@ impl Allocator for Page {
         todo!()
     }
 
-    fn get_allocation<M: MemoryProperties>(
-        &self,
+    fn borrow<M: MemoryProperties>(
+        &mut self,
         _allocation: AllocationIndex<M>,
-    ) -> ResourceResult<Allocation<M>> {
+    ) -> ResourceResult<AllocationBorrow<M>> {
+        todo!()
+    }
+
+    fn put_back<'a, M: MemoryProperties>(
+        &mut self,
+        _allocation: super::AllocationBorrow<M>,
+    ) -> ResourceResult<()> {
         todo!()
     }
 }
