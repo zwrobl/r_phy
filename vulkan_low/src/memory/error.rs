@@ -3,10 +3,10 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use type_kit::{BorrowGuardError, GuardError, GuardVec, TypeGuard};
+use type_kit::{DropGuard, GuardError, TypeGuard};
 
 use crate::{
-    error::ExtError,
+    error::{ExtError, SafeGuardError},
     memory::{
         allocator::{AllocationRaw, MemoryIndexRaw},
         MemoryRaw,
@@ -15,18 +15,9 @@ use crate::{
 
 #[derive(Debug)]
 pub enum MemoryError {
-    InvalidMemoryIndex {
-        index: TypeGuard<MemoryIndexRaw>,
-    },
-    AllocationTypeGuard {
-        error: GuardError<AllocationRaw>,
-    },
-    MemoryTypeGuard {
-        error: GuardError<MemoryRaw>,
-    },
-    MemoryBorrow {
-        error: BorrowGuardError<MemoryRaw, GuardVec<MemoryRaw>>,
-    },
+    InvalidMemoryIndex { index: TypeGuard<MemoryIndexRaw> },
+    AllocationGuard { error: GuardError<AllocationRaw> },
+    MemoryGuard { error: SafeGuardError<MemoryRaw> },
     InvalidConfiguration,
     UnsupportedMemoryType,
     OutOfMemory,
@@ -39,13 +30,12 @@ impl Display for MemoryError {
             MemoryError::InvalidMemoryIndex { index } => {
                 write!(f, "Invalid memory index: {:?}", index)
             }
-            MemoryError::AllocationTypeGuard { error: index } => {
+            MemoryError::AllocationGuard { error: index } => {
                 write!(f, "Allocation type guard error: {:?}", index)
             }
-            MemoryError::MemoryTypeGuard { error } => {
+            MemoryError::MemoryGuard { error } => {
                 write!(f, "Memory type guard error: {:?}", error)
             }
-            MemoryError::MemoryBorrow { error } => write!(f, "Memory borrow error: {:?}", error),
             MemoryError::InvalidConfiguration => write!(f, "Invalid configuration"),
             MemoryError::UnsupportedMemoryType => write!(f, "Unsupported memory type"),
             MemoryError::OutOfMemory => write!(f, "Out of memory"),
@@ -58,22 +48,17 @@ impl Error for MemoryError {}
 
 impl From<GuardError<MemoryRaw>> for MemoryError {
     #[inline]
-    fn from(error: GuardError<MemoryRaw>) -> Self {
-        MemoryError::MemoryTypeGuard { error }
+    fn from((resource, err): GuardError<MemoryRaw>) -> Self {
+        MemoryError::MemoryGuard {
+            error: (DropGuard::new(resource), err),
+        }
     }
 }
 
 impl From<GuardError<AllocationRaw>> for MemoryError {
     #[inline]
     fn from(error: GuardError<AllocationRaw>) -> Self {
-        MemoryError::AllocationTypeGuard { error }
-    }
-}
-
-impl From<BorrowGuardError<MemoryRaw, GuardVec<MemoryRaw>>> for MemoryError {
-    #[inline]
-    fn from(error: BorrowGuardError<MemoryRaw, GuardVec<MemoryRaw>>) -> Self {
-        MemoryError::MemoryBorrow { error }
+        MemoryError::AllocationGuard { error }
     }
 }
 

@@ -34,8 +34,8 @@ use std::convert::Infallible;
 use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
-    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize,
-    GenCollectionResult, GenVec, GuardVec, Initialize, Marker,
+    Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize, GenVec, GuardVec,
+    Initialize, Marker,
 };
 
 use ash::vk;
@@ -344,7 +344,7 @@ impl Context {
         &self,
         index: I,
         f: F,
-    ) -> GenCollectionResult<Result<R, E>> {
+    ) -> ResourceResult<Result<R, E>> {
         self.storage.operate_ref(index, f)
     }
 
@@ -353,7 +353,7 @@ impl Context {
         &self,
         index: I,
         f: F,
-    ) -> GenCollectionResult<Result<R, E>> {
+    ) -> ResourceResult<Result<R, E>> {
         self.storage.operate_mut(index, f)
     }
 }

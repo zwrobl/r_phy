@@ -42,7 +42,7 @@ use std::{any::type_name, convert::Infallible};
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, Destroy, DestroyResult, FromGuard, GuardVec};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{resources::error::ResourceError, Context};
 
@@ -64,8 +64,10 @@ impl<T: GraphicsPipelineConfig> Resource for GraphicsPipeline<T> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::GraphicsPipeline { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::GraphicsPipeline {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 

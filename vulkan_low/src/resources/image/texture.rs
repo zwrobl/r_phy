@@ -184,7 +184,9 @@ impl<V: ImageType> Resource for Texture<V> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::Texture { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Texture {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }

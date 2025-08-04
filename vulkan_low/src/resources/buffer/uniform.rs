@@ -209,8 +209,10 @@ impl<U: AnyBitPattern, O: Operation> Resource for UniformBuffer<U, O> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::Buffer { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Buffer {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 

@@ -289,8 +289,10 @@ impl<V: ImageType, M: MemoryProperties> Resource for Image<V, M> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::Image { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Image {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 

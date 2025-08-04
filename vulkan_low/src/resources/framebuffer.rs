@@ -15,7 +15,7 @@ use crate::{
     },
     Context,
 };
-use type_kit::{Cons, Create, Destroy, FromGuard, GuardVec, Nil};
+use type_kit::{Cons, Create, Destroy, DropGuard, FromGuard, GuardVec, Nil};
 
 pub trait ClearValue {
     fn get(&self) -> Option<vk::ClearValue>;
@@ -839,8 +839,10 @@ impl<C: RenderPassConfig> Resource for Framebuffer<C> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::Framebuffer { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Framebuffer {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 

@@ -9,7 +9,7 @@ use std::{
     ptr::NonNull,
 };
 
-use type_kit::{Create, Destroy, DestroyResult, FromGuard, GuardVec};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 pub use writer::*;
 
 use ash::vk;
@@ -154,8 +154,10 @@ impl<L: DescriptorLayout> Resource for DescriptorPool<L> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::DescriptorPool { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::DescriptorPool {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 

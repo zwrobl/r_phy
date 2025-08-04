@@ -246,8 +246,10 @@ impl<M: MemoryProperties> Resource for Buffer<M> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::Buffer { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Buffer {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 

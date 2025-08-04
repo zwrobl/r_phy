@@ -1,8 +1,6 @@
 use std::{any::TypeId, convert::Infallible, error::Error, marker::PhantomData};
 
-use type_kit::{
-    unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard, GenCollectionResult,
-};
+use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard};
 
 use vulkan_low::{
     error::VkResult,
@@ -129,7 +127,7 @@ impl<M: Material> MaterialPackRef<M> {
         context: &Context,
         descriptor_index: u32,
         pipeline_index: ResourceIndex<GraphicsPipeline<P>>,
-    ) -> GenCollectionResult<DescriptorBindingData> {
+    ) -> ResourceResult<DescriptorBindingData> {
         context
             .operate_ref(
                 index_list![self.descriptors, pipeline_index],
@@ -147,7 +145,7 @@ impl<M: Material> MaterialPackRef<M> {
         &self,
         context: &Context,
         index: u32,
-    ) -> GenCollectionResult<Descriptor<M::DescriptorLayout>> {
+    ) -> ResourceResult<Descriptor<M::DescriptorLayout>> {
         context
             .operate_ref(
                 index_list![self.descriptors],

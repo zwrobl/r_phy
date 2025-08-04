@@ -13,8 +13,8 @@ use super::{
 };
 use type_kit::{
     list_type, BorrowList, BorrowedGuard, CollectionDestroyError, Cons, Contains, Create, Destroy,
-    DestroyResult, FromGuard, GenCollection, GenCollectionResult, GenIndex, GuardCell, GuardVec,
-    IndexList, Marked, Marker, Nil, TypeGuard, TypeMap, TypedIndex,
+    DestroyResult, FromGuard, GenCollection, GenIndex, GuardCell, GuardVec, IndexList, Marked,
+    Marker, Nil, TypeGuard, TypeMap, TypedIndex,
 };
 
 use crate::{
@@ -116,7 +116,7 @@ impl ResourceStorage {
         &self,
         index: I,
         f: F,
-    ) -> GenCollectionResult<Result<R, E>> {
+    ) -> ResourceResult<Result<R, E>> {
         let index_list = index.into_index_list();
         let borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(borrowed.inner_ref());
@@ -129,7 +129,7 @@ impl ResourceStorage {
         &self,
         index: I,
         f: F,
-    ) -> GenCollectionResult<Result<R, E>> {
+    ) -> ResourceResult<Result<R, E>> {
         let index_list = index.into_index_list();
         let mut borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(borrowed.inner_mut());

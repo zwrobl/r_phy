@@ -9,7 +9,7 @@ use ash::vk;
 use png::{BitDepth, ColorType};
 
 use crate::{
-    error::ExtError,
+    error::{ExtError, SafeGuardError},
     memory::error::MemoryError,
     resources::{
         buffer::BufferRaw,
@@ -25,28 +25,28 @@ use crate::{
 #[derive(Debug)]
 pub enum GuardError {
     Buffer {
-        error: type_kit::GuardError<BufferRaw>,
+        error: SafeGuardError<BufferRaw>,
     },
     Image {
-        error: type_kit::GuardError<ImageRaw>,
+        error: SafeGuardError<ImageRaw>,
     },
     Texture {
-        error: type_kit::GuardError<TextureRaw>,
+        error: SafeGuardError<TextureRaw>,
     },
     GraphicsPipeline {
-        error: type_kit::GuardError<GraphicsPipelineRaw>,
+        error: SafeGuardError<GraphicsPipelineRaw>,
     },
     DescriptorPool {
-        error: type_kit::GuardError<DescriptorPoolDataRaw>,
+        error: SafeGuardError<DescriptorPoolDataRaw>,
     },
     PersistentCommandPool {
-        error: type_kit::GuardError<PersistentCommandPoolRaw>,
+        error: SafeGuardError<PersistentCommandPoolRaw>,
     },
     Framebuffer {
-        error: type_kit::GuardError<FramebufferRaw>,
+        error: SafeGuardError<FramebufferRaw>,
     },
     Swapchain {
-        error: type_kit::GuardError<SwapchainRaw>,
+        error: SafeGuardError<SwapchainRaw>,
     },
 }
 

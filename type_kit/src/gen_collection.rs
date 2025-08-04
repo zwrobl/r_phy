@@ -362,8 +362,7 @@ pub enum GenCollectionError {
     CellEmpty,
     CellOccupied,
     CellBorrowed,
-    // TODO: Temporary until separate TypeGuardCollection type is implemented
-    TypeGuardConversion(TypeGuardConversionError),
+    TypeGuard(TypeGuardError),
 }
 
 impl Display for GenCollectionError {
@@ -391,7 +390,7 @@ impl Display for GenCollectionError {
             GenCollectionError::CellBorrowed => {
                 write!(f, "Cell is borrowed")
             }
-            GenCollectionError::TypeGuardConversion(err) => write!(f, "{}", err),
+            GenCollectionError::TypeGuard(err) => write!(f, "{}", err),
         }
     }
 }
@@ -399,6 +398,13 @@ impl Display for GenCollectionError {
 impl Error for GenCollectionError {}
 
 pub type GenCollectionResult<T> = Result<T, GenCollectionError>;
+
+impl From<TypeGuardError> for GenCollectionError {
+    #[inline]
+    fn from(error: TypeGuardError) -> Self {
+        GenCollectionError::TypeGuard(error)
+    }
+}
 
 mod cell {
     use super::{GenCollectionError, GenCollectionResult};
@@ -580,7 +586,7 @@ use std::{
 
 use crate::{
     Cons, Contains, Destroy, DestroyResult, DropGuard, FromGuard, Guard, IntoOuter, Marked, Marker,
-    Nil, TypeGuard, TypeGuardConversionError, TypeList, ValidMut, ValidRef,
+    Nil, TypeGuard, TypeGuardError, TypeList, ValidMut, ValidRef,
 };
 
 pub struct GenIndex<T, C> {
@@ -1052,7 +1058,7 @@ pub struct ScopedEntry<'a, T: FromGuard> {
     _raw: &'a T::Inner,
 }
 
-pub type ScopedEntryResult<'a, T> = Result<ScopedEntry<'a, T>, GuardCollectionError>;
+pub type ScopedEntryResult<'a, T> = Result<ScopedEntry<'a, T>, GenCollectionError>;
 
 impl<T: Clone + Copy> TypeGuard<T> {
     #[inline]
@@ -1073,7 +1079,7 @@ impl<'a, T: FromGuard> Deref for ScopedEntry<'a, T> {
     }
 }
 
-pub type ScopedEntryMutResult<'a, T> = Result<ScopedEntryMut<'a, T>, GuardCollectionError>;
+pub type ScopedEntryMutResult<'a, T> = Result<ScopedEntryMut<'a, T>, GenCollectionError>;
 
 impl<T: Clone + Copy> TypeGuard<T> {
     #[inline]
@@ -1171,41 +1177,6 @@ impl<'a, T: FromGuard> DerefMut for ScopedInnerMut<'a, T> {
 pub type GuardIndex<T, C> = GenIndex<Guard<T>, C>;
 pub type GuardVec<T> = GenVec<TypeGuard<T>>;
 
-#[derive(Debug, Clone, Copy)]
-pub enum GuardCollectionError {
-    GenCollection(GenCollectionError),
-    TypeGuardConversion(TypeGuardConversionError),
-}
-
-impl Display for GuardCollectionError {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            GuardCollectionError::GenCollection(error) => {
-                write!(f, "GenCollection error: {}", error)
-            }
-            GuardCollectionError::TypeGuardConversion(error) => {
-                write!(f, "TypeGuard conversion error: {}", error)
-            }
-        }
-    }
-}
-
-impl From<GenCollectionError> for GuardCollectionError {
-    #[inline]
-    fn from(error: GenCollectionError) -> Self {
-        GuardCollectionError::GenCollection(error)
-    }
-}
-
-impl From<TypeGuardConversionError> for GuardCollectionError {
-    #[inline]
-    fn from(error: TypeGuardConversionError) -> Self {
-        GuardCollectionError::TypeGuardConversion(error)
-    }
-}
-
-impl Error for GuardCollectionError {}
-
 #[derive(Debug)]
 pub struct TypedIndex<T: FromGuard, C> {
     index: GuardIndex<T, C>,
@@ -1257,8 +1228,8 @@ impl<I: Clone + Copy + 'static> GuardVec<I> {
     }
 }
 
-pub type ScopedInnerResult<'a, T> = Result<ScopedInnerRef<'a, T>, GuardCollectionError>;
-pub type ScopedInnerMutResult<'a, T> = Result<ScopedInnerMut<'a, T>, GuardCollectionError>;
+pub type ScopedInnerResult<'a, T> = Result<ScopedInnerRef<'a, T>, GenCollectionError>;
+pub type ScopedInnerMutResult<'a, T> = Result<ScopedInnerMut<'a, T>, GenCollectionError>;
 
 impl<I: 'static> GuardVec<I> {
     #[inline]
@@ -1834,7 +1805,7 @@ impl<T: FromGuard, C> From<BorrowedGuard<T, C>> for Borrowed<Guard<T>, C> {
     }
 }
 
-pub type BorrowGuardError<I, C> = (Borrowed<TypeGuard<I>, C>, TypeGuardConversionError);
+pub type BorrowGuardError<I, C> = (Borrowed<TypeGuard<I>, C>, TypeGuardError);
 
 impl<T: FromGuard, C> TryFrom<Borrowed<Guard<T>, C>> for BorrowedGuard<T, C> {
     type Error = BorrowGuardError<T::Inner, C>;
@@ -1925,7 +1896,7 @@ where
             .get_mut()
             .pop(index)?
             .try_into_outer()
-            .map_err(|(_, err)| GenCollectionError::TypeGuardConversion(err))?;
+            .map_err(|(_, err)| GenCollectionError::TypeGuard(err))?;
 
         Ok(Cons::new(head, tail))
     }
@@ -1946,7 +1917,7 @@ where
                 Ok(borrow) => Ok(borrow),
                 Err((borrow, err)) => {
                     collection.get_mut().put_back(borrow).unwrap();
-                    Err(GenCollectionError::TypeGuardConversion(err))
+                    Err(GenCollectionError::TypeGuard(err))
                 }
             },
             Err(err) => Err(err),
@@ -1998,10 +1969,7 @@ mod test_type_guard_borrow_list {
 
         let index_list = mark![TestTypeGuardCollection, index_a_invalid, index_b_invalid];
         let borrow = index_list.get_borrowed(&mut collection);
-        assert!(matches!(
-            borrow,
-            Err(GenCollectionError::TypeGuardConversion(..))
-        ));
+        assert!(matches!(borrow, Err(GenCollectionError::TypeGuard(..))));
 
         let index_a_valid = TypedIndex::<A, _>::new(index_inner_a);
         let index_b_valid = TypedIndex::<B, _>::new(index_inner_b);

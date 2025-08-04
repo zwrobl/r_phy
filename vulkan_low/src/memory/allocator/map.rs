@@ -5,6 +5,7 @@ use type_kit::{
 };
 
 use crate::{
+    error::ExtError,
     memory::{
         allocator::{
             Allocation, AllocationBorrow, AllocationIndexTyped, AllocationRaw, MemoryIndex,
@@ -153,7 +154,13 @@ impl<R: MemoryRange> MemoryMap<R> {
         &mut self,
         allocation: Allocation<M>,
     ) -> MemoryResult<AllocationBorrow<M>> {
-        let memory = self.memory.borrow(allocation.memory)?.try_into()?;
+        let memory = match self.memory.borrow(allocation.memory)?.try_into() {
+            Ok(memory) => memory,
+            Err((memory, err)) => {
+                self.memory.put_back(memory)?;
+                return Err(ExtError::TypeGuard(err).into());
+            }
+        };
         Ok(AllocationBorrow {
             range: allocation.range,
             memory,

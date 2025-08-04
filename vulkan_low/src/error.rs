@@ -2,54 +2,25 @@ use std::{
     error::Error,
     ffi::CStr,
     fmt::{Display, Formatter},
-    sync,
 };
 
 use ash::{vk, LoadingError};
-use type_kit::{GenCollectionError, GuardCollectionError};
+use type_kit::{DropGuard, GenCollectionError, TypeGuard, TypeGuardError};
 use winit::raw_window_handle::HandleError;
 
 use crate::{
     device::error::DeviceError, memory::error::MemoryError, resources::error::ResourceError,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub enum CollectionError {
-    GenCollection(GenCollectionError),
-    GuardCollection(GuardCollectionError),
-}
-
-impl Display for CollectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CollectionError::GenCollection(error) => write!(f, "{}", error),
-            CollectionError::GuardCollection(error) => write!(f, "{}", error),
-        }
-    }
-}
-
-impl Error for CollectionError {}
-
-impl From<GenCollectionError> for CollectionError {
-    #[inline]
-    fn from(error: GenCollectionError) -> Self {
-        CollectionError::GenCollection(error)
-    }
-}
-
-impl From<GuardCollectionError> for CollectionError {
-    #[inline]
-    fn from(error: GuardCollectionError) -> Self {
-        CollectionError::GuardCollection(error)
-    }
-}
+pub type SafeGuardError<T> = (DropGuard<TypeGuard<T>>, TypeGuardError);
 
 #[derive(Debug)]
 pub enum ExtError {
     Vulkan(vk::Result),
     Loading(LoadingError),
     Window(HandleError),
-    Collection(CollectionError),
+    Collection(GenCollectionError),
+    TypeGuard(TypeGuardError),
 }
 
 impl Display for ExtError {
@@ -60,6 +31,7 @@ impl Display for ExtError {
             ExtError::Loading(error) => write!(f, "{}", error),
             ExtError::Window(error) => write!(f, "{}", error),
             ExtError::Collection(error) => write!(f, "{}", error),
+            ExtError::TypeGuard(error) => write!(f, "{}", error),
         }
     }
 }
@@ -87,10 +59,17 @@ impl From<HandleError> for ExtError {
     }
 }
 
-impl<E: Into<CollectionError>> From<E> for ExtError {
+impl From<TypeGuardError> for ExtError {
     #[inline]
-    fn from(error: E) -> Self {
-        ExtError::Collection(error.into())
+    fn from(error: TypeGuardError) -> Self {
+        ExtError::TypeGuard(error)
+    }
+}
+
+impl From<GenCollectionError> for ExtError {
+    #[inline]
+    fn from(error: GenCollectionError) -> Self {
+        ExtError::Collection(error)
     }
 }
 
@@ -135,8 +114,6 @@ pub enum VkError {
     DeviceError(DeviceError),
     InstanceError(InstanceError),
     ExtError(ExtError),
-    // Temporary LockError handling, storing the PoisonError.to_string() to elide the lock Guard type
-    LockError(String),
 }
 
 impl Display for VkError {
@@ -144,7 +121,6 @@ impl Display for VkError {
         match self {
             VkError::MemoryError(error) => write!(f, "Allocator error: {}", error),
             VkError::ResourceError(error) => write!(f, "Resource error: {}", error),
-            VkError::LockError(error) => write!(f, "Lock error: {}", error),
             VkError::DeviceError(error) => write!(f, "Device error: {}", error),
             VkError::ExtError(error) => write!(f, "Ash error: {}", error),
             VkError::InstanceError(error) => write!(f, "Instance error: {}", error),
@@ -163,12 +139,6 @@ impl<E: Into<ExtError>> From<E> for VkError {
 impl From<InstanceError> for VkError {
     fn from(error: InstanceError) -> Self {
         VkError::InstanceError(error)
-    }
-}
-
-impl<T> From<sync::PoisonError<T>> for VkError {
-    fn from(error: sync::PoisonError<T>) -> Self {
-        VkError::LockError(error.to_string())
     }
 }
 

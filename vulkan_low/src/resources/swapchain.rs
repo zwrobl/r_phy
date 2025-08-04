@@ -1,7 +1,7 @@
 use ash::vk;
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData, ptr::NonNull};
 use type_kit::{
-    unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, FromGuard, GenCell,
+    unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GenCell,
     GenIndexRaw, TypeGuard,
 };
 
@@ -72,8 +72,10 @@ impl<C: RenderPassConfig> Resource for Swapchain<C> {
     type RawCollection = GenCell<TypeGuard<Self::RawType>>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::Swapchain { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Swapchain {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 

@@ -43,7 +43,7 @@ mod tests {
     use crate::{
         list_value,
         type_guard::test_types::{A, B},
-        unpack_list, Cons, FromGuard, Nil, TypeGuardConversionError,
+        unpack_list, Cons, FromGuard, Nil, TypeGuardError,
     };
 
     #[test]
@@ -89,7 +89,7 @@ mod tests {
         let a = A(42);
         let a_guard = a.into_guard();
         match B::try_from_guard(a_guard) {
-            Err((guard, TypeGuardConversionError { to, from })) => {
+            Err((guard, TypeGuardError { to, from })) => {
                 assert_eq!(to, b_type_name);
                 assert_eq!(from, a_type_name);
                 assert_eq!(guard.inner(), &42);
@@ -163,7 +163,7 @@ pub type Valid<T> = TypeGuardUnlocked<<T as FromGuard>::Inner, T>;
 pub type ValidRef<'a, T> = TypeGuardUnlockedRef<'a, <T as FromGuard>::Inner, T>;
 pub type ValidMut<'a, T> = TypeGuardUnlockedMut<'a, <T as FromGuard>::Inner, T>;
 pub type Guard<T> = TypeGuard<<T as FromGuard>::Inner>;
-pub type GuardError<T> = (TypeGuard<T>, TypeGuardConversionError);
+pub type GuardError<T> = (TypeGuard<T>, TypeGuardError);
 pub type GuardResult<T> = Result<T, GuardError<<T as FromGuard>::Inner>>;
 
 pub trait FromGuard: 'static + Sized {
@@ -183,7 +183,7 @@ pub trait FromGuard: 'static + Sized {
     }
 
     #[inline]
-    fn check_type(value: &Guard<Self>) -> Result<(), TypeGuardConversionError> {
+    fn check_type(value: &Guard<Self>) -> Result<(), TypeGuardError> {
         value.check_type::<Self>()
     }
 
@@ -201,12 +201,12 @@ impl<T: FromGuard> Valid<T> {
 }
 
 pub trait IntoOuter<T>: Sized {
-    fn try_into_outer(self) -> Result<T, (Self, TypeGuardConversionError)>;
+    fn try_into_outer(self) -> Result<T, (Self, TypeGuardError)>;
 }
 
 impl<T: FromGuard> IntoOuter<T> for Guard<T> {
     #[inline]
-    fn try_into_outer(self) -> Result<T, (Self, TypeGuardConversionError)> {
+    fn try_into_outer(self) -> Result<T, (Self, TypeGuardError)> {
         T::try_from_guard(self)
     }
 }
@@ -236,7 +236,7 @@ impl<T: FromGuard> Conv<T> {
 }
 
 impl<T: FromGuard> TryFrom<Guard<T>> for Conv<T> {
-    type Error = (Guard<T>, TypeGuardConversionError);
+    type Error = (Guard<T>, TypeGuardError);
 
     fn try_from(value: Guard<T>) -> Result<Self, Self::Error> {
         let unlocked: Valid<T> = value.try_into()?;
@@ -284,9 +284,9 @@ impl GuardType {
 #[cfg(debug_assertions)]
 impl GuardType {
     #[inline]
-    fn check_type<U: 'static>(&self) -> Result<(), TypeGuardConversionError> {
+    fn check_type<U: 'static>(&self) -> Result<(), TypeGuardError> {
         if TypeId::of::<U>() != self.type_id {
-            return Err(TypeGuardConversionError {
+            return Err(TypeGuardError {
                 to: type_name::<U>(),
                 from: self.type_name,
             });
@@ -387,7 +387,7 @@ impl<I> TypeGuard<I> {
     }
 
     #[inline]
-    pub fn check_type<F: FromGuard<Inner = I>>(&self) -> Result<(), TypeGuardConversionError> {
+    pub fn check_type<F: FromGuard<Inner = I>>(&self) -> Result<(), TypeGuardError> {
         #[cfg(debug_assertions)]
         self.guard_type.check_type::<F>()?;
         Ok(())
@@ -408,7 +408,7 @@ impl<T, U: 'static> TypeGuardUnlocked<T, U> {
 }
 
 impl<T, U> TryFrom<TypeGuard<T>> for TypeGuardUnlocked<T, U> {
-    type Error = (TypeGuard<T>, TypeGuardConversionError);
+    type Error = (TypeGuard<T>, TypeGuardError);
 
     #[inline]
     fn try_from(value: TypeGuard<T>) -> Result<Self, Self::Error> {
@@ -439,7 +439,7 @@ impl<'a, T, U: 'static> TypeGuardUnlockedRef<'a, T, U> {
 }
 
 impl<'a, T, U> TryFrom<&'a TypeGuard<T>> for TypeGuardUnlockedRef<'a, T, U> {
-    type Error = TypeGuardConversionError;
+    type Error = TypeGuardError;
 
     #[inline]
     fn try_from(value: &'a TypeGuard<T>) -> Result<Self, Self::Error> {
@@ -471,7 +471,7 @@ impl<'a, T, U: 'static> TypeGuardUnlockedMut<'a, T, U> {
 }
 
 impl<'a, T, U> TryFrom<&'a mut TypeGuard<T>> for TypeGuardUnlockedMut<'a, T, U> {
-    type Error = TypeGuardConversionError;
+    type Error = TypeGuardError;
 
     #[inline]
     fn try_from(value: &'a mut TypeGuard<T>) -> Result<Self, Self::Error> {
@@ -485,12 +485,12 @@ impl<'a, T, U> TryFrom<&'a mut TypeGuard<T>> for TypeGuardUnlockedMut<'a, T, U> 
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct TypeGuardConversionError {
+pub struct TypeGuardError {
     to: &'static str,
     from: &'static str,
 }
 
-impl Display for TypeGuardConversionError {
+impl Display for TypeGuardError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -500,7 +500,7 @@ impl Display for TypeGuardConversionError {
     }
 }
 
-impl Error for TypeGuardConversionError {}
+impl Error for TypeGuardError {}
 
 impl<T: Destroy> Destroy for TypeGuard<T> {
     type Context<'a> = T::Context<'a>;
@@ -546,7 +546,7 @@ impl<T: FromGuard, N: FromGuard> FromGuard for Cons<T, N> {
     }
 }
 
-pub type GuardListResult<T, L> = Result<T, (L, TypeGuardConversionError)>;
+pub type GuardListResult<T, L> = Result<T, (L, TypeGuardError)>;
 
 pub trait GuardList: Sized {
     type Guard;

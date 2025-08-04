@@ -1,6 +1,6 @@
 use ash::{self, vk};
 use bytemuck::{bytes_of, Pod};
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, GuardVec};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
     error::ExtResult,
@@ -457,8 +457,10 @@ impl<L: Level, O: Operation> Resource for PersistentCommandPool<L, O> {
     type RawCollection = GuardVec<Self::RawType>;
 
     #[inline]
-    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
-        ResourceError::GuardError(GuardError::PersistentCommandPool { error })
+    fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::PersistentCommandPool {
+            error: (DropGuard::new(resource), err),
+        })
     }
 }
 
