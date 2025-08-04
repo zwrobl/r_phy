@@ -1462,18 +1462,12 @@ pub struct BorrowedContext<C: 'static, B: BorrowList<C>> {
 
 impl<C: 'static, B: BorrowList<C>> BorrowedContext<C, B> {
     #[inline]
-    pub fn operate_ref<R, E, F: FnOnce(B::InnerRef<'_>) -> Result<R, E>>(
-        &self,
-        operation: F,
-    ) -> Result<R, E> {
+    pub fn operate_ref<R, F: FnOnce(B::InnerRef<'_>) -> R>(&self, operation: F) -> R {
         operation(self.borrow.as_ref().unwrap().inner_ref())
     }
 
     #[inline]
-    pub fn operate_mut<R, E, F: FnOnce(B::InnerMut<'_>) -> Result<R, E>>(
-        &mut self,
-        operation: F,
-    ) -> Result<R, E> {
+    pub fn operate_mut<R, F: FnOnce(B::InnerMut<'_>) -> R>(&mut self, operation: F) -> R {
         operation(self.borrow.as_mut().unwrap().inner_mut())
     }
 }
@@ -1557,8 +1551,6 @@ impl<T: TypeList> GenCollectionList<T> {
 
 #[cfg(test)]
 mod test_list_index {
-    use std::convert::Infallible;
-
     use super::*;
     use crate::{list_type, list_value, unpack_list, Cons, GenIndex, IndexList, Nil};
 
@@ -1739,30 +1731,27 @@ mod test_list_index {
         let index_list = mark![TestCopyCollection, index_u8, index_u16, index_u32];
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ = context.operate_ref::<_, Infallible, _>(|borrow| {
+            context.operate_ref(|borrow| {
                 let unpack_list![b_u8, b_u16, b_u32] = borrow;
                 assert_eq!(*b_u8, 8);
                 assert_eq!(*b_u16, 16);
                 assert_eq!(*b_u32, 32);
-                Ok(())
             });
-            let _ = context.operate_mut::<_, bool, _>(|borrow| {
+            context.operate_mut(|borrow| {
                 let unpack_list![b_u8, b_u16, b_u32] = borrow;
                 *b_u8 = 7;
                 *b_u16 = 15;
                 *b_u32 = 31;
-                Ok(())
             });
             assert!(context.destroy(&mut collection).is_ok());
         }
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ = context.operate_ref::<_, bool, _>(|borrow| {
+            context.operate_ref(|borrow| {
                 let unpack_list![b_u8, b_u16, b_u32] = borrow;
                 assert_eq!(*b_u8, 7);
                 assert_eq!(*b_u16, 15);
                 assert_eq!(*b_u32, 31);
-                Ok(())
             });
             assert!(context.destroy(&mut collection).is_ok());
         }
@@ -1934,8 +1923,6 @@ where
 
 #[cfg(test)]
 mod test_type_guard_borrow_list {
-    use std::convert::Infallible;
-
     use super::*;
 
     use crate::{
@@ -1992,31 +1979,28 @@ mod test_type_guard_borrow_list {
         let index_list = mark![TestTypeGuardCollection, index_a, index_b];
         {
             let mut borrow = collection.get_borrow(index_list).unwrap();
-            let _ = borrow.operate_ref::<_, Infallible, _>(|borrow| {
+            let _ = borrow.operate_ref(|borrow| {
                 let unpack_list![b_a, b_b] = borrow;
                 assert_eq!(b_a.0, 42);
                 assert_eq!(b_b.0, 31);
-                Ok(())
             });
             assert!(borrow.destroy(&mut collection).is_ok());
         }
         {
             let mut borrow = collection.get_borrow(index_list).unwrap();
-            let _ = borrow.operate_mut::<_, Infallible, _>(|borrow| {
+            let _ = borrow.operate_mut(|borrow| {
                 let unpack_list![b_a, b_b] = borrow;
                 b_a.0 = 41;
                 b_b.0 = 30;
-                Ok(())
             });
             assert!(borrow.destroy(&mut collection).is_ok());
         }
         {
             let mut borrow = collection.get_borrow(index_list).unwrap();
-            let _ = borrow.operate_ref::<_, Infallible, _>(|borrow| {
+            let _ = borrow.operate_ref(|borrow| {
                 let unpack_list![b_a, b_b] = borrow;
                 assert_eq!(b_a.0, 41);
                 assert_eq!(b_b.0, 30);
-                Ok(())
             });
             assert!(borrow.destroy(&mut collection).is_ok());
         }
@@ -2196,8 +2180,6 @@ impl<T: Destroy> Destroy for GenCell<T> {
 
 #[cfg(test)]
 mod test_mixed_collection_types {
-    use std::convert::Infallible;
-
     use super::*;
 
     use crate::{list_type, unpack_list, Cons, Nil};
@@ -2238,28 +2220,25 @@ mod test_mixed_collection_types {
         let index_list = mark![TestCollectionListType, index_a, index_b];
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ = context.operate_ref::<_, Infallible, _>(|unpack_list![item_a, item_b]| {
+            context.operate_ref(|unpack_list![item_a, item_b]| {
                 assert_eq!(*item_a, 42);
                 assert_eq!(*item_b, 42);
-                Ok(())
             });
             assert!(context.destroy(&mut collection).is_ok());
         }
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ = context.operate_mut::<_, Infallible, _>(|unpack_list![item_a, item_b]| {
+            context.operate_mut(|unpack_list![item_a, item_b]| {
                 *item_a = 31;
                 *item_b = 40;
-                Ok(())
             });
             assert!(context.destroy(&mut collection).is_ok());
         }
         {
             let mut context = collection.get_borrow(index_list).unwrap();
-            let _ = context.operate_ref::<_, Infallible, _>(|unpack_list![item_a, item_b]| {
+            context.operate_ref(|unpack_list![item_a, item_b]| {
                 assert_eq!(*item_a, 31);
                 assert_eq!(*item_b, 40);
-                Ok(())
             });
             assert!(context.destroy(&mut collection).is_ok());
         }

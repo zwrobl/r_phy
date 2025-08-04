@@ -336,7 +336,7 @@ impl SwapchainFramebufferConfigBuilder<DeferedRenderPass<AttachmentsGBuffer>> fo
                     self.depth
                 ],
                 |unpack_list![depth, position, normal, albedo, combined]| {
-                    let builder = FramebufferBuilder::new(
+                    FramebufferBuilder::new(
                         extent,
                         AttachmentsBuilder::new()
                             .push(swapchain_image)
@@ -345,11 +345,9 @@ impl SwapchainFramebufferConfigBuilder<DeferedRenderPass<AttachmentsGBuffer>> fo
                             .push(normal.get_image_view())
                             .push(albedo.get_image_view())
                             .push(combined.get_image_view()),
-                    );
-                    Result::<_, Infallible>::Ok(builder)
+                    )
                 },
             )
-            .unwrap()
             .unwrap()
     }
 }
@@ -401,15 +399,10 @@ impl Create for DeferredRendererFrameData {
         let swapchain = context
             .create_resource::<Swapchain<DeferedRenderPass<AttachmentsGBuffer>>, _>(&g_buffer)?;
         let (framebuffer_index, num_frames) = {
-            context
-                .operate_ref(index_list![swapchain], |unpack_list![swapchain]| {
-                    let swapchain: &Swapchain<DeferedRenderPass<AttachmentsGBuffer>> = swapchain;
-                    Result::<_, Infallible>::Ok((
-                        swapchain.get_framebuffer_index(0),
-                        swapchain.num_images,
-                    ))
-                })?
-                .unwrap()
+            context.operate_ref(index_list![swapchain], |unpack_list![swapchain]| {
+                let swapchain: &Swapchain<DeferedRenderPass<AttachmentsGBuffer>> = swapchain;
+                (swapchain.get_framebuffer_index(0), swapchain.num_images)
+            })?
         };
         let descriptors = {
             context.operate_ref(
@@ -549,7 +542,7 @@ impl Create for DeferredRenderer {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let (DeferredRendererPartial { g_buffer, skybox }, allocator) = config;
-        let render_pass = context.get_or_create_unique_resource()?;
+        let render_pass = context.get_unique_resource()?;
         let frame_data = DeferredRendererFrameData::create((g_buffer, allocator), context)?;
         let resources = DeferredRendererResources::create((skybox, allocator), context)?;
         Ok(DeferredRenderer {

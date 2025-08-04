@@ -101,14 +101,13 @@ impl<T: GraphicsPipelineConfig> Create for GraphicsPipeline<T> {
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
         let modules = config;
-        let layout = context.get_or_create_unique_resource::<PipelineLayout<T::Layout>, _>()?;
+        let layout = context.get_unique_resource::<PipelineLayout<T::Layout>, _>()?;
         let extent = context
             .physical_device
             .surface_properties
             .get_current_extent();
         let layout = layout.into();
-        let render_pass =
-            context.get_or_create_unique_resource::<RenderPass<T::RenderPass>, _>()?;
+        let render_pass = context.get_unique_resource::<RenderPass<T::RenderPass>, _>()?;
         let states = get_pipeline_states_info::<T::Attachments, T::Subpass, T::PipelineStates>(
             &context.physical_device,
             extent,

@@ -146,15 +146,10 @@ impl<M: Material> MaterialPackRef<M> {
         context: &Context,
         index: u32,
     ) -> ResourceResult<Descriptor<M::DescriptorLayout>> {
-        context
-            .operate_ref(
-                index_list![self.descriptors],
-                |unpack_list![material_descriptor]| {
-                    let descriptor = material_descriptor.get(index as usize);
-                    Result::<_, Infallible>::Ok(descriptor)
-                },
-            )
-            .map(|result| result.unwrap())
+        context.operate_ref(
+            index_list![self.descriptors],
+            |unpack_list![material_descriptor]| material_descriptor.get(index as usize),
+        )
     }
 }
 
@@ -225,17 +220,14 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
 ) -> Result<ResourceIndex<PackUniform<M>>, Box<dyn Error>> {
     let MaterialUniformPartial { uniform, data } = partial;
     let uniform_buffer = context.create_resource::<PackUniform<M>, _>((uniform, allocator))?;
-    context
-        .operate_mut(
-            index_list![uniform_buffer],
-            |unpack_list![uniform_buffer]| {
-                for (index, uniform) in data.into_iter().enumerate() {
-                    *uniform_buffer[index].as_inner_mut() = *uniform;
-                }
-                Result::<_, Infallible>::Ok(())
-            },
-        )?
-        .unwrap();
+    context.operate_mut(
+        index_list![uniform_buffer],
+        |unpack_list![uniform_buffer]| {
+            for (index, uniform) in data.into_iter().enumerate() {
+                *uniform_buffer[index].as_inner_mut() = *uniform;
+            }
+        },
+    )?;
     Ok(uniform_buffer)
 }
 
@@ -284,9 +276,8 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
                 context
                     .operate_ref(index_list![texture], |unpack_list![texture]| {
                         let image_info: DescriptorImageInfo = texture.into();
-                        Result::<_, Infallible>::Ok(image_info)
+                        image_info
                     })
-                    .unwrap()
                     .unwrap()
             })
             .collect::<Vec<_>>();
@@ -297,9 +288,8 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
     let writer = if let Some(uniforms) = &uniforms {
         context
             .operate_ref(index_list![*uniforms], |unpack_list![uniforms]| {
-                Result::<_, Infallible>::Ok(writer.write_buffer(uniforms))
+                writer.write_buffer(uniforms)
             })
-            .unwrap()
             .unwrap()
     } else {
         writer

@@ -397,7 +397,7 @@ impl Context {
         if !T::exhausted() {
             if let Some(entry) = iter.next() {
                 *entry = self
-                    .get_or_create_unique_resource::<DescriptorSetLayout<T::Item>, _>()?
+                    .get_unique_resource::<DescriptorSetLayout<T::Item>, _>()?
                     .layout;
             }
             self.get_descriptor_list_entry::<T::Next>(iter)

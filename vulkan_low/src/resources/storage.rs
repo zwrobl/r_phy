@@ -112,11 +112,11 @@ impl ResourceStorage {
     }
 
     #[inline]
-    pub fn operate_ref<I: ResourceIndexList, R, E, F: FnOnce(BorrowRef<'_, I>) -> Result<R, E>>(
+    pub fn operate_ref<I: ResourceIndexList, R, F: FnOnce(BorrowRef<'_, I>) -> R>(
         &self,
         index: I,
         f: F,
-    ) -> ResourceResult<Result<R, E>> {
+    ) -> ResourceResult<R> {
         let index_list = index.into_index_list();
         let borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(borrowed.inner_ref());
@@ -125,11 +125,11 @@ impl ResourceStorage {
     }
 
     #[inline]
-    pub fn operate_mut<I: ResourceIndexList, R, E, F: FnOnce(BorrowMut<'_, I>) -> Result<R, E>>(
+    pub fn operate_mut<I: ResourceIndexList, R, F: FnOnce(BorrowMut<'_, I>) -> R>(
         &self,
         index: I,
         f: F,
-    ) -> ResourceResult<Result<R, E>> {
+    ) -> ResourceResult<R> {
         let index_list = index.into_index_list();
         let mut borrowed = index_list.get_borrowed(&mut self.storage.borrow_mut())?;
         let result = f(borrowed.inner_mut());
@@ -308,44 +308,32 @@ impl TypeUniqueResourceStorage {
     }
 
     #[inline]
-    pub fn get_type_unique_resource<R: TypeUniqueResource, M: Marker>(&self) -> Option<R>
-    where
-        TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
-    {
-        self.storage.borrow().get().get::<R>()
-    }
-
-    #[inline]
-    pub fn create_type_unique_resource<R: TypeUniqueResource, M: Marker>(
+    pub fn get_resource<R: TypeUniqueResource, M: Marker>(
         &self,
         context: &Context,
     ) -> ResourceResult<R>
     where
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
-        let item = R::create((), context)?;
-        self.storage.borrow_mut().get_mut().insert(item);
+        // TODO: This function tehnically allows for cloning the resource
+        // even if it is not Clone, as the RawType is Clone + Copy
+        // and the R is retrieved using this conversion
+        // Should All TypeUniqueResources also be Clone + Copy?
+        // TransientcommandPool is used as TypeUniqueResource and
+        // access to it should be synchronized,
+        // hence it is not safe for it to be Clone + Copy
+        // Consider current resource management design in the context of
+        // multithreaded access (should each thread maintain its own storage?).
+        let in_storage = self.storage.borrow().get().contains::<R>();
+        if !in_storage {
+            let item = R::create((), context)?;
+            self.storage.borrow_mut().get_mut().insert(item);
+        }
         Ok(self.storage.borrow().get().get::<R>().unwrap())
     }
 
     #[inline]
-    pub fn get_or_create_type_unique_resource<R: TypeUniqueResource, M: Marker>(
-        &self,
-        context: &Context,
-    ) -> ResourceResult<R>
-    where
-        TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
-    {
-        let item = self.storage.borrow().get().get::<R>();
-        if let Some(value) = item {
-            Ok(value)
-        } else {
-            self.create_type_unique_resource(context)
-        }
-    }
-
-    #[inline]
-    pub fn destroy_type_unique_resource<R: TypeUniqueResource, M: Marker>(
+    pub fn destroy_resource<R: TypeUniqueResource, M: Marker>(
         &self,
         context: &Context,
     ) -> ResourceResult<()>
@@ -358,7 +346,7 @@ impl TypeUniqueResourceStorage {
     }
 
     #[inline]
-    fn destroy_type_unique_resource_storage<R, M: Marker>(
+    fn destroy_resource_storage<R, M: Marker>(
         &self,
         context: &Context,
     ) -> Result<(), CollectionDestroyError<R>>
@@ -371,10 +359,10 @@ impl TypeUniqueResourceStorage {
 
     #[inline]
     pub fn destroy_storage(&self, context: &Context) -> Result<(), Infallible> {
-        let _ = self.destroy_type_unique_resource_storage::<RenderPassRaw, _>(context);
-        let _ = self.destroy_type_unique_resource_storage::<PipelineLayoutRaw, _>(context);
-        let _ = self.destroy_type_unique_resource_storage::<DescriptorSetLayoutRaw, _>(context);
-        let _ = self.destroy_type_unique_resource_storage::<TransientCommandPoolRaw, _>(context);
+        let _ = self.destroy_resource_storage::<RenderPassRaw, _>(context);
+        let _ = self.destroy_resource_storage::<PipelineLayoutRaw, _>(context);
+        let _ = self.destroy_resource_storage::<DescriptorSetLayoutRaw, _>(context);
+        let _ = self.destroy_resource_storage::<TransientCommandPoolRaw, _>(context);
         Ok(())
     }
 }

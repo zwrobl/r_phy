@@ -201,7 +201,7 @@ impl<L: DescriptorLayout> Create for DescriptorPool<L> {
                 .device
                 .create_descriptor_pool(&pool_create_info, None)?
         };
-        let layout = context.get_or_create_unique_resource::<DescriptorSetLayout<L>, _>()?;
+        let layout = context.get_unique_resource::<DescriptorSetLayout<L>, _>()?;
         let sets = unsafe {
             context.device.allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::builder()

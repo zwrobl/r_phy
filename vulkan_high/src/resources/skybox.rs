@@ -134,10 +134,8 @@ pub fn draw_skybox<
                     .bind_pipeline(pipeline.get_binding_data())
                     .bind_descriptor_set(&descriptor.get(0).get_binding_data(pipeline).unwrap())
                     .push_constants(pipeline.get_push_range(&camera_matrices));
-                let command = common_meshes.draw(context, command, CommonMesh::Cube);
-                Result::<_, Infallible>::Ok(command)
+                common_meshes.draw(context, command, CommonMesh::Cube)
             },
         )
-        .unwrap()
         .unwrap()
 }

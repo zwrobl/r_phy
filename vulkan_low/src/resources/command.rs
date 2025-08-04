@@ -409,7 +409,7 @@ pub mod operation {
         }
         fn get_transient_command_pool(context: &Context) -> TransientCommandPool<Self> {
             context
-                .get_or_create_unique_resource::<TransientCommandPool<Self>, _>()
+                .get_unique_resource::<TransientCommandPool<Self>, _>()
                 .unwrap()
         }
     }
@@ -422,7 +422,7 @@ pub mod operation {
         }
         fn get_transient_command_pool(context: &Context) -> TransientCommandPool<Self> {
             context
-                .get_or_create_unique_resource::<TransientCommandPool<Self>, _>()
+                .get_unique_resource::<TransientCommandPool<Self>, _>()
                 .unwrap()
         }
     }
@@ -435,7 +435,7 @@ pub mod operation {
         }
         fn get_transient_command_pool(context: &Context) -> TransientCommandPool<Self> {
             context
-                .get_or_create_unique_resource::<TransientCommandPool<Self>, _>()
+                .get_unique_resource::<TransientCommandPool<Self>, _>()
                 .unwrap()
         }
     }

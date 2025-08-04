@@ -880,7 +880,7 @@ impl<C: RenderPassConfig> Create for Framebuffer<C> {
             extent,
             attachments,
         } = config;
-        let render_pass = context.get_or_create_unique_resource::<RenderPass<C>, _>()?;
+        let render_pass = context.get_unique_resource::<RenderPass<C>, _>()?;
         let attachments = attachments.get_attachments().into_boxed_slice();
         let create_info = vk::FramebufferCreateInfo::builder()
             .attachments(&attachments)

@@ -282,13 +282,11 @@ impl Context {
     }
 
     #[inline]
-    pub fn get_or_create_unique_resource<R: TypeUniqueResource, M: Marker>(
-        &self,
-    ) -> ResourceResult<R>
+    pub fn get_unique_resource<R: TypeUniqueResource, M: Marker>(&self) -> ResourceResult<R>
     where
         TypeUniqueResourceStorageList: Contains<TypeUniqueRawCollection<R>, M>,
     {
-        self.unique_storage.get_or_create_type_unique_resource(self)
+        self.unique_storage.get_resource(self)
     }
 
     #[inline]
@@ -340,20 +338,20 @@ impl Context {
     }
 
     #[inline]
-    pub fn operate_ref<I: ResourceIndexList, R, E, F: FnOnce(BorrowRef<'_, I>) -> Result<R, E>>(
+    pub fn operate_ref<I: ResourceIndexList, R, F: FnOnce(BorrowRef<'_, I>) -> R>(
         &self,
         index: I,
         f: F,
-    ) -> ResourceResult<Result<R, E>> {
+    ) -> ResourceResult<R> {
         self.storage.operate_ref(index, f)
     }
 
     #[inline]
-    pub fn operate_mut<I: ResourceIndexList, R, E, F: FnOnce(BorrowMut<'_, I>) -> Result<R, E>>(
+    pub fn operate_mut<I: ResourceIndexList, R, F: FnOnce(BorrowMut<'_, I>) -> R>(
         &self,
         index: I,
         f: F,
-    ) -> ResourceResult<Result<R, E>> {
+    ) -> ResourceResult<R> {
         self.storage.operate_mut(index, f)
     }
 }

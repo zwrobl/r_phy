@@ -5,7 +5,7 @@ pub use list::*;
 pub use pack::*;
 use type_kit::{unpack_list, Cons, DropGuard};
 
-use std::{convert::Infallible, ops::Index};
+use std::ops::Index;
 
 use strum::EnumCount;
 
@@ -121,7 +121,7 @@ pub fn bind_mesh_pack<'a, T, L: Level, O: Operation>(
     let pack = pack.into();
     context
         .operate_ref(index_list![pack.buffer], |unpack_list![buffer]| {
-            let command = command
+            command
                 .bind_index_buffer(
                     BufferBinding {
                         buffer: buffer.get_vk_buffer(),
@@ -132,9 +132,7 @@ pub fn bind_mesh_pack<'a, T, L: Level, O: Operation>(
                 .bind_vertex_buffer(BufferBinding {
                     buffer: buffer.get_vk_buffer(),
                     range: pack.buffer_ranges[BufferType::Vertex],
-                });
-            Result::<_, Infallible>::Ok(command)
+                })
         })
-        .unwrap()
         .unwrap()
 }

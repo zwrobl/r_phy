@@ -45,6 +45,11 @@ impl<T> TypeMap<T> {
     pub fn insert<I: FromGuard<Inner = T>>(&mut self, item: I) {
         self.data.insert(TypeId::of::<I>(), item.into_inner());
     }
+
+    #[inline]
+    pub fn contains<I: FromGuard<Inner = T>>(&self) -> bool {
+        self.data.contains_key(&TypeId::of::<I>())
+    }
 }
 
 impl<T: Copy + Clone> TypeMap<T> {

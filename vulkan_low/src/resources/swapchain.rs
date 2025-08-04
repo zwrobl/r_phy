@@ -120,15 +120,10 @@ impl Context {
         swapchain: &Swapchain<C>,
         index: usize,
     ) -> ResourceResult<FramebufferHandle<C>> {
-        let handle = self
-            .operate_ref(
-                index_list![swapchain.get_framebuffer_index(index)],
-                |unpack_list![framebuffer]| {
-                    let handle: FramebufferHandle<C> = framebuffer.into();
-                    Result::<_, Infallible>::Ok(handle)
-                },
-            )
-            .map(|handle| handle.unwrap())?;
+        let handle = self.operate_ref(
+            index_list![swapchain.get_framebuffer_index(index)],
+            |unpack_list![framebuffer]| framebuffer.into(),
+        )?;
         Ok(handle)
     }
 

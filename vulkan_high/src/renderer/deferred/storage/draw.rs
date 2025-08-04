@@ -1,7 +1,6 @@
 use std::{
     any::TypeId,
     collections::{hash_map::Values, HashMap},
-    convert::Infallible,
     error::Error,
     hash::Hash,
     marker::PhantomData,
@@ -302,9 +301,8 @@ impl DrawStorage {
             .operate_ref(index_list![pipeline], |unpack_list![pipeline]| {
                 let binding = pipeline.get_binding_data();
                 let mapper = PushConstantRangeMapper::new(pipeline);
-                Result::<_, Infallible>::Ok((binding, mapper))
+                (binding, mapper)
             })
-            .unwrap()
             .unwrap();
         let pipeline_state = PipelineState {
             pipeline_bind_data,
@@ -382,7 +380,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
             .operate_ref(
                 index_list![self.pipelines.depth_prepass],
                 |unpack_list![pipeline]| {
-                    let command = draw_graph
+                    draw_graph
                         .into_iter()
                         .fold(
                             context.start_recording(depth_prepass),
@@ -415,13 +413,11 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                                 )
                             },
                         )
-                        .stop_recording();
-                    Result::<_, Infallible>::Ok(command)
+                        .stop_recording()
                 },
             )
-            .unwrap()
             .unwrap();
-        let _ = context.operate_mut(
+        context.operate_mut(
             index_list![self.frames.secondary_commands],
             |unpack_list![secondary_commands]| {
                 draw_graph.into_iter().for_each(|pipeline_state| {
@@ -467,9 +463,8 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                         .stop_recording();
                     write_pass.push(command);
                 });
-                Result::<_, Infallible>::Ok(())
             },
-        );
+        )?;
         Ok(CommandStorage {
             depth_prepass,
             write_pass,
