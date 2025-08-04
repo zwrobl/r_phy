@@ -11,7 +11,7 @@ use crate::{
     memory::{
         allocator::{
             AllocReq, AllocationBorrow, AllocationStore, Allocator, AllocatorBuilder,
-            AllocatorIndex, AllocatorIndexTyped, MemoryIndex,
+            AllocatorIndex, AllocatorIndexTyped, MemoryIndex, NoReleaseRange,
         },
         range::ByteRange,
         AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
@@ -44,7 +44,7 @@ impl<M: MemoryProperties> LinearBuffer<M> {
     fn allocate(
         &mut self,
         req: AllocReqTyped<M>,
-        store: &mut AllocationStore,
+        store: &mut AllocationStore<NoReleaseRange>,
     ) -> ResourceResult<AllocationIndexTyped<M>> {
         store.suballocate(req, self.memory)
     }
@@ -60,7 +60,7 @@ impl<M: MemoryProperties> LinearBufferBuilder<M> {
     fn try_build(
         self,
         context: &Context,
-        storage: &mut AllocationStore,
+        storage: &mut AllocationStore<NoReleaseRange>,
     ) -> ResourceResult<Option<LinearBuffer<M>>> {
         if !self.info.range.is_empty() && self.info.memory_type_bits != 0 {
             let req = M::alloc_req_typed(vk::MemoryRequirements {
@@ -155,7 +155,7 @@ type Buffers = list_type![
 #[derive(Debug)]
 pub struct Static {
     buffers: Buffers,
-    store: AllocationStore,
+    store: AllocationStore<NoReleaseRange>,
 }
 
 impl Create for Static {

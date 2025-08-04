@@ -8,10 +8,7 @@ use type_kit::{Create, Destroy, DestroyResult, FromGuard};
 
 use crate::{
     error::{AllocatorError, AllocatorResult, ResourceError, VkResult},
-    memory::{
-        allocator::{AllocationIndex, AllocationIndexTyped},
-        range::ByteRange,
-    },
+    memory::allocator::{AllocationIndex, AllocationIndexTyped},
     Context,
 };
 
@@ -235,7 +232,6 @@ impl Context {
 pub struct MemoryRaw {
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
-    range: ByteRange,
     _type_index: u32,
     // Extract map functionallity to dedicated helper structure, to be used wrapped in Optional here,
     // Optional<MemoryMapper> to be returned by type function provided by MemoryProperties trait
@@ -262,7 +258,6 @@ impl<M: MemoryProperties> Create for Memory<M> {
             memory: MemoryRaw {
                 memory: unsafe { context.allocate_memory(&info, None)? },
                 size: info.allocation_size,
-                range: ByteRange::new(info.allocation_size as usize),
                 _type_index: info.memory_type_index,
                 ptr: None,
                 map_count: 0,
@@ -275,8 +270,8 @@ impl<M: MemoryProperties> Create for Memory<M> {
 
 impl<M: MemoryProperties> Memory<M> {
     #[inline]
-    pub fn suballocate(&mut self, size: usize, alignment: usize) -> Option<ByteRange> {
-        self.memory.range.alloc_raw(size, alignment)
+    pub fn size(&self) -> usize {
+        self.memory.size as usize
     }
 
     pub fn map(&mut self, context: &Context) -> VkResult<*mut c_void> {

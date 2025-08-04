@@ -5,7 +5,9 @@ use type_kit::{Create, Destroy, DestroyResult, GenCell};
 use crate::{
     error::{ResourceError, ResourceResult},
     memory::{
-        allocator::{AllocationBorrow, AllocationStore, AllocatorIndex, AllocatorIndexTyped},
+        allocator::{
+            AllocationBorrow, AllocationStore, AllocatorIndex, AllocatorIndexTyped, NoReleaseRange,
+        },
         AllocReqTyped, MemoryProperties,
     },
     Context,
@@ -15,7 +17,7 @@ use super::{AllocationIndexTyped, Allocator};
 
 #[derive(Debug)]
 pub struct Unpooled {
-    store: AllocationStore,
+    store: AllocationStore<NoReleaseRange>,
 }
 
 impl Default for Unpooled {

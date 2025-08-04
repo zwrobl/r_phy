@@ -1,55 +1,147 @@
-use std::{collections::HashMap, convert::Infallible};
+use std::{collections::HashMap, convert::Infallible, fmt::Debug};
 
 use type_kit::{
-    BorrowedGuard, Create, Destroy, DestroyResult, DropGuard, FromGuard, GenCollection, TypeGuard,
-    TypeGuardVec,
+    Create, Destroy, DestroyResult, DropGuard, FromGuard, GenCollection, TypeGuard, TypeGuardVec,
 };
 
 use crate::{
-    error::{AllocatorError, ResourceError, ResourceResult},
+    error::{AllocatorError, AllocatorResult, ResourceResult},
     memory::{
         allocator::{
             Allocation, AllocationBorrow, AllocationIndexTyped, AllocationRaw, MemoryIndex,
             MemoryIndexRaw,
         },
+        range::ByteRange,
         AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties, MemoryRaw,
     },
     Context,
 };
 
-#[derive(Debug, Default)]
-struct MemoryMap {
-    usage: HashMap<TypeGuard<MemoryIndexRaw>, usize>,
-    memory: TypeGuardVec<MemoryRaw>,
+pub trait MemoryRange: Debug + From<ByteRange> {
+    fn try_alloc<M: MemoryProperties>(&mut self, req: &AllocReqTyped<M>) -> Option<ByteRange>;
+    fn dealloc(&mut self, _range: ByteRange);
+    fn is_empty(&self) -> bool;
 }
 
-impl MemoryMap {
+#[derive(Debug, Clone, Copy)]
+pub struct NoReleaseRange {
+    range: ByteRange,
+    count: usize,
+}
+
+impl NoReleaseRange {
+    fn new(range: ByteRange) -> Self {
+        Self { range, count: 0 }
+    }
+}
+
+impl From<ByteRange> for NoReleaseRange {
     #[inline]
-    fn new() -> Self {
-        Self::default()
+    fn from(value: ByteRange) -> Self {
+        Self::new(value)
+    }
+}
+
+impl MemoryRange for NoReleaseRange {
+    #[inline]
+    fn try_alloc<M: MemoryProperties>(&mut self, req: &AllocReqTyped<M>) -> Option<ByteRange> {
+        let req = req.requirements();
+        if let Some(range) = self
+            .range
+            .alloc_raw(req.size as usize, req.alignment as usize)
+        {
+            self.count += 1;
+            Some(range)
+        } else {
+            None
+        }
     }
 
     #[inline]
-    fn register<M: MemoryProperties>(&mut self, allocation: &Allocation<M>) {
-        let memory = allocation.memory.into_guard();
-        *self.usage.entry(memory).or_default() += 1;
+    fn dealloc(&mut self, _range: ByteRange) {
+        self.count = self.count.saturating_sub(1);
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+}
+
+#[derive(Debug)]
+struct MemoryMap<R: MemoryRange> {
+    usage: HashMap<TypeGuard<MemoryIndexRaw>, R>,
+    memory: TypeGuardVec<MemoryRaw>,
+}
+
+impl<R: MemoryRange> Default for MemoryMap<R> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<R: MemoryRange> MemoryMap<R> {
+    #[inline]
+    fn new() -> Self {
+        Self {
+            usage: HashMap::default(),
+            memory: TypeGuardVec::default(),
+        }
+    }
+
+    fn get_usage<M: MemoryProperties>(
+        &mut self,
+        memory: MemoryIndex<M>,
+    ) -> AllocatorResult<&mut R> {
+        self.usage
+            .get_mut(&memory.into_guard())
+            .ok_or(AllocatorError::InvalidAllocationIndex)
+    }
+
+    fn pop_usage<M: MemoryProperties>(&mut self, memory: MemoryIndex<M>) -> AllocatorResult<R> {
+        self.usage
+            .remove(&memory.into_guard())
+            .ok_or(AllocatorError::InvalidAllocationIndex)
+    }
+
+    #[inline]
+    fn try_suballocate<M: MemoryProperties>(
+        &mut self,
+        memory: MemoryIndex<M>,
+        req: &AllocReqTyped<M>,
+    ) -> ResourceResult<Allocation<M>> {
+        if let Some(range) = self.get_usage::<M>(memory)?.try_alloc(req) {
+            Ok(Allocation::new(memory, range))
+        } else {
+            Err(AllocatorError::OutOfMemory.into())
+        }
+    }
+
+    #[inline]
+    fn push<M: MemoryProperties>(&mut self, memory: Memory<M>) -> ResourceResult<MemoryIndex<M>> {
+        let size = memory.size();
+        let index = self.memory.push(memory.into_guard())?;
+        self.usage
+            .insert(index.into_guard(), ByteRange::new(size).into());
+        Ok(index)
     }
 
     #[inline]
     fn pop<M: MemoryProperties>(
         &mut self,
-        allocation: Allocation<M>,
+        memory: Allocation<M>,
     ) -> ResourceResult<Option<DropGuard<Memory<M>>>> {
-        let memory = allocation.memory.into_guard();
-        let count = self
-            .usage
-            .get_mut(&memory)
-            .ok_or(AllocatorError::InvalidAllocationIndex)?;
-        *count = count.saturating_sub(1);
-        if *count == 0 {
-            self.usage.remove(&memory);
-            let memory = self.memory.pop(allocation.memory)?;
-            let memory = unsafe { Memory::<M>::from_inner(memory.into_inner()) };
+        let Allocation { range, memory } = memory;
+        let usage = self.get_usage::<M>(memory)?;
+        usage.dealloc(range);
+        if usage.is_empty() {
+            self.pop_usage::<M>(memory)?;
+            // TODO: From now discard the guard if failed to convert
+            // In Future error type that can express type conversion failure
+            // should be generic over the converted Type and be able to contain the guard type
+            let memory =
+                Memory::<M>::try_from_guard(self.memory.pop(memory)?).map_err(|(_, err)| err)?;
             Ok(Some(DropGuard::new(memory)))
         } else {
             Ok(None)
@@ -108,7 +200,7 @@ impl MemoryMap {
     }
 }
 
-impl Destroy for MemoryMap {
+impl<R: MemoryRange> Destroy for MemoryMap<R> {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
@@ -120,18 +212,18 @@ impl Destroy for MemoryMap {
 }
 
 #[derive(Debug)]
-pub struct AllocationStore {
+pub struct AllocationStore<R: MemoryRange> {
     allocations: TypeGuardVec<AllocationRaw>,
-    memory_map: MemoryMap,
+    memory_map: MemoryMap<R>,
 }
 
-impl Default for AllocationStore {
+impl<R: MemoryRange> Default for AllocationStore<R> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AllocationStore {
+impl<R: MemoryRange> AllocationStore<R> {
     #[inline]
     pub fn new() -> Self {
         Self {
@@ -148,7 +240,7 @@ impl AllocationStore {
     ) -> ResourceResult<MemoryIndex<M>> {
         let alloc_info = context.get_memory_allocate_info(req)?;
         let memory = Memory::<M>::create(alloc_info, context)?;
-        let index = self.memory_map.memory.push(memory.into_guard())?;
+        let index = self.memory_map.push(memory)?;
         Ok(index)
     }
 
@@ -158,23 +250,7 @@ impl AllocationStore {
         req: AllocReqTyped<M>,
         memory: MemoryIndex<M>,
     ) -> ResourceResult<AllocationIndexTyped<M>> {
-        let req = req.requirements();
-        let mut borrow: BorrowedGuard<Memory<M>, _> =
-            self.memory_map.memory.borrow(memory)?.try_into().unwrap();
-        let alloc = borrow
-            .suballocate(req.size as usize, req.alignment as usize)
-            .and_then(|range| Some(Allocation { range, memory }))
-            .ok_or(ResourceError::AllocatorError(AllocatorError::OutOfMemory));
-        self.memory_map.memory.put_back(borrow.into())?;
-        alloc.and_then(|allocation| self.register_allocation(allocation))
-    }
-
-    #[inline]
-    pub fn register_allocation<M: MemoryProperties>(
-        &mut self,
-        allocation: Allocation<M>,
-    ) -> ResourceResult<AllocationIndexTyped<M>> {
-        self.memory_map.register(&allocation);
+        let allocation = self.memory_map.try_suballocate(memory, &req)?;
         let index = self.allocations.push(allocation.into_guard())?;
         Ok(AllocationIndexTyped { index })
     }
@@ -208,7 +284,7 @@ impl AllocationStore {
     }
 }
 
-impl Destroy for AllocationStore {
+impl<R: MemoryRange> Destroy for AllocationStore<R> {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
