@@ -11,10 +11,11 @@ use winit::{
     window::Window,
 };
 
-use crate::device::error::{PhysicalDeviceError, PhysicalDeviceResult};
-
-use super::error::{VkError, VkResult};
 use super::Instance;
+use crate::{
+    device::error::{PhysicalDeviceError, PhysicalDeviceResult},
+    error::{ExtError, ExtResult},
+};
 
 pub struct Surface {
     handle: vk::SurfaceKHR,
@@ -22,7 +23,7 @@ pub struct Surface {
 }
 
 #[cfg(target_os = "windows")]
-fn create_platform_surface(instance: &Instance, window: &Window) -> VkResult<vk::SurfaceKHR> {
+fn create_platform_surface(instance: &Instance, window: &Window) -> ExtResult<vk::SurfaceKHR> {
     let win32_surface: khr::Win32Surface = instance.load();
     let (hwnd, hinstance) = match window.window_handle()?.as_raw() {
         RawWindowHandle::Win32(Win32WindowHandle {
@@ -46,11 +47,7 @@ fn create_platform_surface(instance: &Instance, window: &Window) -> VkResult<vk:
 }
 
 #[cfg(not(target_os = "windows"))]
-fn create_platform_surface(
-    entry: &Entry,
-    instance: &Instance,
-    window: &Window,
-) -> VkResult<vk::SurfaceKHR> {
+fn create_platform_surface(instance: &Instance, window: &Window) -> ExtResult<vk::SurfaceKHR> {
     compile_error!("Current platform not supported!");
 }
 
@@ -69,7 +66,7 @@ impl Surface {
 
 impl Create for Surface {
     type Config<'a> = &'a Window;
-    type CreateError = VkError;
+    type CreateError = ExtError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let handle = create_platform_surface(context, config)?;

@@ -6,14 +6,12 @@ use std::{
     ffi::{c_char, c_void, CStr},
 };
 
+use crate::error::{InstanceError, InstanceResult};
 use ash::{extensions::ext, vk};
 use colored::{self, Colorize};
 use type_kit::{Create, Destroy, DestroyResult};
 
-use super::{
-    error::{VkError, VkResult},
-    Instance,
-};
+use super::Instance;
 
 unsafe extern "system" fn debug_messenger_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -73,7 +71,7 @@ impl DebugUtils {
         REQUIRED_LAYERS.into_iter()
     }
 
-    pub fn check_required_layer_support(entry: &ash::Entry) -> VkResult<Vec<*const c_char>> {
+    pub fn check_required_layer_support(entry: &ash::Entry) -> InstanceResult<Vec<*const c_char>> {
         let supported_layers = entry.enumerate_instance_layer_properties()?;
         let supported =
             Self::iterate_required_layers().try_fold(Vec::new(), |mut supported, req| {
@@ -84,7 +82,7 @@ impl DebugUtils {
                         supported.push(req.as_ptr());
                         supported
                     })
-                    .ok_or(VkError::LayerNotSupported(req))
+                    .ok_or(InstanceError::LayerNotSupported(req))
             })?;
         Ok(supported)
     }
@@ -92,7 +90,7 @@ impl DebugUtils {
 
 impl Create for DebugUtils {
     type Config<'a> = ();
-    type CreateError = VkError;
+    type CreateError = InstanceError;
 
     fn create<'a>(
         _config: Self::Config<'a>,

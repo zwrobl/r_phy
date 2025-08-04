@@ -97,12 +97,43 @@ impl<E: Into<CollectionError>> From<E> for ExtError {
 pub type ExtResult<T> = Result<T, ExtError>;
 
 #[derive(Debug)]
+pub enum InstanceError {
+    ExtensionNotSupported(&'static CStr),
+    LayerNotSupported(&'static CStr),
+    ExtError(ExtError),
+}
+
+impl Display for InstanceError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InstanceError::ExtensionNotSupported(name) => {
+                write!(f, "Extension not supported: {}", name.to_string_lossy())
+            }
+            InstanceError::LayerNotSupported(name) => {
+                write!(f, "Layer not supported: {}", name.to_string_lossy())
+            }
+            InstanceError::ExtError(error) => write!(f, "{}", error),
+        }
+    }
+}
+
+impl<E: Into<ExtError>> From<E> for InstanceError {
+    #[inline]
+    fn from(error: E) -> Self {
+        InstanceError::ExtError(error.into())
+    }
+}
+
+impl Error for InstanceError {}
+
+pub type InstanceResult<T> = Result<T, InstanceError>;
+
+#[derive(Debug)]
 pub enum VkError {
     MemoryError(MemoryError),
     ResourceError(ResourceError),
     DeviceError(DeviceError),
-    ExtensionNotSupported(&'static CStr),
-    LayerNotSupported(&'static CStr),
+    InstanceError(InstanceError),
     ExtError(ExtError),
     // Temporary LockError handling, storing the PoisonError.to_string() to elide the lock Guard type
     LockError(String),
@@ -115,17 +146,8 @@ impl Display for VkError {
             VkError::ResourceError(error) => write!(f, "Resource error: {}", error),
             VkError::LockError(error) => write!(f, "Lock error: {}", error),
             VkError::DeviceError(error) => write!(f, "Device error: {}", error),
-            VkError::LayerNotSupported(layer) => {
-                write!(f, "Layer not supported: {}", layer.to_string_lossy())
-            }
             VkError::ExtError(error) => write!(f, "Ash error: {}", error),
-            VkError::ExtensionNotSupported(extension) => {
-                write!(
-                    f,
-                    "Extension not supported: {}",
-                    extension.to_string_lossy()
-                )
-            }
+            VkError::InstanceError(error) => write!(f, "Instance error: {}", error),
         }
     }
 }
@@ -135,6 +157,12 @@ impl Error for VkError {}
 impl<E: Into<ExtError>> From<E> for VkError {
     fn from(error: E) -> Self {
         VkError::ExtError(error.into())
+    }
+}
+
+impl From<InstanceError> for VkError {
+    fn from(error: InstanceError) -> Self {
+        VkError::InstanceError(error)
     }
 }
 

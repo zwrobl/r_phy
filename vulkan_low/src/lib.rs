@@ -6,6 +6,7 @@ pub mod resources;
 mod surface;
 
 use crate::{
+    error::{InstanceError, InstanceResult, VkResult},
     memory::{
         allocator::{
             AllocationBorrow, AllocationEntryTyped, Allocator, AllocatorIndex, AllocatorIndexTyped,
@@ -25,16 +26,11 @@ use crate::{
     },
 };
 
-use self::{
-    device::Device,
-    error::{VkError, VkResult},
-    surface::Surface,
-};
+use self::{device::Device, surface::Surface};
 use ash::extensions::{ext, khr};
 #[cfg(debug_assertions)]
 use debug::DebugUtils;
 use std::convert::Infallible;
-use std::error::Error;
 use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
@@ -48,7 +44,7 @@ use winit::window::Window;
 fn check_required_extension_support(
     entry: &ash::Entry,
     mut extension_names: impl Iterator<Item = &'static CStr>,
-) -> VkResult<Vec<*const c_char>> {
+) -> InstanceResult<Vec<*const c_char>> {
     let supported_extensions = entry.enumerate_instance_extension_properties(None)?;
     let supported = extension_names.try_fold(Vec::new(), |mut supported, req| {
         supported_extensions
@@ -58,7 +54,7 @@ fn check_required_extension_support(
                 supported.push(req.as_ptr());
                 supported
             })
-            .ok_or(VkError::ExtensionNotSupported(req))
+            .ok_or(InstanceError::ExtensionNotSupported(req))
     })?;
     Ok(supported)
 }
@@ -118,7 +114,7 @@ impl DerefMut for Instance {
 
 impl Create for Instance {
     type Config<'a> = ();
-    type CreateError = VkError;
+    type CreateError = InstanceError;
 
     fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
         let entry = unsafe { ash::Entry::load()? };
@@ -190,7 +186,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn build(window: &Window) -> Result<Self, Box<dyn Error>> {
+    pub fn build(window: &Window) -> VkResult<Self> {
         let instance = Instance::initialize(())?;
         #[cfg(debug_assertions)]
         let debug_utils = DebugUtils::create((), &instance)?;
