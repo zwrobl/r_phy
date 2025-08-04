@@ -15,6 +15,7 @@ use crate::{
         AllocReqTyped, MemoryProperties,
     },
     resources::{
+        error::ResourceResult,
         storage::{
             BorrowMut, BorrowRef, RawCollection, ResourceIndexList, ResourceStorage,
             ResourceStorageList, TypeUniqueRawCollection, TypeUniqueResource,
@@ -26,7 +27,7 @@ use crate::{
 
 use self::{
     device::Device,
-    error::{ResourceResult, VkError, VkResult},
+    error::{VkError, VkResult},
     surface::Surface,
 };
 use ash::extensions::{ext, khr};

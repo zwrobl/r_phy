@@ -18,8 +18,10 @@ use type_kit::{
 };
 
 use crate::{
-    error::{ResourceError, ResourceResult},
-    resources::{RawIndex, Resource, ResourceIndex},
+    resources::{
+        error::{ResourceError, ResourceResult},
+        RawIndex, Resource, ResourceIndex,
+    },
     Context,
 };
 
@@ -87,16 +89,8 @@ impl ResourceStorage {
     where
         ResourceStorageList: Contains<RawCollection<R>, M>,
     {
-        // TODO: Proper type guard type check should be performed here
-        let resource = unsafe {
-            R::from_inner(
-                self.storage
-                    .borrow_mut()
-                    .get_mut()
-                    .pop(index.index)?
-                    .into_inner(),
-            )
-        };
+        let resource = R::try_from_guard(self.storage.borrow_mut().get_mut().pop(index.index)?)
+            .map_err(R::wrap_guard_error)?;
         Ok(resource)
     }
 
@@ -104,13 +98,16 @@ impl ResourceStorage {
     /// This method allows user to remove resource of type R using raw index.
     /// The caller must ensure that the index corresponds to a valid resource of type R.
     #[inline]
-    pub unsafe fn pop_raw_resource<R, M: Marker>(&self, index: RawIndex) -> ResourceResult<R>
+    pub unsafe fn pop_raw_resource<R, C: GenCollection<TypeGuard<R>>, M: Marker>(
+        &self,
+        index: RawIndex,
+    ) -> ResourceResult<TypeGuard<R>>
     where
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
-        ResourceStorageList: Contains<GuardVec<R>, M>,
+        ResourceStorageList: Contains<C, M>,
     {
         let index = unsafe { GenIndex::<TypeGuard<R>, _>::from_inner(index) };
-        let resource = self.storage.borrow_mut().get_mut().pop(index)?.into_inner();
+        let resource = self.storage.borrow_mut().get_mut().pop(index)?;
         Ok(resource)
     }
 

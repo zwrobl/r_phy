@@ -6,9 +6,11 @@ use png::{BitDepth, ColorType, Transformations};
 use strum::IntoEnumIterator;
 
 use crate::{
-    error::ImageError,
     memory::MemoryProperties,
-    resources::image::{Image2D, ImageCreateInfo, ImageCube, ImageInfo, ImageType},
+    resources::{
+        error::ImageError,
+        image::{Image2D, ImageCreateInfo, ImageCube, ImageInfo, ImageType},
+    },
 };
 
 pub struct PngImageReader<R: Read> {

@@ -1,12 +1,12 @@
 use std::marker::PhantomData;
 
 use crate::resources::{
+    error::GuardError,
     framebuffer::AttachmentList,
     layout::{Layout, PipelineLayout, PushConstant},
     pipeline::{get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantDataRef},
-    render_pass::RenderPass,
-    render_pass::{RenderPassConfig, Subpass},
-    Resource,
+    render_pass::{RenderPass, RenderPassConfig, Subpass},
+    Resource, ResourceGuardError,
 };
 
 use super::PipelineStates;
@@ -44,7 +44,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 use type_kit::{Create, Destroy, DestroyResult, FromGuard, GuardVec};
 
-use crate::{error::ResourceError, Context};
+use crate::{resources::error::ResourceError, Context};
 
 #[derive(Debug)]
 pub struct GraphicsPipeline<T: GraphicsPipelineConfig> {
@@ -62,6 +62,11 @@ pub struct GraphicsPipelineRaw {
 impl<T: GraphicsPipelineConfig> Resource for GraphicsPipeline<T> {
     type RawType = GraphicsPipelineRaw;
     type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::GraphicsPipeline { error })
+    }
 }
 
 impl<T: GraphicsPipelineConfig> FromGuard for GraphicsPipeline<T> {

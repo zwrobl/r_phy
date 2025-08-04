@@ -3,8 +3,9 @@ use std::{any::TypeId, collections::HashMap, convert::Infallible, marker::Phanto
 use ash::vk;
 
 use crate::{
-    error::ResourceError,
-    resources::{descriptor::DescriptorWriteInfo, storage::TypeUniqueResource},
+    resources::{
+        descriptor::DescriptorWriteInfo, error::ResourceError, storage::TypeUniqueResource,
+    },
     Context,
 };
 use type_kit::{Cons, Create, Destroy, FromGuard, Nil};

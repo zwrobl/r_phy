@@ -6,12 +6,12 @@ use ash::vk;
 
 use crate::{
     device::AttachmentProperties,
-    error::ResourceError,
     memory::DeviceLocal,
     resources::{
+        error::{GuardError, ResourceError},
         image::{DescriptorImageInfo, Image, Image2D, ImageType, ImageView},
         render_pass::{RenderPass, RenderPassConfig},
-        Resource,
+        Resource, ResourceGuardError,
     },
     Context,
 };
@@ -837,6 +837,11 @@ impl<C: RenderPassConfig> Copy for FramebufferHandle<C> {}
 impl<C: RenderPassConfig> Resource for Framebuffer<C> {
     type RawType = FramebufferRaw;
     type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Framebuffer { error })
+    }
 }
 
 impl<C: RenderPassConfig> FromGuard for Framebuffer<C> {

@@ -8,18 +8,18 @@ use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
-    error::ResourceError,
     memory::{
         allocator::{AllocatorBuilder, AllocatorIndex},
         DeviceLocal,
     },
     resources::{
         buffer::{StagingBuffer, StagingBufferBuilder, StagingBufferPartial},
+        error::{GuardError, ResourceError},
         image::{
             sampler, Image, ImagePartial, ImageRaw, ImageType, Linear, Sampler, SamplerCreateInfo,
             SamplerRaw,
         },
-        Partial, Resource,
+        Partial, Resource, ResourceGuardError,
     },
     Context,
 };
@@ -182,4 +182,9 @@ impl<V: ImageType> FromGuard for Texture<V> {
 impl<V: ImageType> Resource for Texture<V> {
     type RawType = TextureRaw;
     type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Texture { error })
+    }
 }

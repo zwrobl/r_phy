@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod command;
 pub mod descriptor;
+pub mod error;
 pub mod framebuffer;
 pub mod image;
 pub mod layout;
@@ -13,18 +14,22 @@ use std::fmt::Debug;
 
 use type_kit::{
     Cons, Contains, Create, Destroy, DropGuard, FromGuard, GenIndexRaw, GuardCollectionT,
-    GuardIndex, Marked, Marker, TypedNil,
+    GuardError, GuardIndex, Marked, Marker, TypedNil,
 };
 
-use crate::{error::ResourceError, memory::allocator::AllocatorBuilder, Context};
+use crate::{memory::allocator::AllocatorBuilder, resources::error::ResourceError, Context};
 
 pub trait Resource:
     FromGuard<Inner = Self::RawType>
     + for<'a> Create<Context<'a> = &'a Context, CreateError = ResourceError>
 {
-    type RawType: Clone + Copy + for<'a> Destroy<Context<'a> = Self::Context<'a>>;
-    type RawCollection: GuardCollectionT<Self::RawType>;
+    type RawType: Clone + Copy + for<'a> Destroy<Context<'a> = Self::Context<'a>> + Debug;
+    type RawCollection: GuardCollectionT<Self::RawType> + Debug;
+
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError;
 }
+
+pub type ResourceGuardError<R> = GuardError<<R as Resource>::RawType>;
 
 pub type Raw<R> = <R as Resource>::RawType;
 

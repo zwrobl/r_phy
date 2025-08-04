@@ -3,12 +3,15 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard};
+use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
-    error::ResourceError,
     memory::{allocator::AllocatorIndex, HostCoherent},
-    resources::buffer::{Buffer, BufferPartial, BufferRaw},
+    resources::{
+        buffer::{Buffer, BufferPartial, BufferRaw},
+        error::{GuardError, ResourceError},
+        Resource, ResourceGuardError,
+    },
     Context,
 };
 
@@ -89,5 +92,15 @@ impl Destroy for PersistentBuffer {
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let _ = context.unmap_allocation(self.buffer.allocation);
         self.buffer.destroy(context)
+    }
+}
+
+impl Resource for PersistentBuffer {
+    type RawType = BufferRaw;
+    type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Buffer { error })
     }
 }

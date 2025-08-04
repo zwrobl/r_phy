@@ -5,13 +5,14 @@ use type_kit::{
 };
 
 use vulkan_low::{
-    error::{ResourceResult, VkResult},
+    error::VkResult,
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
         buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
         command::operation::Graphics,
         descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
+        error::ResourceResult,
         image::{DescriptorImageInfo, Image2D, Image2DReader, Texture, TexturePartial},
         layout::presets::{FragmentStage, PodUniform},
         pipeline::{GraphicsPipeline, GraphicsPipelineConfig},

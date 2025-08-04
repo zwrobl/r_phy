@@ -10,7 +10,7 @@ use ash::{self, vk};
 use std::{ffi::CStr, marker::PhantomData, path::Path};
 
 use crate::{
-    error::{ShaderError, ShaderResult},
+    resources::error::{ShaderError, ShaderResult},
     Context,
 };
 

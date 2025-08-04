@@ -15,11 +15,11 @@ pub use writer::*;
 use ash::vk;
 
 use crate::{
-    error::ResourceError,
     resources::{
+        error::{GuardError, ResourceError},
         layout::{DescriptorLayout, DescriptorSetLayout, Layout},
         pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
-        Resource,
+        Resource, ResourceGuardError,
     },
     Context,
 };
@@ -152,6 +152,11 @@ impl<T: DescriptorLayout> Descriptor<T> {
 impl<L: DescriptorLayout> Resource for DescriptorPool<L> {
     type RawType = DescriptorPoolDataRaw;
     type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::DescriptorPool { error })
+    }
 }
 
 impl<L: DescriptorLayout> FromGuard for DescriptorPool<L> {

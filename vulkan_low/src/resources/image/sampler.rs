@@ -4,8 +4,10 @@ use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 
 use crate::{
-    error::ResourceError,
-    resources::image::{ImageInfo, MipInfo},
+    resources::{
+        error::ResourceError,
+        image::{ImageInfo, MipInfo},
+    },
     Context,
 };
 

@@ -3,12 +3,13 @@ use bytemuck::{bytes_of, Pod};
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard, GuardVec};
 
 use crate::{
-    error::{ExtResult, ResourceError},
+    error::ExtResult,
     memory::{range::ByteRange, MemoryProperties},
     resources::{
         buffer::Buffer,
         command::level::{PersistentAllocator, PersistentAllocatorRaw},
         descriptor::DescriptorBindingData,
+        error::{GuardError, ResourceError},
         framebuffer::{Clear, FramebufferHandle},
         image::{Image, ImageType},
         layout::PushConstant,
@@ -16,7 +17,7 @@ use crate::{
         render_pass::{RenderPass, RenderPassConfig, Subpass},
         storage::TypeUniqueResource,
         swapchain::SwapchainFrame,
-        Resource,
+        Resource, ResourceGuardError,
     },
     Context, Device,
 };
@@ -454,6 +455,11 @@ pub struct PersistentCommandPoolRaw {
 impl<L: Level, O: Operation> Resource for PersistentCommandPool<L, O> {
     type RawType = PersistentCommandPoolRaw;
     type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::PersistentCommandPool { error })
+    }
 }
 
 impl<L: Level, O: Operation> FromGuard for PersistentCommandPool<L, O> {

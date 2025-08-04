@@ -6,8 +6,8 @@ use ash::vk;
 
 use crate::{
     device::AttachmentProperties,
-    error::ResourceError,
     resources::{
+        error::ResourceError,
         framebuffer::{
             AttachmentFormatInfo, AttachmentList, AttachmentListFormats, AttachmentReference,
             AttachmentReferences, AttachmentTarget, AttachmentTransistions, AttachmentTransition,

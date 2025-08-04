@@ -8,23 +8,26 @@ use std::{
 
 use ash::vk;
 use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
-use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard};
+use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
-    error::{ExtResult, ResourceError},
+    error::ExtResult,
     memory::{
         allocator::{AllocatorBuilder, AllocatorIndex},
         range::{ByteRange, Range},
         DeviceLocal, HostCoherent,
     },
     resources::{
-        buffer::{BufferInfoBuilder, BufferPartial, BufferUsage, PersistentBuffer, SharingMode},
+        buffer::{
+            BufferInfoBuilder, BufferPartial, BufferRaw, BufferUsage, PersistentBuffer, SharingMode,
+        },
         command::{
             operation::{self, Operation},
             SubmitSemaphoreState,
         },
+        error::{GuardError, ResourceError},
         image::{Image, ImageType},
-        Partial,
+        Partial, Resource, ResourceGuardError,
     },
     Context,
 };
@@ -251,6 +254,22 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
     }
 }
 
+impl FromGuard for StagingBuffer {
+    type Inner = BufferRaw;
+
+    #[inline]
+    fn into_inner(self) -> Self::Inner {
+        self.buffer.into_inner()
+    }
+
+    #[inline]
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        StagingBuffer {
+            buffer: PersistentBuffer::from_inner(inner),
+        }
+    }
+}
+
 impl Create for StagingBuffer {
     type Config<'a> = (DropGuard<StagingBufferPartial>, Option<AllocatorIndex>);
     type CreateError = ResourceError;
@@ -272,5 +291,15 @@ impl Destroy for StagingBuffer {
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let _ = self.buffer.destroy(context);
         Ok(())
+    }
+}
+
+impl Resource for StagingBuffer {
+    type RawType = BufferRaw;
+    type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Buffer { error })
     }
 }

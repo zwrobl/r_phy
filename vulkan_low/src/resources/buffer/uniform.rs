@@ -8,7 +8,6 @@ use bytemuck::AnyBitPattern;
 use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
-    error::ResourceError,
     memory::{
         allocator::{AllocatorBuilder, AllocatorIndex},
         HostCoherent,
@@ -19,7 +18,8 @@ use crate::{
             BufferUsage, SharingMode,
         },
         command::operation::Operation,
-        Partial, Resource,
+        error::{GuardError, ResourceError},
+        Partial, Resource, ResourceGuardError,
     },
     Context,
 };
@@ -207,6 +207,11 @@ impl<U: AnyBitPattern, O: Operation> Destroy for UniformBuffer<U, O> {
 impl<U: AnyBitPattern, O: Operation> Resource for UniformBuffer<U, O> {
     type RawType = BufferRaw;
     type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Buffer { error })
+    }
 }
 
 impl<U: AnyBitPattern, O: Operation> FromGuard for UniformBuffer<U, O> {

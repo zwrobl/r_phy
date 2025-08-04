@@ -11,12 +11,14 @@ use std::{convert::Infallible, fmt::Debug, marker::PhantomData};
 use ash::vk;
 
 use crate::{
-    error::{ResourceError, ResourceResult},
     memory::{
         allocator::{AllocationEntry, AllocationEntryTyped, AllocatorBuilder, AllocatorIndex},
         AllocReqTyped, BindResource, DeviceLocal, MemoryProperties,
     },
-    resources::Partial,
+    resources::{
+        error::{GuardError, ResourceError, ResourceResult},
+        Partial, ResourceGuardError,
+    },
     Context,
 };
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
@@ -285,6 +287,11 @@ impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
 impl<V: ImageType, M: MemoryProperties> Resource for Image<V, M> {
     type RawType = ImageRaw;
     type RawCollection = GuardVec<Self::RawType>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Image { error })
+    }
 }
 
 impl<V: ImageType, M: MemoryProperties> Create for Image<V, M> {

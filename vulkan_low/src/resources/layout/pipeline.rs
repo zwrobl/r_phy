@@ -3,9 +3,9 @@ use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 use ash::vk;
 
 use crate::{
-    error::{ResourceError, ResourceResult},
     resources::{
         descriptor::DescriptorWriteInfo,
+        error::{ResourceError, ResourceResult},
         layout::{
             DescriptorBinding, DescriptorLayout, DescriptorSetLayout, DescriptorSetLayoutBinding,
         },

@@ -4,7 +4,6 @@ use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, 
 
 use graphics::model::{Mesh, Vertex};
 use vulkan_low::{
-    error::{ResourceError, ResourceResult},
     index_list,
     memory::{
         allocator::{AllocatorBuilder, AllocatorIndex},
@@ -20,6 +19,7 @@ use vulkan_low::{
             operation::{self, Operation},
             DrawIndexed,
         },
+        error::{ResourceError, ResourceResult},
         storage::ResourceIndexListBuilder,
         Partial,
     },

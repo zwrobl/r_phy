@@ -6,13 +6,13 @@ use type_kit::{
 };
 
 use crate::{
-    error::{ResourceError, ResourceResult},
     index_list,
     resources::{
+        error::{GuardError, ResourceError, ResourceResult},
         framebuffer::{Extent2D, FramebufferBuilder, FramebufferRaw},
         image::{Image2D, ImageView, ImageViewCreateInfo},
         render_pass::RenderPassConfig,
-        Resource, ResourceIndex,
+        Resource, ResourceGuardError, ResourceIndex,
     },
     surface::PhysicalDeviceSurfaceProperties,
     Context,
@@ -49,7 +49,7 @@ struct SwapchainImage {
     view: ImageView<Image2D>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SwapchainRaw {
     pub num_images: usize,
     pub extent: vk::Extent2D,
@@ -70,6 +70,11 @@ pub struct Swapchain<C: RenderPassConfig> {
 impl<C: RenderPassConfig> Resource for Swapchain<C> {
     type RawType = SwapchainRaw;
     type RawCollection = GenCell<TypeGuard<Self::RawType>>;
+
+    #[inline]
+    fn wrap_guard_error(error: ResourceGuardError<Self>) -> ResourceError {
+        ResourceError::GuardError(GuardError::Swapchain { error })
+    }
 }
 
 impl<C: RenderPassConfig> FromGuard for Swapchain<C> {

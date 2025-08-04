@@ -10,10 +10,10 @@ use physics::shape;
 use strum::EnumCount;
 use type_kit::{Create, CreateResult, Destroy};
 use vulkan_low::{
-    error::ResourceError,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
         command::{level::Level, operation::Operation, RecordingCommand},
+        error::ResourceError,
         Partial,
     },
     Context,

@@ -16,7 +16,7 @@ use type_kit::{
 };
 
 use vulkan_low::{
-    error::{ResourceError, ShaderResult, VkError},
+    error::VkError,
     index_list,
     memory::{
         allocator::{AllocatorBuilder, AllocatorIndex},
@@ -24,6 +24,7 @@ use vulkan_low::{
     },
     resources::{
         descriptor::{DescriptorPool, DescriptorSetWriter},
+        error::{ResourceError, ShaderResult},
         framebuffer::{
             AttachmentReferences, AttachmentsBuilder, Extent2D, FramebufferBuilder, InputAttachment,
         },

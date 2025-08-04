@@ -17,7 +17,7 @@ use graphics::{
 };
 use math::types::Matrix4;
 use vulkan_low::{
-    error::{ResourceError, VkError, VkResult},
+    error::{VkError, VkResult},
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
@@ -28,6 +28,7 @@ use vulkan_low::{
             BeginCommand, Persistent, PersistentCommandPool,
         },
         descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
+        error::ResourceError,
         layout::presets::CameraDescriptorSet,
         pipeline::{GraphicsPipelineConfig, ModuleLoader},
         render_pass::RenderPassConfig,
