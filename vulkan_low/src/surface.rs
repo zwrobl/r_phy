@@ -11,7 +11,9 @@ use winit::{
     window::Window,
 };
 
-use super::error::{DeviceNotSuitable, VkError, VkResult};
+use crate::device::error::{PhysicalDeviceError, PhysicalDeviceResult};
+
+use super::error::{VkError, VkResult};
 use super::Instance;
 
 pub struct Surface {
@@ -108,7 +110,7 @@ impl PhysicalDeviceSurfaceProperties {
         surface: &Surface,
         physical_device: vk::PhysicalDevice,
         quque_families: &[(vk::QueueFamilyProperties, u32)],
-    ) -> Result<Self, DeviceNotSuitable> {
+    ) -> PhysicalDeviceResult<Self> {
         let surface_formats = unsafe {
             surface
                 .loader
@@ -123,7 +125,7 @@ impl PhysicalDeviceSurfaceProperties {
                 })
             })
             .or(surface_formats.first())
-            .ok_or(DeviceNotSuitable::MissingSurfaceSupport)?;
+            .ok_or(PhysicalDeviceError::MissingSurfaceSupport)?;
         let present_mode = unsafe {
             surface
                 .loader
@@ -151,7 +153,7 @@ impl PhysicalDeviceSurfaceProperties {
                 .map(|&(_, queue_family_index)| queue_family_index),
         );
         if supported_queue_families.is_empty() {
-            Err(DeviceNotSuitable::MissingSurfaceSupport)?;
+            Err(PhysicalDeviceError::MissingSurfaceSupport)?;
         }
         let capabilities = unsafe {
             surface

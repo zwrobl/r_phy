@@ -1,10 +1,13 @@
-use super::{
-    error::{DeviceNotSuitable, VkError, VkResult},
+pub mod error;
+
+use error::{DeviceError, DeviceResult, PhysicalDeviceError, PhysicalDeviceResult};
+
+use crate::{
+    surface::{PhysicalDeviceSurfaceProperties, Surface},
     Instance,
 };
 
-use super::surface::{PhysicalDeviceSurfaceProperties, Surface};
-use ash::{self, extensions::khr, vk};
+use ash::{extensions::khr, vk};
 use colored::Colorize;
 use std::convert::Infallible;
 use std::ffi::c_char;
@@ -28,7 +31,7 @@ impl QueueFamilies {
     pub fn get(
         properties: &PhysicalDeviceProperties,
         surface_properties: &PhysicalDeviceSurfaceProperties,
-    ) -> Result<Self, DeviceNotSuitable> {
+    ) -> PhysicalDeviceResult<Self> {
         let mut queue_usages = HashMap::new();
         let mut try_use_queue_family = |queue: &mut Option<u32>, queue_family_index: u32| {
             if match queue {
@@ -64,9 +67,9 @@ impl QueueFamilies {
             }
         }
         Ok(Self {
-            graphics: graphics.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex("Graphics"))?,
-            compute: compute.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex("Compute"))?,
-            transfer: transfer.ok_or(DeviceNotSuitable::MissingQueueFamilyIndex("Transfer"))?,
+            graphics: graphics.ok_or(PhysicalDeviceError::MissingQueueFamilyIndex("Graphics"))?,
+            compute: compute.ok_or(PhysicalDeviceError::MissingQueueFamilyIndex("Compute"))?,
+            transfer: transfer.ok_or(PhysicalDeviceError::MissingQueueFamilyIndex("Transfer"))?,
         })
     }
 }
@@ -138,14 +141,14 @@ impl PhysicalDeviceProperties {
     pub fn get(
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
-    ) -> Result<Self, DeviceNotSuitable> {
+    ) -> PhysicalDeviceResult<Self> {
         let generic = unsafe { instance.get_physical_device_properties(physical_device) };
         let features = unsafe { instance.get_physical_device_features(physical_device) };
         let memory = unsafe { instance.get_physical_device_memory_properties(physical_device) };
         if generic.device_type != vk::PhysicalDeviceType::DISCRETE_GPU
             && generic.device_type != vk::PhysicalDeviceType::INTEGRATED_GPU
         {
-            Err(DeviceNotSuitable::InvalidDeviceType)?;
+            Err(PhysicalDeviceError::InvalidDeviceType)?;
         }
         let enabled_features = Self::get_enabled_features(&features);
         let enabled_extension_names =
@@ -163,7 +166,7 @@ impl PhysicalDeviceProperties {
     fn check_required_device_extension_support(
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
-    ) -> Result<Vec<*const c_char>, DeviceNotSuitable> {
+    ) -> PhysicalDeviceResult<Vec<*const c_char>> {
         let supported_extensions =
             unsafe { instance.enumerate_device_extension_properties(physical_device)? };
         let enabled_extension_names = DeviceExtensions::required_extensions().iter().try_fold(
@@ -176,7 +179,7 @@ impl PhysicalDeviceProperties {
                         supported.push(req.as_ptr());
                         supported
                     })
-                    .ok_or(DeviceNotSuitable::ExtensionNotSupported(req))
+                    .ok_or(PhysicalDeviceError::ExtensionNotSupported(req))
             },
         )?;
         Ok(enabled_extension_names)
@@ -234,7 +237,7 @@ impl AttachmentProperties {
         physical_device: vk::PhysicalDevice,
         properties: &PhysicalDeviceProperties,
         surface_properties: &PhysicalDeviceSurfaceProperties,
-    ) -> Result<Self, DeviceNotSuitable> {
+    ) -> PhysicalDeviceResult<Self> {
         let color = surface_properties.surface_format.format;
         let depth_stencil = *Self::PREFERRED_DEPTH_FORMATS
             .iter()
@@ -246,7 +249,7 @@ impl AttachmentProperties {
                     .optimal_tiling_features
                     .contains(vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
             })
-            .ok_or(DeviceNotSuitable::MissingDepthAndStencilFormat)?;
+            .ok_or(PhysicalDeviceError::MissingDepthAndStencilFormat)?;
         let msaa_samples = [
             vk::SampleCountFlags::TYPE_64,
             vk::SampleCountFlags::TYPE_32,
@@ -348,7 +351,7 @@ fn check_physical_device_suitable(
     physical_device: vk::PhysicalDevice,
     instance: &ash::Instance,
     surface: &Surface,
-) -> Result<PhysicalDevice, DeviceNotSuitable> {
+) -> Result<PhysicalDevice, PhysicalDeviceError> {
     let properties = PhysicalDeviceProperties::get(instance, physical_device)?;
     let surface_properties =
         PhysicalDeviceSurfaceProperties::get(surface, physical_device, &properties.queue_families)?;
@@ -364,7 +367,10 @@ fn check_physical_device_suitable(
     })
 }
 
-fn pick_physical_device(instance: &ash::Instance, surface: &Surface) -> VkResult<PhysicalDevice> {
+fn pick_physical_device(
+    instance: &ash::Instance,
+    surface: &Surface,
+) -> DeviceResult<PhysicalDevice> {
     let (suitable_devices, discarded_devices) = unsafe { instance.enumerate_physical_devices()? }
         .into_iter()
         .map(|physical_device| check_physical_device_suitable(physical_device, instance, surface))
@@ -380,7 +386,7 @@ fn pick_physical_device(instance: &ash::Instance, surface: &Surface) -> VkResult
                     Ok(..) => unreachable!(),
                 })
                 .collect();
-            VkError::NoSuitablePhysicalDevice(discarded_devices)
+            DeviceError::NoSuitablePhysicalDevice(discarded_devices)
         })?
         .unwrap();
     println!(
@@ -411,7 +417,7 @@ impl Device {
 
 impl Create for Device {
     type Config<'a> = &'a Surface;
-    type CreateError = VkError;
+    type CreateError = DeviceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,

@@ -10,8 +10,7 @@ use type_kit::{GenCollectionError, GuardCollectionError};
 use winit::raw_window_handle::HandleError;
 
 use crate::{
-    memory::error::MemoryError,
-    resources::error::{ImageError, ResourceError, ShaderError},
+    device::error::DeviceError, memory::error::MemoryError, resources::error::ResourceError,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -98,36 +97,10 @@ impl<E: Into<CollectionError>> From<E> for ExtError {
 pub type ExtResult<T> = Result<T, ExtError>;
 
 #[derive(Debug)]
-pub enum DeviceNotSuitable {
-    InvalidDeviceType,
-    MissingSurfaceSupport,
-    MissingDepthAndStencilFormat,
-    MissingQueueFamilyIndex(&'static str),
-    ExtensionNotSupported(&'static CStr),
-    VkError(vk::Result),
-}
-
-impl Display for DeviceNotSuitable {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Device not suitable")
-    }
-}
-
-impl Error for DeviceNotSuitable {}
-
-impl From<vk::Result> for DeviceNotSuitable {
-    fn from(error: vk::Result) -> Self {
-        DeviceNotSuitable::VkError(error)
-    }
-}
-
-#[derive(Debug)]
 pub enum VkError {
-    AllocatorError(MemoryError),
+    MemoryError(MemoryError),
     ResourceError(ResourceError),
-    ShaderError(ShaderError),
-    ImageError(ImageError),
-    NoSuitablePhysicalDevice(Vec<DeviceNotSuitable>),
+    DeviceError(DeviceError),
     ExtensionNotSupported(&'static CStr),
     LayerNotSupported(&'static CStr),
     ExtError(ExtError),
@@ -138,14 +111,14 @@ pub enum VkError {
 impl Display for VkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VkError::AllocatorError(error) => write!(f, "Allocator error: {}", error),
+            VkError::MemoryError(error) => write!(f, "Allocator error: {}", error),
             VkError::ResourceError(error) => write!(f, "Resource error: {}", error),
-            VkError::ShaderError(error) => write!(f, "Shader error: {}", error),
             VkError::LockError(error) => write!(f, "Lock error: {}", error),
-            VkError::ImageError(error) => write!(f, "Image error: {}", error),
-            VkError::NoSuitablePhysicalDevice(devices) => {
-                write!(f, "No suitable device found: {:?}", devices)
+            VkError::DeviceError(error) => write!(f, "Device error: {}", error),
+            VkError::LayerNotSupported(layer) => {
+                write!(f, "Layer not supported: {}", layer.to_string_lossy())
             }
+            VkError::ExtError(error) => write!(f, "Ash error: {}", error),
             VkError::ExtensionNotSupported(extension) => {
                 write!(
                     f,
@@ -153,10 +126,6 @@ impl Display for VkError {
                     extension.to_string_lossy()
                 )
             }
-            VkError::LayerNotSupported(layer) => {
-                write!(f, "Layer not supported: {}", layer.to_string_lossy())
-            }
-            VkError::ExtError(error) => write!(f, "Ash error: {}", error),
         }
     }
 }
@@ -169,21 +138,9 @@ impl<E: Into<ExtError>> From<E> for VkError {
     }
 }
 
-impl From<ImageError> for VkError {
-    fn from(error: ImageError) -> Self {
-        VkError::ImageError(error)
-    }
-}
-
 impl<T> From<sync::PoisonError<T>> for VkError {
     fn from(error: sync::PoisonError<T>) -> Self {
         VkError::LockError(error.to_string())
-    }
-}
-
-impl From<ShaderError> for VkError {
-    fn from(error: ShaderError) -> Self {
-        VkError::ShaderError(error)
     }
 }
 
@@ -195,7 +152,13 @@ impl From<ResourceError> for VkError {
 
 impl From<MemoryError> for VkError {
     fn from(error: MemoryError) -> Self {
-        VkError::AllocatorError(error)
+        VkError::MemoryError(error)
+    }
+}
+
+impl From<DeviceError> for VkError {
+    fn from(error: DeviceError) -> Self {
+        VkError::DeviceError(error)
     }
 }
 
