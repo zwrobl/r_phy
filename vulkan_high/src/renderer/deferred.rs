@@ -153,7 +153,7 @@ impl Frame for DeferredRenderer {
     fn load_context<'a, P: GraphicsPipelinePackList>(
         &'a self,
         context: &'a Context,
-        allocator: AllocatorIndex,
+        allocator: Option<AllocatorIndex>,
         partial: Self::Partial,
         pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
     ) -> Result<Self::Context<'a, P>, Box<dyn Error>> {
@@ -354,7 +354,7 @@ impl SwapchainFramebufferConfigBuilder<DeferedRenderPass<AttachmentsGBuffer>> fo
 }
 
 impl Create for GBuffer {
-    type Config<'a> = (GBufferPartial, AllocatorIndex);
+    type Config<'a> = (GBufferPartial, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
@@ -448,7 +448,7 @@ impl Destroy for DeferredRendererFrameData {
 }
 
 impl Create for DeferredRendererResources {
-    type Config<'a> = (SkyboxPartial, AllocatorIndex);
+    type Config<'a> = (SkyboxPartial, Option<AllocatorIndex>);
     type CreateError = VkError;
 
     fn create<'a, 'b>(
@@ -540,7 +540,7 @@ impl Destroy for DeferredRendererPartial {
 }
 
 impl Create for DeferredRenderer {
-    type Config<'a> = (DeferredRendererPartial, AllocatorIndex);
+    type Config<'a> = (DeferredRendererPartial, Option<AllocatorIndex>);
     type CreateError = VkError;
 
     fn create<'a, 'b>(

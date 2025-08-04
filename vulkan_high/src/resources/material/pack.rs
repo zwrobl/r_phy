@@ -189,7 +189,7 @@ fn prepare_material_pack_textures<'a, M: Material>(
 fn allocate_material_pack_textures_memory<'a>(
     context: &Context,
     textures: Vec<DropGuard<TexturePartial<Image2D, Image2DReader<'a>>>>,
-    allocator: AllocatorIndex,
+    allocator: Option<AllocatorIndex>,
 ) -> ResourceResult<PackTextures> {
     textures
         .into_iter()
@@ -222,7 +222,7 @@ fn prepare_material_pack_uniforms<'a, M: Material>(
 fn allocate_material_pack_uniforms_memory<'a, M: Material>(
     context: &Context,
     partial: MaterialUniformPartial<'a, M>,
-    allocator: AllocatorIndex,
+    allocator: Option<AllocatorIndex>,
 ) -> Result<ResourceIndex<PackUniform<M>>, Box<dyn Error>> {
     let MaterialUniformPartial { uniform, data } = partial;
     let uniform_buffer = context.create_resource::<PackUniform<M>, _>((uniform, allocator))?;
@@ -256,7 +256,7 @@ pub fn prepare_material_pack<'a, M: Material>(
 pub fn allocate_material_pack_memory<'a, M: Material>(
     context: &Context,
     partial: MaterialPackPartial<'a, M>,
-    allocator: AllocatorIndex,
+    allocator: Option<AllocatorIndex>,
 ) -> Result<MaterialPack<M>, Box<dyn Error>> {
     let MaterialPackPartial {
         textures,
@@ -317,7 +317,7 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
 pub fn load_material_pack<M: Material>(
     context: &Context,
     materials: &[M],
-    allocator: AllocatorIndex,
+    allocator: Option<AllocatorIndex>,
 ) -> Result<MaterialPack<M>, Box<dyn Error>> {
     let pack = prepare_material_pack(context, materials)?;
     let pack = allocate_material_pack_memory(context, pack, allocator)?;

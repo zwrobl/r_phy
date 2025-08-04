@@ -3,7 +3,7 @@ use std::{convert::Infallible, marker::PhantomData, ops::BitAndAssign};
 use ash::vk;
 use type_kit::{
     list_type, unpack_list, Cons, Contains, Create, CreateResult, Destroy, DestroyResult,
-    FromGuard, Marker, Nil,
+    FromGuard, GenVec, Marker, Nil,
 };
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
     memory::{
         allocator::{
             AllocReq, AllocationBorrow, AllocationStore, Allocator, AllocatorBuilder,
-            AllocatorInstance, MemoryIndex,
+            AllocatorIndex, AllocatorIndexTyped, MemoryIndex,
         },
         range::ByteRange,
         AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
@@ -19,7 +19,7 @@ use crate::{
     Context,
 };
 
-use super::AllocationIndex;
+use super::AllocationIndexTyped;
 
 #[derive(Debug, Clone, Copy)]
 struct BufferInfo {
@@ -45,7 +45,7 @@ impl<M: MemoryProperties> LinearBuffer<M> {
         &mut self,
         req: AllocReqTyped<M>,
         store: &mut AllocationStore,
-    ) -> ResourceResult<AllocationIndex<M>> {
+    ) -> ResourceResult<AllocationIndexTyped<M>> {
         store.suballocate(req, self.memory)
     }
 }
@@ -192,19 +192,12 @@ impl Destroy for Static {
     }
 }
 
-impl From<Static> for AllocatorInstance {
-    #[inline]
-    fn from(value: Static) -> Self {
-        AllocatorInstance::Static(value)
-    }
-}
-
 impl Static {
     #[inline]
     fn allocate_memory_type<M: MemoryProperties, T: Marker>(
         &mut self,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndex<M>>
+    ) -> ResourceResult<AllocationIndexTyped<M>>
     where
         Buffers: Contains<Option<LinearBuffer<M>>, T>,
     {
@@ -217,25 +210,27 @@ impl Static {
 }
 
 impl Allocator for Static {
+    type Storage = GenVec<Self>;
+
     #[inline]
     fn allocate<M: MemoryProperties>(
         &mut self,
         _context: &Context,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndex<M>> {
+    ) -> ResourceResult<AllocationIndexTyped<M>> {
         let allocation = match req.into() {
             AllocReq::DeviceLocal(req) => self.allocate_memory_type(req)?.into_inner(),
             AllocReq::HostCoherent(req) => self.allocate_memory_type(req)?.into_inner(),
             AllocReq::HostVisible(req) => self.allocate_memory_type(req)?.into_inner(),
         };
-        Ok(unsafe { AllocationIndex::from_inner(allocation) })
+        Ok(unsafe { AllocationIndexTyped::from_inner(allocation) })
     }
 
     #[inline]
     fn free<M: MemoryProperties>(
         &mut self,
         context: &Context,
-        allocation: AllocationIndex<M>,
+        allocation: AllocationIndexTyped<M>,
     ) -> ResourceResult<()> {
         if let Some(mut memory) = self.store.pop(allocation)? {
             let _ = memory.destroy(context);
@@ -246,15 +241,21 @@ impl Allocator for Static {
     #[inline]
     fn borrow<M: MemoryProperties>(
         &mut self,
-        allocation: AllocationIndex<M>,
+        allocation: AllocationIndexTyped<M>,
     ) -> ResourceResult<AllocationBorrow<M>> {
         self.store.borrow(allocation)
     }
 
+    #[inline]
     fn put_back<'a, M: MemoryProperties>(
         &mut self,
         allocation: super::AllocationBorrow<M>,
     ) -> ResourceResult<()> {
         self.store.put_back(allocation)
+    }
+
+    #[inline]
+    fn wrap_index(index: AllocatorIndexTyped<Self>) -> AllocatorIndex {
+        AllocatorIndex::Static(index)
     }
 }

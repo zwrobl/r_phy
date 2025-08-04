@@ -252,7 +252,7 @@ impl<T: AnyBitPattern + NoUninit> WritableRange<T> {
 }
 
 impl Create for StagingBuffer {
-    type Config<'a> = (DropGuard<StagingBufferPartial>, AllocatorIndex);
+    type Config<'a> = (DropGuard<StagingBufferPartial>, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     #[inline]

@@ -100,7 +100,7 @@ pub struct CommonResources {
 }
 
 impl Create for CommonResources {
-    type Config<'a> = (CommonResourcesPartial, AllocatorIndex);
+    type Config<'a> = (CommonResourcesPartial, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {

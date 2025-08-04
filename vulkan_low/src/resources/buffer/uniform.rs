@@ -171,7 +171,10 @@ impl<U: AnyBitPattern, O: Operation> DerefMut for UniformBuffer<U, O> {
 }
 
 impl<U: AnyBitPattern, O: Operation> Create for UniformBuffer<U, O> {
-    type Config<'a> = (DropGuard<UniformBufferPartial<U, O>>, AllocatorIndex);
+    type Config<'a> = (
+        DropGuard<UniformBufferPartial<U, O>>,
+        Option<AllocatorIndex>,
+    );
     type CreateError = ResourceError;
 
     #[inline]

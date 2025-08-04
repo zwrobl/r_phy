@@ -1,21 +1,30 @@
 use std::convert::Infallible;
 
-use type_kit::{Create, Destroy, DestroyResult};
+use type_kit::{Create, Destroy, DestroyResult, GenCell};
 
 use crate::{
     error::{ResourceError, ResourceResult},
     memory::{
-        allocator::{AllocationBorrow, AllocationStore, AllocatorInstance},
+        allocator::{AllocationBorrow, AllocationStore, AllocatorIndex, AllocatorIndexTyped},
         AllocReqTyped, MemoryProperties,
     },
     Context,
 };
 
-use super::{AllocationIndex, Allocator};
+use super::{AllocationIndexTyped, Allocator};
 
 #[derive(Debug)]
 pub struct Unpooled {
     store: AllocationStore,
+}
+
+impl Default for Unpooled {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            store: AllocationStore::new(),
+        }
+    }
 }
 
 impl Create for Unpooled {
@@ -33,25 +42,21 @@ impl Destroy for Unpooled {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
-    fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
-        Ok(())
-    }
-}
-
-impl From<Unpooled> for AllocatorInstance {
     #[inline]
-    fn from(value: Unpooled) -> Self {
-        AllocatorInstance::Unpooled(value)
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.store.destroy(context)
     }
 }
 
 impl Allocator for Unpooled {
+    type Storage = GenCell<Self>;
+
     #[inline]
     fn allocate<'a, M: MemoryProperties>(
         &mut self,
         context: &Context,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndex<M>> {
+    ) -> ResourceResult<AllocationIndexTyped<M>> {
         let memory = self.store.allocate(context, req)?;
         let allocation = self.store.suballocate(req, memory)?;
         Ok(allocation)
@@ -61,7 +66,7 @@ impl Allocator for Unpooled {
     fn free<'a, M: MemoryProperties>(
         &mut self,
         context: &Context,
-        allocation: AllocationIndex<M>,
+        allocation: AllocationIndexTyped<M>,
     ) -> ResourceResult<()> {
         if let Some(mut memory) = self.store.pop(allocation)? {
             let _ = memory.destroy(context);
@@ -72,7 +77,7 @@ impl Allocator for Unpooled {
     #[inline]
     fn borrow<M: MemoryProperties>(
         &mut self,
-        allocation: AllocationIndex<M>,
+        allocation: AllocationIndexTyped<M>,
     ) -> ResourceResult<AllocationBorrow<M>> {
         self.store.borrow(allocation)
     }
@@ -83,5 +88,10 @@ impl Allocator for Unpooled {
         allocation: AllocationBorrow<M>,
     ) -> ResourceResult<()> {
         self.store.put_back(allocation)
+    }
+
+    #[inline]
+    fn wrap_index(index: AllocatorIndexTyped<Self>) -> AllocatorIndex {
+        AllocatorIndex::Unpooled(index)
     }
 }

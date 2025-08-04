@@ -13,7 +13,7 @@ use ash::vk;
 use crate::{
     error::{ResourceError, ResourceResult},
     memory::{
-        allocator::{AllocationEntry, AllocationEntryRaw, AllocatorBuilder, AllocatorIndex},
+        allocator::{AllocationEntry, AllocationEntryTyped, AllocatorBuilder, AllocatorIndex},
         AllocReqTyped, BindResource, DeviceLocal, MemoryProperties,
     },
     resources::Partial,
@@ -216,7 +216,7 @@ pub struct Image<V: ImageType, M: MemoryProperties> {
     image: vk::Image,
     view: ImageView<V>,
     layout: vk::ImageLayout,
-    allocation: AllocationEntry<M>,
+    allocation: AllocationEntryTyped<M>,
     image_info: ImageInfo,
 }
 
@@ -252,7 +252,7 @@ pub struct ImageRaw {
     image: vk::Image,
     view: ImageViewRaw,
     layout: vk::ImageLayout,
-    allocation: AllocationEntryRaw,
+    allocation: AllocationEntry,
     image_info: ImageInfo,
 }
 
@@ -276,7 +276,7 @@ impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
             image: inner.image,
             image_info: inner.image_info,
             layout: inner.layout,
-            allocation: AllocationEntry::from_inner(inner.allocation),
+            allocation: AllocationEntryTyped::from_inner(inner.allocation),
             view: ImageView::from_inner(inner.view),
         }
     }
@@ -288,7 +288,7 @@ impl<V: ImageType, M: MemoryProperties> Resource for Image<V, M> {
 }
 
 impl<V: ImageType, M: MemoryProperties> Create for Image<V, M> {
-    type Config<'a> = (DropGuard<ImagePartial<V, M>>, AllocatorIndex);
+    type Config<'a> = (DropGuard<ImagePartial<V, M>>, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     #[inline]
@@ -299,7 +299,7 @@ impl<V: ImageType, M: MemoryProperties> Create for Image<V, M> {
             alloc_req,
             create_info,
         } = unsafe { image_partial.unwrap() };
-        let allocation = context.allocate(allocator, alloc_req)?;
+        let allocation = context.allocate(alloc_req, allocator)?;
         context.bind_memory(image, allocation)?;
         let view = ImageView::create(create_info.get_view_create_info(image), context)?;
         Ok(Self {

@@ -8,36 +8,12 @@ use type_kit::{Create, Destroy, DestroyResult, FromGuard};
 
 use crate::{
     error::{AllocatorError, AllocatorResult, ResourceError, VkResult},
-    memory::range::ByteRange,
+    memory::{
+        allocator::{AllocationIndex, AllocationIndexTyped},
+        range::ByteRange,
+    },
     Context,
 };
-
-#[derive(Debug, Clone, Copy)]
-pub enum MemoryType {
-    DeviceLocal,
-    HostCoherent,
-    HostVisible,
-}
-
-impl MemoryType {
-    #[inline]
-    pub fn get_property_flags(&self) -> vk::MemoryPropertyFlags {
-        match self {
-            MemoryType::DeviceLocal => DeviceLocal::properties(),
-            MemoryType::HostCoherent => HostCoherent::properties(),
-            MemoryType::HostVisible => HostVisible::properties(),
-        }
-    }
-
-    #[inline]
-    pub fn get_alloc_req(&self, requirements: vk::MemoryRequirements) -> AllocReq {
-        match self {
-            MemoryType::DeviceLocal => DeviceLocal::alloc_req(requirements),
-            MemoryType::HostCoherent => HostCoherent::alloc_req(requirements),
-            MemoryType::HostVisible => HostVisible::alloc_req(requirements),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct AllocReqTyped<T: MemoryProperties> {
@@ -84,50 +60,21 @@ pub enum AllocReq {
 impl<M: MemoryProperties> From<AllocReqTyped<M>> for AllocReq {
     #[inline]
     fn from(value: AllocReqTyped<M>) -> AllocReq {
-        M::alloc_req(value.requirements())
-    }
-}
-
-impl AllocReq {
-    #[inline]
-    pub fn requirements(&self) -> vk::MemoryRequirements {
-        match self {
-            AllocReq::HostVisible(req) => req.requirements,
-            AllocReq::DeviceLocal(req) => req.requirements,
-            AllocReq::HostCoherent(req) => req.requirements,
-        }
-    }
-
-    #[inline]
-    pub fn properties(&self) -> vk::MemoryPropertyFlags {
-        match self {
-            AllocReq::HostVisible(req) => req.properties(),
-            AllocReq::DeviceLocal(req) => req.properties(),
-            AllocReq::HostCoherent(req) => req.properties(),
-        }
-    }
-
-    #[inline]
-    pub fn get_memory_type(&self) -> MemoryType {
-        match self {
-            AllocReq::DeviceLocal(_) => MemoryType::DeviceLocal,
-            AllocReq::HostCoherent(_) => MemoryType::HostCoherent,
-            AllocReq::HostVisible(_) => MemoryType::HostVisible,
-        }
+        M::wrap_req(value)
     }
 }
 
 pub trait MemoryProperties: 'static + Sized + Debug {
     fn properties() -> vk::MemoryPropertyFlags;
 
-    fn memory_type() -> MemoryType;
-
-    fn alloc_req(requirements: vk::MemoryRequirements) -> AllocReq;
+    fn wrap_req(req: AllocReqTyped<Self>) -> AllocReq;
 
     #[inline]
     fn alloc_req_typed(requirements: vk::MemoryRequirements) -> AllocReqTyped<Self> {
         AllocReqTyped::<Self>::new(requirements)
     }
+
+    fn wrap_index(index: AllocationIndexTyped<Self>) -> AllocationIndex;
 }
 
 #[derive(Debug)]
@@ -140,13 +87,13 @@ impl MemoryProperties for HostVisible {
     }
 
     #[inline]
-    fn memory_type() -> MemoryType {
-        MemoryType::HostVisible
+    fn wrap_req(req: AllocReqTyped<Self>) -> AllocReq {
+        AllocReq::HostVisible(req)
     }
 
     #[inline]
-    fn alloc_req(requirements: vk::MemoryRequirements) -> AllocReq {
-        AllocReq::HostVisible(Self::alloc_req_typed(requirements))
+    fn wrap_index(index: AllocationIndexTyped<Self>) -> AllocationIndex {
+        AllocationIndex::HostVisible(index)
     }
 }
 
@@ -160,13 +107,13 @@ impl MemoryProperties for HostCoherent {
     }
 
     #[inline]
-    fn memory_type() -> MemoryType {
-        MemoryType::HostCoherent
+    fn wrap_req(req: AllocReqTyped<Self>) -> AllocReq {
+        AllocReq::HostCoherent(req)
     }
 
     #[inline]
-    fn alloc_req(requirements: vk::MemoryRequirements) -> AllocReq {
-        AllocReq::HostCoherent(Self::alloc_req_typed(requirements))
+    fn wrap_index(index: AllocationIndexTyped<Self>) -> AllocationIndex {
+        AllocationIndex::HostCoherent(index)
     }
 }
 
@@ -180,13 +127,13 @@ impl MemoryProperties for DeviceLocal {
     }
 
     #[inline]
-    fn memory_type() -> MemoryType {
-        MemoryType::DeviceLocal
+    fn wrap_req(req: AllocReqTyped<Self>) -> AllocReq {
+        AllocReq::DeviceLocal(req)
     }
 
     #[inline]
-    fn alloc_req(requirements: vk::MemoryRequirements) -> AllocReq {
-        AllocReq::DeviceLocal(Self::alloc_req_typed(requirements))
+    fn wrap_index(index: AllocationIndexTyped<Self>) -> AllocationIndex {
+        AllocationIndex::DeviceLocal(index)
     }
 }
 
@@ -235,8 +182,10 @@ impl Context {
     }
 
     #[inline]
-    pub fn get_memory_type_index<R: Into<AllocReq>>(&self, req: R) -> AllocatorResult<u32> {
-        let req: AllocReq = req.into();
+    pub fn get_memory_type_index<M: MemoryProperties>(
+        &self,
+        req: AllocReqTyped<M>,
+    ) -> AllocatorResult<u32> {
         let memory_type_bits = req.requirements().memory_type_bits;
         let memory_properties = req.properties();
 

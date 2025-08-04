@@ -55,7 +55,7 @@ pub trait MaterialPackListPartial: Sized {
     fn allocate(
         self,
         context: &Context,
-        allocator: AllocatorIndex,
+        allocator: Option<AllocatorIndex>,
     ) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
@@ -67,7 +67,7 @@ impl MaterialPackListPartial for TypedNil<DummyPack> {
     fn allocate(
         self,
         _context: &Context,
-        _allocator: AllocatorIndex,
+        _allocator: Option<AllocatorIndex>,
     ) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(TypedNil::new())
     }
@@ -86,7 +86,7 @@ impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
     fn allocate(
         self,
         context: &Context,
-        allocator: AllocatorIndex,
+        allocator: Option<AllocatorIndex>,
     ) -> Result<Self::Pack, Box<dyn Error>> {
         let Self { head, tail } = self;
         let pack = if let Some(pack) = head {

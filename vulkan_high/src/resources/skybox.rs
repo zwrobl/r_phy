@@ -73,7 +73,7 @@ impl Destroy for SkyboxPartial {
 }
 
 impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
-    type Config<'a> = (SkyboxPartial, AllocatorIndex);
+    type Config<'a> = (SkyboxPartial, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(

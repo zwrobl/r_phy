@@ -1,17 +1,17 @@
 use std::convert::Infallible;
 
-use type_kit::{Create, Destroy, DestroyResult};
+use type_kit::{Create, Destroy, DestroyResult, GenVec};
 
 use crate::{
     error::{ResourceError, ResourceResult},
     memory::{
-        allocator::{AllocationBorrow, Allocator, AllocatorInstance},
+        allocator::{AllocationBorrow, Allocator, AllocatorIndex, AllocatorIndexTyped},
         AllocReqTyped, MemoryProperties,
     },
     Context,
 };
 
-use super::AllocationIndex;
+use super::AllocationIndexTyped;
 
 #[derive(Debug, Clone, Copy)]
 pub struct PageConfig {}
@@ -65,20 +65,15 @@ impl Destroy for Page {
     }
 }
 
-impl From<Page> for AllocatorInstance {
-    #[inline]
-    fn from(value: Page) -> Self {
-        AllocatorInstance::Page(value)
-    }
-}
-
 impl Allocator for Page {
+    type Storage = GenVec<Self>;
+
     #[inline]
     fn allocate<'a, M: MemoryProperties>(
         &mut self,
         _context: &Context,
         _req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationIndex<M>> {
+    ) -> ResourceResult<AllocationIndexTyped<M>> {
         todo!()
     }
 
@@ -86,22 +81,29 @@ impl Allocator for Page {
     fn free<'a, M: MemoryProperties>(
         &mut self,
         _context: &Context,
-        _allocation: AllocationIndex<M>,
+        _allocation: AllocationIndexTyped<M>,
     ) -> ResourceResult<()> {
         todo!()
     }
 
+    #[inline]
     fn borrow<M: MemoryProperties>(
         &mut self,
-        _allocation: AllocationIndex<M>,
+        _allocation: AllocationIndexTyped<M>,
     ) -> ResourceResult<AllocationBorrow<M>> {
         todo!()
     }
 
+    #[inline]
     fn put_back<'a, M: MemoryProperties>(
         &mut self,
         _allocation: super::AllocationBorrow<M>,
     ) -> ResourceResult<()> {
         todo!()
+    }
+
+    #[inline]
+    fn wrap_index(index: AllocatorIndexTyped<Self>) -> AllocatorIndex {
+        AllocatorIndex::Page(index)
     }
 }

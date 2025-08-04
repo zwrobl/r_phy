@@ -102,7 +102,7 @@ pub trait MeshPackListPartial: Sized {
     fn allocate(
         self,
         context: &Context,
-        allocator: AllocatorIndex,
+        allocator: Option<AllocatorIndex>,
     ) -> Result<Self::Pack, Box<dyn Error>>;
 }
 
@@ -112,7 +112,7 @@ impl MeshPackListPartial for TypedNil<DummyPack> {
     fn allocate(
         self,
         _context: &Context,
-        _allocator: AllocatorIndex,
+        _allocator: Option<AllocatorIndex>,
     ) -> Result<Self::Pack, Box<dyn Error>> {
         Ok(TypedNil::new())
     }
@@ -135,7 +135,7 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
     fn allocate(
         self,
         context: &Context,
-        allocator: AllocatorIndex,
+        allocator: Option<AllocatorIndex>,
     ) -> Result<Self::Pack, Box<dyn Error>> {
         let Self { head, tail } = self;
         let pack = if let Some(partial) = head {

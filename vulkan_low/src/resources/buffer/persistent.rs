@@ -64,7 +64,10 @@ impl FromGuard for PersistentBuffer {
 }
 
 impl Create for PersistentBuffer {
-    type Config<'a> = (DropGuard<BufferPartial<HostCoherent>>, AllocatorIndex);
+    type Config<'a> = (
+        DropGuard<BufferPartial<HostCoherent>>,
+        Option<AllocatorIndex>,
+    );
     type CreateError = ResourceError;
 
     #[inline]

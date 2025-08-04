@@ -14,7 +14,7 @@ use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuar
 use crate::{
     error::{ResourceError, ResourceResult},
     memory::{
-        allocator::{AllocationEntry, AllocationEntryRaw, AllocatorBuilder, AllocatorIndex},
+        allocator::{AllocationEntry, AllocationEntryTyped, AllocatorBuilder, AllocatorIndex},
         AllocReqTyped, BindResource, HostCoherent, MemoryProperties,
     },
     resources::Partial,
@@ -187,7 +187,7 @@ pub struct BufferRaw {
     buffer: vk::Buffer,
     size: usize,
     ptr: Option<*mut c_void>,
-    allocation: AllocationEntryRaw,
+    allocation: AllocationEntry,
 }
 
 #[derive(Debug)]
@@ -195,7 +195,7 @@ pub struct Buffer<M: MemoryProperties> {
     buffer: vk::Buffer,
     size: usize,
     ptr: Option<*mut c_void>,
-    allocation: AllocationEntry<M>,
+    allocation: AllocationEntryTyped<M>,
 }
 
 impl<M: MemoryProperties> Buffer<M> {
@@ -234,7 +234,7 @@ impl<M: MemoryProperties> FromGuard for Buffer<M> {
             buffer: inner.buffer,
             size: inner.size,
             ptr: inner.ptr,
-            allocation: AllocationEntry::<M>::from_inner(inner.allocation),
+            allocation: AllocationEntryTyped::<M>::from_inner(inner.allocation),
         }
     }
 }
@@ -245,14 +245,14 @@ impl<M: MemoryProperties> Resource for Buffer<M> {
 }
 
 impl<M: MemoryProperties> Create for Buffer<M> {
-    type Config<'a> = (DropGuard<BufferPartial<M>>, AllocatorIndex);
+    type Config<'a> = (DropGuard<BufferPartial<M>>, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let (buffer_partial, allocator) = config;
         let BufferPartial { buffer, alloc_req } = unsafe { buffer_partial.unwrap() };
-        let allocation = context.allocate(allocator, alloc_req)?;
+        let allocation = context.allocate(alloc_req, allocator)?;
         context.bind_memory(buffer, allocation)?;
         let buffer = Buffer {
             buffer,

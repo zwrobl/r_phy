@@ -92,7 +92,7 @@ pub struct MeshPack<V: Vertex> {
 }
 
 impl<V: Vertex> Create for MeshPack<V> {
-    type Config<'a> = (MeshPackPartial<'a, V>, AllocatorIndex);
+    type Config<'a> = (MeshPackPartial<'a, V>, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
@@ -117,7 +117,7 @@ impl<V: Vertex> Create for MeshPack<V> {
             let mut staging_buffer = StagingBuffer::create(
                 (
                     DropGuard::new(StagingBufferPartial::create(builder, context)?),
-                    context.default_allocator(),
+                    None,
                 ),
                 context,
             )?;
@@ -261,7 +261,7 @@ pub struct MeshRange<V: Vertex> {
 pub fn load_mesh_pack<V: Vertex>(
     context: &Context,
     meshes: &[Mesh<V>],
-    allocator: AllocatorIndex,
+    allocator: Option<AllocatorIndex>,
 ) -> ResourceResult<MeshPack<V>> {
     let partial = MeshPackPartial::create(meshes, context)?;
     MeshPack::create((partial, allocator), context)

@@ -51,7 +51,7 @@ pub trait Frame: 'static {
     fn load_context<'a, P: GraphicsPipelinePackList>(
         &'a self,
         context: &'a Context,
-        allocator: AllocatorIndex,
+        allocator: Option<AllocatorIndex>,
         partial: Self::Partial,
         pipelines: &impl GraphicsPipelineListBuilder<Pack = P>,
     ) -> Result<Self::Context<'a, P>, Box<dyn Error>>;
@@ -145,7 +145,7 @@ pub struct FramePool<F: FrameContext> {
 }
 
 impl Create for CameraUniform {
-    type Config<'a> = (CameraUniformPartial, AllocatorIndex);
+    type Config<'a> = (CameraUniformPartial, Option<AllocatorIndex>);
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(

@@ -8,8 +8,8 @@ mod surface;
 use crate::{
     memory::{
         allocator::{
-            AllocationBorrow, AllocationEntry, Allocator, AllocatorIndex, AllocatorStorage,
-            Unpooled,
+            AllocationBorrow, AllocationEntryTyped, Allocator, AllocatorIndex, AllocatorIndexTyped,
+            AllocatorStorage, AllocatorStorageList,
         },
         AllocReqTyped, MemoryProperties,
     },
@@ -37,7 +37,7 @@ use std::ffi::{c_char, CStr};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
     Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize,
-    GenCollectionResult, Initialize, Marker, TypeGuardVec,
+    GenCollectionResult, GenVec, Initialize, Marker, TypeGuardVec,
 };
 
 use ash::vk;
@@ -177,7 +177,6 @@ impl Destroy for Instance {
 }
 
 pub struct Context {
-    default_allocator: Option<AllocatorIndex>,
     allocators: Box<AllocatorStorage>,
     pub storage: Box<ResourceStorage>,
     unique_storage: Box<TypeUniqueResourceStorage>,
@@ -198,8 +197,7 @@ impl Context {
         let allocators = Box::new(AllocatorStorage::new());
         let storage = Box::new(ResourceStorage::new());
         let unique_storage = Box::new(TypeUniqueResourceStorage::new());
-        let mut context = Self {
-            default_allocator: None,
+        let context = Self {
             allocators,
             storage,
             unique_storage,
@@ -209,14 +207,7 @@ impl Context {
             debug_utils: DropGuard::new(debug_utils),
             instance: DropGuard::new(instance),
         };
-        let default_allocator = context.create_allocator::<Unpooled>(())?;
-        context.default_allocator.replace(default_allocator);
         Ok(context)
-    }
-
-    #[inline]
-    pub fn default_allocator(&self) -> AllocatorIndex {
-        self.default_allocator.unwrap()
     }
 }
 
@@ -303,36 +294,48 @@ impl Context {
     }
 
     #[inline]
-    pub fn create_allocator<'a, A: Allocator>(
+    pub fn create_allocator<'a, A: Allocator<Storage = GenVec<A>>, M: Marker>(
         &'a self,
         config: A::Config<'a>,
-    ) -> ResourceResult<AllocatorIndex> {
-        self.allocators.create_allocator::<A>(self, config)
+    ) -> ResourceResult<AllocatorIndexTyped<A>>
+    where
+        AllocatorStorageList: Contains<A::Storage, M>,
+    {
+        let allocator = A::create(config, self)?;
+        self.allocators.push_allocator::<A, _>(allocator)
     }
 
     #[inline]
-    pub fn destroy_allocator(&self, index: AllocatorIndex) -> ResourceResult<()> {
-        self.allocators.destroy_allocator(self, index)
+    pub fn destroy_allocator<A: Allocator<Storage = GenVec<A>>, M: Marker>(
+        &self,
+        index: AllocatorIndexTyped<A>,
+    ) -> ResourceResult<()>
+    where
+        AllocatorStorageList: Contains<A::Storage, M>,
+    {
+        let mut allocator = self.allocators.pop_allocator(index)?;
+        let _ = allocator.destroy(self);
+        Ok(())
     }
 
     #[inline]
     pub fn allocate<M: MemoryProperties>(
         &self,
-        index: AllocatorIndex,
         req: AllocReqTyped<M>,
-    ) -> ResourceResult<AllocationEntry<M>> {
-        self.allocators.allocate(self, index, req)
+        allocator: impl Into<Option<AllocatorIndex>>,
+    ) -> ResourceResult<AllocationEntryTyped<M>> {
+        self.allocators.allocate(self, req, allocator.into())
     }
 
     #[inline]
-    pub fn free<M: MemoryProperties>(&self, index: AllocationEntry<M>) -> ResourceResult<()> {
+    pub fn free<M: MemoryProperties>(&self, index: AllocationEntryTyped<M>) -> ResourceResult<()> {
         self.allocators.free(self, index)
     }
 
     #[inline]
     pub fn operate_alloc<M: MemoryProperties, R, F: FnOnce(&mut AllocationBorrow<M>) -> R>(
         &self,
-        index: AllocationEntry<M>,
+        index: AllocationEntryTyped<M>,
         f: F,
     ) -> ResourceResult<R> {
         self.allocators.operate_mut(index, f)

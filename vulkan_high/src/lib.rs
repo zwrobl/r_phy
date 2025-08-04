@@ -19,7 +19,7 @@ use std::path::Path;
 use std::{error::Error, marker::PhantomData};
 use winit::window::Window;
 
-use vulkan_low::memory::allocator::{AllocatorBuilder, AllocatorIndex, Static, StaticConfig};
+use vulkan_low::memory::allocator::{AllocatorBuilder, AllocatorIndexTyped, Static, StaticConfig};
 use vulkan_low::resources::Partial;
 
 use crate::frame::{CameraUniform, Frame, FrameContext};
@@ -99,7 +99,7 @@ pub struct VulkanRenderer {
     context: Context,
     renderer: DeferredRenderer,
     common_resources: CommonResources,
-    allocator: AllocatorIndex,
+    allocator: AllocatorIndexTyped<Static>,
     _config: VulkanRendererConfig,
 }
 
@@ -146,13 +146,13 @@ where
     fn load(
         self,
         context: &Context,
-        allocator: AllocatorIndex,
+        allocator: AllocatorIndexTyped<Static>,
     ) -> Result<VulkanResourcePack<M, V>, Box<dyn Error>> {
         let Self {
             materials, meshes, ..
         } = self;
-        let meshes = meshes.allocate(context, allocator)?;
-        let materials = materials.allocate(context, allocator)?;
+        let meshes = meshes.allocate(context, allocator.into())?;
+        let materials = materials.allocate(context, allocator.into())?;
         Ok(VulkanResourcePack { materials, meshes })
     }
 }
@@ -237,7 +237,7 @@ pub struct VulkanRendererContext<
     renderer: &'a VulkanRenderer,
     renderer_context: DeferredRendererContext<'a, P>,
     resources: VulkanResourcePack<M, V>,
-    allocator: AllocatorIndex,
+    allocator: AllocatorIndexTyped<Static>,
 }
 
 impl VulkanRenderer {
@@ -251,9 +251,10 @@ impl VulkanRenderer {
         let mut allocator_config = StaticConfig::new();
         common_resources.register_memory_requirements(&mut allocator_config);
         renderer_partial.register_memory_requirements(&mut allocator_config);
-        let allocator = context.create_allocator::<Static>(allocator_config)?;
-        let common_meshes = CommonResources::create((common_resources, allocator), &context)?;
-        let renderer = DeferredRenderer::create((renderer_partial, allocator), &context)?;
+        let allocator = context.create_allocator::<Static, _>(allocator_config)?;
+        let common_meshes =
+            CommonResources::create((common_resources, allocator.into()), &context)?;
+        let renderer = DeferredRenderer::create((renderer_partial, allocator.into()), &context)?;
         Ok(Self {
             context,
             renderer,
@@ -301,10 +302,10 @@ impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
             VulkanResourcePack::prepare(&renderer.context, &self.materials, &self.meshes)?;
         camera_uniform.register_memory_requirements(&mut config);
         resources.register_memory_requirements(&mut config);
-        let allocator = renderer.context.create_allocator::<Static>(config)?;
+        let allocator = renderer.context.create_allocator::<Static, _>(config)?;
         let renderer_context = renderer.renderer.load_context(
             &renderer.context,
-            allocator,
+            allocator.into(),
             camera_uniform,
             &self.shaders,
         )?;

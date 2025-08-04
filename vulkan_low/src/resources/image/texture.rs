@@ -101,7 +101,7 @@ impl<V: ImageType> From<&Texture<V>> for DescriptorImageInfo {
 impl<V: ImageType> Create for Texture<V> {
     type Config<'a> = (
         DropGuard<TexturePartial<V, V::ImageReader<'a>>>,
-        AllocatorIndex,
+        Option<AllocatorIndex>,
     );
     type CreateError = ResourceError;
 
@@ -114,10 +114,8 @@ impl<V: ImageType> Create for Texture<V> {
         let stating_buffer_partial =
             DropGuard::new(StagingBufferPartial::create(builder, context)?);
         {
-            let mut staging_buffer = StagingBuffer::create(
-                (stating_buffer_partial, context.default_allocator()),
-                context,
-            )?;
+            let mut staging_buffer =
+                StagingBuffer::create((stating_buffer_partial, None), context)?;
             let mut image_range = staging_buffer.write_range::<u8>(image_range);
             let staging_area = image_range.remaining_as_slice_mut();
             while let Some(read_result) = reader.read(staging_area) {
