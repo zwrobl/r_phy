@@ -1,11 +1,12 @@
 use ash::vk;
-use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData, ptr::NonNull};
+use std::{convert::Infallible, fmt::Debug, marker::PhantomData, ptr::NonNull};
 use type_kit::{
     unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GenCell,
     GenIndexRaw, TypeGuard,
 };
 
 use crate::{
+    error::ExtResult,
     index_list,
     resources::{
         error::{GuardError, ResourceError, ResourceResult},
@@ -131,7 +132,7 @@ impl Context {
         &self,
         swapchain: &Swapchain<C>,
         image_sync: SwapchainImageSync,
-    ) -> Result<SwapchainFrame<C>, Box<dyn Error>> {
+    ) -> ResourceResult<SwapchainFrame<C>> {
         let (image_index, _) = unsafe {
             self.get_extensions().swapchain.acquire_next_image(
                 swapchain.handle,
@@ -160,7 +161,7 @@ impl Device {
         swapchain: &Swapchain<C>,
         command: FinishedCommand<Persistent, Primary, Graphics>,
         frame: SwapchainFrame<C>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> ExtResult<()> {
         let SwapchainFrame {
             image_index,
             image_sync,

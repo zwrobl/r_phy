@@ -3,6 +3,7 @@ pub mod error;
 use error::{DeviceError, DeviceResult, PhysicalDeviceError, PhysicalDeviceResult};
 
 use crate::{
+    error::ExtResult,
     surface::{PhysicalDeviceSurfaceProperties, Surface},
     Instance,
 };
@@ -15,7 +16,6 @@ use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 use std::{
     collections::{HashMap, HashSet},
-    error::Error,
     ffi::CStr,
 };
 use type_kit::{Create, Destroy, DestroyResult};
@@ -402,7 +402,7 @@ fn pick_physical_device(
 
 impl Device {
     #[inline]
-    pub fn wait_idle(&self) -> Result<(), Box<dyn Error>> {
+    pub fn wait_idle(&self) -> ExtResult<()> {
         unsafe {
             self.device.device_wait_idle()?;
         }

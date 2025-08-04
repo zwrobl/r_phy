@@ -3,6 +3,7 @@ use std::{error::Error, marker::PhantomData};
 use graphics::renderer::camera::CameraMatrices;
 use type_kit::{unpack_list, Cons};
 use vulkan_low::{
+    error::ExtError,
     index_list,
     resources::{
         command::{
@@ -72,9 +73,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                         command
                             .bind_pipeline(depth_prepass_pipeline.get_binding_data())
                             .bind_descriptor_set(
-                                &camera_descriptor
-                                    .get_binding_data(depth_prepass_pipeline)
-                                    .unwrap(),
+                                &camera_descriptor.get_binding_data(depth_prepass_pipeline),
                             )
                     })
                 };
@@ -85,8 +84,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                             renderer.render_pass,
                             swapchain_frame.framebuffer,
                         )?;
-                    let binding_data =
-                        descriptors.get(0).get_binding_data(shading_pass_pipeline)?;
+                    let binding_data = descriptors.get(0).get_binding_data(shading_pass_pipeline);
                     context.record_command(command, |command| {
                         let command = command
                             .bind_pipeline(shading_pass_pipeline.get_binding_data())
@@ -109,9 +107,10 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                             command,
                             *camera_matrices,
                         )
+                        .unwrap()
                     })
                 };
-                Result::<_, Box<dyn Error>>::Ok((depth_prepass, shading_pass, skybox_pass))
+                Result::<_, ExtError>::Ok((depth_prepass, shading_pass, skybox_pass))
             },
         )??;
         let write_pass = Vec::with_capacity(P::LEN);

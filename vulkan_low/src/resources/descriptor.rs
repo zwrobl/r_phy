@@ -3,7 +3,6 @@ mod writer;
 use std::{
     any::{type_name, TypeId},
     convert::Infallible,
-    error::Error,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -133,7 +132,7 @@ impl<T: DescriptorLayout> Descriptor<T> {
     pub fn get_binding_data<C: GraphicsPipelineConfig>(
         &self,
         pipeline: &GraphicsPipeline<C>,
-    ) -> Result<DescriptorBindingData, Box<dyn Error>> {
+    ) -> DescriptorBindingData {
         let set_index = C::Layout::sets().get_set_index::<T>().unwrap_or_else(|| {
             panic!(
                 "DescriptorSet {} not present in layout DescriptorSets {}",
@@ -141,11 +140,11 @@ impl<T: DescriptorLayout> Descriptor<T> {
                 type_name::<<C::Layout as Layout>::Descriptors>()
             )
         });
-        Ok(DescriptorBindingData {
+        DescriptorBindingData {
             set_index,
             set: self.set,
             pipeline_layout: pipeline.layout().into(),
-        })
+        }
     }
 }
 

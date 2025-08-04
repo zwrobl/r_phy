@@ -10,7 +10,7 @@ use vulkan_low::{
     resources::{
         command::{level::Level, operation::Operation, RecordingCommand},
         descriptor::{DescriptorPool, DescriptorSetWriter},
-        error::ResourceError,
+        error::{ResourceError, ResourceResult},
         image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
         layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
         pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, ShaderDirectory},
@@ -124,18 +124,16 @@ pub fn draw_skybox<
     common_meshes: &CommonResources,
     command: RecordingCommand<'a, T, L, O>,
     mut camera_matrices: CameraMatrices,
-) -> RecordingCommand<'a, T, L, O> {
+) -> ResourceResult<RecordingCommand<'a, T, L, O>> {
     camera_matrices.view[3] = Vector4::w();
-    context
-        .operate_ref(
-            index_list![skybox.pipeline, skybox.descriptor],
-            |unpack_list![descriptor, pipeline]| {
-                let command = command
-                    .bind_pipeline(pipeline.get_binding_data())
-                    .bind_descriptor_set(&descriptor.get(0).get_binding_data(pipeline).unwrap())
-                    .push_constants(pipeline.get_push_range(&camera_matrices));
-                common_meshes.draw(context, command, CommonMesh::Cube)
-            },
-        )
-        .unwrap()
+    context.operate_ref(
+        index_list![skybox.pipeline, skybox.descriptor],
+        |unpack_list![descriptor, pipeline]| {
+            let command = command
+                .bind_pipeline(pipeline.get_binding_data())
+                .bind_descriptor_set(&descriptor.get(0).get_binding_data(pipeline))
+                .push_constants(pipeline.get_push_range(&camera_matrices));
+            common_meshes.draw(context, command, CommonMesh::Cube)
+        },
+    )
 }

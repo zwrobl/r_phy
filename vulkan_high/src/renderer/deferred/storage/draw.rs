@@ -207,10 +207,8 @@ impl PipelineState {
         });
         let camera_binding_data = context
             .operate_ref(index_list![pipeline_index], |unpack_list![pipeline]| {
-                let binding = camera.get_binding_data(pipeline)?;
-                Result::<_, Box<dyn Error>>::Ok(binding)
+                camera.get_binding_data(pipeline)
             })
-            .unwrap()
             .unwrap();
         let state = DescriptorState {
             sets: [material_binding_data, Some(camera_binding_data)]

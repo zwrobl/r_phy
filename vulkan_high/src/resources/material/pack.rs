@@ -128,16 +128,13 @@ impl<M: Material> MaterialPackRef<M> {
         descriptor_index: u32,
         pipeline_index: ResourceIndex<GraphicsPipeline<P>>,
     ) -> ResourceResult<DescriptorBindingData> {
-        context
-            .operate_ref(
-                index_list![self.descriptors, pipeline_index],
-                |unpack_list![pipeline, material_descriptor]| {
-                    let descriptor = material_descriptor.get(descriptor_index as usize);
-                    let binding = descriptor.get_binding_data(pipeline)?;
-                    Result::<_, Box<dyn Error>>::Ok(binding)
-                },
-            )
-            .map(|result| result.unwrap())
+        context.operate_ref(
+            index_list![self.descriptors, pipeline_index],
+            |unpack_list![pipeline, material_descriptor]| {
+                let descriptor = material_descriptor.get(descriptor_index as usize);
+                descriptor.get_binding_data(pipeline)
+            },
+        )
     }
 
     #[inline]

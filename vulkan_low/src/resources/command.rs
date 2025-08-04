@@ -27,7 +27,7 @@ use self::{
     operation::Operation,
 };
 
-use std::{any::type_name, convert::Infallible, error::Error, marker::PhantomData};
+use std::{any::type_name, convert::Infallible, marker::PhantomData};
 
 pub struct Transient;
 pub struct Persistent;
@@ -571,7 +571,7 @@ impl Device {
         command: NewCommand<T, Secondary, O>,
         render_pass: RenderPass<C>,
         framebuffer: FramebufferHandle<C>,
-    ) -> Result<BeginCommand<T, Secondary, O>, Box<dyn Error>> {
+    ) -> ExtResult<BeginCommand<T, Secondary, O>> {
         let subpass = C::try_get_subpass_index::<S>().unwrap_or_else(|| {
             panic!(
                 "Subpass {} not present in RenderPass {}!",
@@ -1147,7 +1147,7 @@ impl<'a, O: Operation> SubmitedCommand<'a, Persistent, Primary, O> {
         NewCommand(command)
     }
 
-    pub fn _wait(self) -> Result<Self, Box<dyn Error>> {
+    pub fn _wait(self) -> ExtResult<Self> {
         let SubmitedCommand(command, device) = self;
         unsafe {
             device.wait_for_fences(&[command.data.fence], true, u64::MAX)?;
