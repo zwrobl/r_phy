@@ -69,13 +69,13 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                             renderer.render_pass,
                             swapchain_frame.framebuffer,
                         )?;
-                    context.record_command(command, |command| {
-                        command
-                            .bind_pipeline(depth_prepass_pipeline.get_binding_data())
-                            .bind_descriptor_set(
-                                &camera_descriptor.get_binding_data(depth_prepass_pipeline),
-                            )
-                    })
+                    context
+                        .start_recording(command)
+                        .bind_pipeline(depth_prepass_pipeline.get_binding_data())
+                        .bind_descriptor_set(
+                            &camera_descriptor.get_binding_data(depth_prepass_pipeline),
+                        )
+                        .stop_recording()
                 };
                 let shading_pass = {
                     let command = context
@@ -85,12 +85,13 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                             swapchain_frame.framebuffer,
                         )?;
                     let binding_data = descriptors.get(0).get_binding_data(shading_pass_pipeline);
-                    context.record_command(command, |command| {
-                        let command = command
-                            .bind_pipeline(shading_pass_pipeline.get_binding_data())
-                            .bind_descriptor_set(&binding_data);
-                        common_meshes.draw(context, command, CommonMesh::Plane)
-                    })
+                    let command = context
+                        .start_recording(command)
+                        .bind_pipeline(shading_pass_pipeline.get_binding_data())
+                        .bind_descriptor_set(&binding_data);
+                    common_meshes
+                        .draw(context, command, CommonMesh::Plane)
+                        .stop_recording()
                 };
                 let skybox_pass = {
                     let command = context
@@ -99,16 +100,15 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                             renderer.render_pass,
                             swapchain_frame.framebuffer,
                         )?;
-                    context.record_command(command, |command| {
-                        draw_skybox(
-                            context,
-                            &renderer.resources.skybox,
-                            common_meshes,
-                            command,
-                            *camera_matrices,
-                        )
-                        .unwrap()
-                    })
+                    draw_skybox(
+                        context,
+                        &renderer.resources.skybox,
+                        common_meshes,
+                        context.start_recording(command),
+                        *camera_matrices,
+                    )
+                    .unwrap()
+                    .stop_recording()
                 };
                 Result::<_, ExtError>::Ok((depth_prepass, shading_pass, skybox_pass))
             },
@@ -153,22 +153,22 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
             .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]))
             .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]))
             .push(ClearColor::new([0.0, 0.0, 0.0, 1.0]));
-        let primary_command = context.record_command(primary_command, |command| {
-            let command = command
-                .begin_render_pass(swapchain_frame, &renderer.render_pass, &clear_values)
-                .write_secondary(&depth_prepass)
-                .next_render_pass()
-                .write_secondary(&skybox_pass)
-                .next_render_pass();
-            write_pass
-                .into_iter()
-                .fold(command, |command, write_pass| {
-                    command.write_secondary(&write_pass)
-                })
-                .next_render_pass()
-                .write_secondary(&shading_pass)
-                .end_render_pass()
-        });
+        let primary_command = context
+            .start_recording(primary_command)
+            .begin_render_pass(swapchain_frame, &renderer.render_pass, &clear_values)
+            .write_secondary(&depth_prepass)
+            .next_render_pass()
+            .write_secondary(&skybox_pass)
+            .next_render_pass();
+        let primary_command = write_pass
+            .into_iter()
+            .fold(primary_command, |command, write_pass| {
+                command.write_secondary(&write_pass)
+            })
+            .next_render_pass()
+            .write_secondary(&shading_pass)
+            .end_render_pass()
+            .stop_recording();
         Ok(context.finish_command(primary_command)?)
     }
 }

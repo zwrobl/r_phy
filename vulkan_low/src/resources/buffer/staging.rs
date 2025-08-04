@@ -148,8 +148,9 @@ impl StagingBuffer {
     ) -> ExtResult<()> {
         let command = context.allocate_transient_command::<operation::Transfer>()?;
         let command = context.begin_primary_command(command)?;
-        let command = context.record_command(command, |command| {
-            command.copy_buffer(
+        let command = context
+            .start_recording(command)
+            .copy_buffer(
                 &self.buffer,
                 dst,
                 &[vk::BufferCopy {
@@ -158,7 +159,7 @@ impl StagingBuffer {
                     size: self.buffer.get_size() as vk::DeviceSize,
                 }],
             )
-        });
+            .stop_recording();
         let command = context
             .submit_command(
                 context.finish_command(command)?,
@@ -185,27 +186,27 @@ impl StagingBuffer {
         let old_layout = dst.get_vk_layout();
         let command = context
             .begin_primary_command(context.allocate_transient_command::<operation::Graphics>()?)?;
-        let command = context.record_command(command, |command| {
-            command
-                .change_layout(
-                    dst,
-                    old_layout,
-                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                    dst_array_layer,
-                    0,
-                    1,
-                )
-                .copy_image(self, dst, dst_array_layer)
-                .generate_mip(dst, dst_array_layer)
-                .change_layout(
-                    dst.borrow_mut(),
-                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                    dst_final_layout,
-                    dst_array_layer,
-                    0,
-                    mip_info.level_count,
-                )
-        });
+        let command = context
+            .start_recording(command)
+            .change_layout(
+                dst,
+                old_layout,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                dst_array_layer,
+                0,
+                1,
+            )
+            .copy_image(self, dst, dst_array_layer)
+            .generate_mip(dst, dst_array_layer)
+            .change_layout(
+                dst.borrow_mut(),
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dst_final_layout,
+                dst_array_layer,
+                0,
+                mip_info.level_count,
+            )
+            .stop_recording();
 
         let command = context
             .submit_command(

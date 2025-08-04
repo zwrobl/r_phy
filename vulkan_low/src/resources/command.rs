@@ -613,21 +613,6 @@ impl Device {
         Ok(BeginCommand(command))
     }
 
-    pub fn record_command<
-        T,
-        L: Level,
-        O: Operation,
-        F: FnOnce(RecordingCommand<T, L, O>) -> RecordingCommand<T, L, O>,
-    >(
-        &self,
-        command: BeginCommand<T, L, O>,
-        recorder: F,
-    ) -> BeginCommand<T, L, O> {
-        let BeginCommand(command) = command;
-        let RecordingCommand(command, _) = recorder(RecordingCommand(command, self));
-        BeginCommand(command)
-    }
-
     pub fn start_recording<T, L: Level, O: Operation>(
         &self,
         command: BeginCommand<T, L, O>,
