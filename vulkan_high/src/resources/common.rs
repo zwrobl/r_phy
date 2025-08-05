@@ -12,14 +12,14 @@ use type_kit::{Create, CreateResult, Destroy};
 use vulkan_low::{
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
-        command::{Level, Lifetime, Operation, RecordingCommand},
+        command::{DrawIndexed, Level, Lifetime, Operation, Recorder, RecordingCommand},
         error::ResourceError,
         Partial,
     },
     Context,
 };
 
-use crate::resources::{bind_mesh_pack, MeshPack, MeshPackPartial};
+use crate::resources::{MeshPack, MeshPackPartial};
 use strum::IntoEnumIterator;
 
 #[derive(Debug, Clone, Copy, strum::EnumCount, strum::EnumIter)]
@@ -110,15 +110,31 @@ impl Create for CommonResources {
     }
 }
 
+pub struct CommonDraw<'a> {
+    resources: &'a CommonResources,
+    mesh: DrawIndexed,
+}
+
 impl CommonResources {
     #[inline]
-    pub fn draw<'a, T: Lifetime, L: Level, O: Operation>(
+    pub fn draw(&self, mesh: CommonMesh) -> CommonDraw {
+        let mesh = self.meshes.get(mesh as usize).into();
+        CommonDraw {
+            resources: self,
+            mesh,
+        }
+    }
+}
+
+impl Recorder for CommonDraw<'_> {
+    #[inline]
+    fn record<'a, 'b, T: Lifetime, L: Level, O: Operation>(
         &self,
-        context: &Context,
         command: RecordingCommand<'a, T, L, O>,
-        mesh: CommonMesh,
     ) -> RecordingCommand<'a, T, L, O> {
-        bind_mesh_pack(context, command, &self.meshes).draw_indexed(self.meshes.get(mesh as usize))
+        command
+            .push(&self.resources.meshes.bindings())
+            .push(&self.mesh)
     }
 }
 

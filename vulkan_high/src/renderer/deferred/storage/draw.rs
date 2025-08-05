@@ -16,10 +16,10 @@ use type_kit::{unpack_list, Cons};
 use vulkan_low::{
     index_list,
     resources::{
-        command::DrawIndexed,
-        descriptor::{Descriptor, DescriptorBindingData},
+        command::{BindDescriptor, BindPipeline, DrawIndexed},
+        descriptor::Descriptor,
         layout::presets::{CameraDescriptorSet, ModelMatrix, ModelNormalMatrix},
-        pipeline::{PipelineBindData, PushConstantRangeMapper},
+        pipeline::PushConstantRangeMapper,
         storage::ResourceIndexListBuilder,
         swapchain::SwapchainFrame,
     },
@@ -31,9 +31,7 @@ use crate::{
         presets::{AttachmentsGBuffer, DeferedRenderPass, GBufferWritePass},
         DeferredRendererContext, DeferredRendererFrameState, DeferredShader,
     },
-    resources::{
-        bind_mesh_pack, GraphicsPipelinePackList, MaterialPackList, MeshPackBinding, MeshPackList,
-    },
+    resources::{GraphicsPipelinePackList, MaterialPackList, MeshPackList, PackBufferBindings},
 };
 
 use super::CommandStorage;
@@ -68,7 +66,7 @@ impl BufferIndex {
 }
 
 pub struct BufferState {
-    mesh_pack_binding: MeshPackBinding,
+    mesh_pack_binding: PackBufferBindings,
     model_states: HashMap<MeshIndex, ModelState>,
 }
 
@@ -110,7 +108,7 @@ impl DescriptorIndex {
 }
 
 pub struct DescriptorState {
-    sets: Vec<DescriptorBindingData>,
+    sets: Vec<BindDescriptor>,
     buffer_states: HashMap<BufferIndex, BufferState>,
 }
 
@@ -120,7 +118,7 @@ impl DescriptorState {
         self.buffer_states
             .entry(buffer_index)
             .or_insert_with(|| BufferState {
-                mesh_pack_binding: mesh_packs.get::<V>().into(),
+                mesh_pack_binding: mesh_packs.get::<V>().bindings(),
                 model_states: HashMap::new(),
             })
     }
@@ -145,7 +143,7 @@ impl PipelineIndex {
 }
 
 pub struct PipelineState {
-    pipeline_bind_data: PipelineBindData,
+    bind_data: BindPipeline,
     push_constant_mapper: PushConstantRangeMapper,
     descriptor_states: HashMap<DescriptorIndex, DescriptorState>,
 }
@@ -207,7 +205,7 @@ impl PipelineState {
         });
         let camera_binding_data = context
             .operate_ref(index_list![pipeline_index], |unpack_list![pipeline]| {
-                camera.get_binding_data(pipeline)
+                camera.bind(pipeline)
             })
             .unwrap();
         let state = DescriptorState {
@@ -295,15 +293,15 @@ impl DrawStorage {
         let pipeline = pipelines
             .get::<DeferredShader<S>>()
             .get(shader.index() as usize);
-        let (pipeline_bind_data, push_constant_mapper) = context
+        let (bind_data, push_constant_mapper) = context
             .operate_ref(index_list![pipeline], |unpack_list![pipeline]| {
-                let binding = pipeline.get_binding_data();
+                let binding = pipeline.bind();
                 let mapper = PushConstantRangeMapper::new(pipeline);
                 (binding, mapper)
             })
             .unwrap();
         let pipeline_state = PipelineState {
-            pipeline_bind_data,
+            bind_data,
             push_constant_mapper,
             descriptor_states: HashMap::new(),
         };
@@ -388,23 +386,17 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                                     |command, _| command,
                                     |command, _| command,
                                     |command, buffer_state| {
-                                        bind_mesh_pack(
-                                            context,
-                                            command,
-                                            buffer_state.mesh_pack_binding,
-                                        )
+                                        command.push(&buffer_state.mesh_pack_binding)
                                     },
                                     |command, model_state, _| {
                                         model_state.instances.iter().fold(
                                             command,
                                             |command, instance| {
                                                 command
-                                                    .push_constants(
-                                                        pipeline.get_push_range::<ModelMatrix>(
-                                                            &instance.into(),
-                                                        ),
-                                                    )
-                                                    .draw_indexed(model_state.mesh_bind_data)
+                                                    .push(&pipeline.push_constants::<ModelMatrix>(
+                                                        &instance.into(),
+                                                    ))
+                                                    .push(&model_state.mesh_bind_data)
                                             },
                                         )
                                     },
@@ -429,32 +421,23 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                     let command = pipeline_state
                         .process(
                             context.start_recording(command),
-                            |command, pipeline_state| {
-                                command.bind_pipeline(pipeline_state.pipeline_bind_data)
-                            },
-                            |command, descriptor_state| {
-                                descriptor_state
-                                    .sets
-                                    .iter()
-                                    .fold(command, |c, set| c.bind_descriptor_set(set))
-                            },
-                            |command, buffer_state| {
-                                bind_mesh_pack(context, command, buffer_state.mesh_pack_binding)
-                            },
+                            |command, pipeline_state| command.push(&pipeline_state.bind_data),
+                            |command, descriptor_state| command.extend(&descriptor_state.sets),
+                            |command, buffer_state| command.push(&buffer_state.mesh_pack_binding),
                             |command, model_state, push_constant_mapper| {
                                 model_state
                                     .instances
                                     .iter()
                                     .fold(command, |command, instance| {
                                         command
-                                            .push_constants(
-                                                push_constant_mapper
-                                                    .map_push_constant::<ModelNormalMatrix>(
+                                            .push(
+                                                &push_constant_mapper
+                                                    .push_constants::<ModelNormalMatrix>(
                                                         &instance.into(),
                                                     )
                                                     .unwrap(),
                                             )
-                                            .draw_indexed(model_state.mesh_bind_data)
+                                            .push(&model_state.mesh_bind_data)
                                     })
                             },
                         )

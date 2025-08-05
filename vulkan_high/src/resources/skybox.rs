@@ -1,19 +1,24 @@
 use std::{convert::Infallible, path::Path};
 
 use graphics::renderer::camera::CameraMatrices;
-use math::types::Vector4;
 
+use math::types::Vector4;
 use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
 use vulkan_low::{
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
-        command::{Level, Lifetime, Operation, RecordingCommand},
+        command::{
+            BindDescriptor, BindPipeline, Level, Lifetime, Operation, Recorder, RecordingCommand,
+        },
         descriptor::{DescriptorPool, DescriptorSetWriter},
-        error::{ResourceError, ResourceResult},
+        error::ResourceError,
         image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
         layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
-        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, ShaderDirectory},
+        pipeline::{
+            GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PushConstantRangeMapper,
+            ShaderDirectory,
+        },
         storage::ResourceIndexListBuilder,
         Partial, ResourceIndex,
     },
@@ -29,7 +34,14 @@ pub struct SkyboxPartial {
     cubemap: DropGuard<TexturePartial<ImageCube, ImageCubeReader>>,
 }
 
+struct SkyboxBindings {
+    pipeline: BindPipeline,
+    descriptor: BindDescriptor,
+    range_mapper: PushConstantRangeMapper,
+}
+
 pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
+    bindings: SkyboxBindings,
     cubemap: ResourceIndex<Texture<ImageCube>>,
     pub descriptor: ResourceIndex<DescriptorPool<TextureDescriptorSet>>,
     pub pipeline: ResourceIndex<GraphicsPipeline<L>>,
@@ -85,14 +97,24 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
         let descriptor =
             context.operate_ref(index_list![cubemap], |unpack_list![cubemap]| {
                 let image_info = cubemap.into();
-                context.create_resource(
+                context.create_resource::<DescriptorPool<_>, _>(
                     DescriptorSetWriter::<TextureDescriptorSet>::new(1)
                         .write_images::<Texture<Image2D>>(&[image_info]),
                 )
             })??;
         let modules = ShaderDirectory::new(Path::new(SKYBOX_SHADER));
-        let pipeline = context.create_resource(&modules as &dyn ModuleLoader)?;
+        let pipeline =
+            context.create_resource::<GraphicsPipeline<_>, _>(&modules as &dyn ModuleLoader)?;
+        let bindings = context.operate_ref(
+            index_list![pipeline, descriptor],
+            |unpack_list![descriptor, pipeline]| SkyboxBindings {
+                pipeline: pipeline.bind(),
+                descriptor: descriptor.get(0).bind(pipeline),
+                range_mapper: PushConstantRangeMapper::new(pipeline),
+            },
+        )?;
         Ok(Skybox {
+            bindings,
             cubemap,
             descriptor,
             pipeline,
@@ -112,28 +134,46 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Destroy for Skybox<L> {
     }
 }
 
-pub fn draw_skybox<
-    'a,
-    T: Lifetime,
-    L: Level,
-    O: Operation,
-    C: GraphicsPipelineConfig<Layout = LayoutSkybox>,
->(
-    context: &Context,
-    skybox: &Skybox<C>,
-    common_meshes: &CommonResources,
-    command: RecordingCommand<'a, T, L, O>,
-    mut camera_matrices: CameraMatrices,
-) -> ResourceResult<RecordingCommand<'a, T, L, O>> {
-    camera_matrices.view[3] = Vector4::w();
-    context.operate_ref(
-        index_list![skybox.pipeline, skybox.descriptor],
-        |unpack_list![descriptor, pipeline]| {
-            let command = command
-                .bind_pipeline(pipeline.get_binding_data())
-                .bind_descriptor_set(&descriptor.get(0).get_binding_data(pipeline))
-                .push_constants(pipeline.get_push_range(&camera_matrices));
-            common_meshes.draw(context, command, CommonMesh::Cube)
-        },
-    )
+pub struct DrawSkybox<'a, C: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
+    skybox: &'a Skybox<C>,
+    resources: &'a CommonResources,
+    camera: CameraMatrices,
+}
+
+impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Skybox<L> {
+    #[inline]
+    pub fn draw<'a>(
+        &'a self,
+        resources: &'a CommonResources,
+        mut camera: CameraMatrices,
+    ) -> DrawSkybox<'a, L> {
+        camera.view[3] = Vector4::w();
+        DrawSkybox {
+            skybox: self,
+            resources,
+            camera,
+        }
+    }
+}
+
+impl<C: GraphicsPipelineConfig<Layout = LayoutSkybox>> Recorder for DrawSkybox<'_, C> {
+    #[inline]
+    fn record<'a, 'b, T: Lifetime, L: Level, O: Operation>(
+        &self,
+        command: RecordingCommand<'a, T, L, O>,
+    ) -> RecordingCommand<'a, T, L, O> {
+        command
+            .push(&self.skybox.bindings.pipeline)
+            .push(&self.skybox.bindings.descriptor)
+            // TODO: Consider alternative approach to mapping push constants
+            .push(
+                &self
+                    .skybox
+                    .bindings
+                    .range_mapper
+                    .push_constants(&self.camera)
+                    .unwrap(),
+            )
+            .push(&self.resources.draw(CommonMesh::Cube))
+    }
 }

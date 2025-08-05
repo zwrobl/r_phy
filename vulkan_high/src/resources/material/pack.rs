@@ -8,8 +8,8 @@ use vulkan_low::{
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
         buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-        command::Graphics,
-        descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
+        command::{BindDescriptor, Graphics},
+        descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
         error::ResourceResult,
         image::{DescriptorImageInfo, Image2D, Image2DReader, Texture, TexturePartial},
         layout::presets::{FragmentStage, PodUniform},
@@ -127,12 +127,12 @@ impl<M: Material> MaterialPackRef<M> {
         context: &Context,
         descriptor_index: u32,
         pipeline_index: ResourceIndex<GraphicsPipeline<P>>,
-    ) -> ResourceResult<DescriptorBindingData> {
+    ) -> ResourceResult<BindDescriptor> {
         context.operate_ref(
             index_list![self.descriptors, pipeline_index],
             |unpack_list![pipeline, material_descriptor]| {
                 let descriptor = material_descriptor.get(descriptor_index as usize);
-                descriptor.get_binding_data(pipeline)
+                descriptor.bind(pipeline)
             },
         )
     }

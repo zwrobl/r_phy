@@ -1,5 +1,4 @@
 use std::{
-    borrow::BorrowMut,
     convert::Infallible,
     marker::PhantomData,
     ops::{Deref, DerefMut},
@@ -21,7 +20,7 @@ use crate::{
         buffer::{
             BufferInfoBuilder, BufferPartial, BufferRaw, BufferUsage, PersistentBuffer, SharingMode,
         },
-        command::{Graphics, Operation, SubmitSemaphoreState, Transfer},
+        command::{CopyBuffer, Graphics, Operation, SubmitSemaphoreState, Transfer},
         error::{GuardError, ResourceError},
         image::{Image, ImageType},
         Partial, Resource, ResourceGuardError,
@@ -147,15 +146,11 @@ impl StagingBuffer {
         let command = context.begin_primary_command(command)?;
         let command = context
             .start_recording(command)
-            .copy_buffer(
-                &self.buffer,
-                dst,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset,
-                    size: self.buffer.get_size() as vk::DeviceSize,
-                }],
-            )
+            .push(&CopyBuffer::new(&self.buffer, dst.into()).push_range(
+                0,
+                dst_offset,
+                self.buffer.get_size() as vk::DeviceSize,
+            ))
             .stop_recording();
         let command = context
             .submit_command(
@@ -185,23 +180,22 @@ impl StagingBuffer {
             context.begin_primary_command(context.allocate_transient_command::<Graphics>()?)?;
         let command = context
             .start_recording(command)
-            .change_layout(
-                dst,
-                old_layout,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                dst_array_layer,
-                0,
-                1,
+            .push(
+                &dst.change_layout(old_layout, vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                    .with_aspect(vk::ImageAspectFlags::COLOR)
+                    .with_array_layer(dst_array_layer),
             )
-            .copy_image(self, dst, dst_array_layer)
-            .generate_mip(dst, dst_array_layer)
-            .change_layout(
-                dst.borrow_mut(),
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                dst_final_layout,
-                dst_array_layer,
-                0,
-                mip_info.level_count,
+            .push(
+                &dst.copy_from_buffer(self)
+                    .with_aspect(vk::ImageAspectFlags::COLOR)
+                    .with_base_array_layer(dst_array_layer),
+            )
+            .push(&dst.generate_mip(dst_array_layer))
+            .push(
+                &dst.change_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, dst_final_layout)
+                    .with_aspect(vk::ImageAspectFlags::COLOR)
+                    .with_array_layer(dst_array_layer)
+                    .with_level_count(mip_info.level_count),
             )
             .stop_recording();
 

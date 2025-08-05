@@ -4,6 +4,7 @@ use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, 
 
 use graphics::model::{Mesh, Vertex};
 use vulkan_low::{
+    error::ExtError,
     index_list,
     memory::{
         allocator::{AllocatorBuilder, AllocatorIndex},
@@ -15,7 +16,7 @@ use vulkan_low::{
             BufferInfoBuilder, BufferPartial, BufferUsage, SharingMode, StagingBuffer,
             StagingBufferBuilder, StagingBufferPartial,
         },
-        command::{DrawIndexed, Graphics, Operation},
+        command::{DrawIndexed, Graphics, IndexType, Operation},
         error::{ResourceError, ResourceResult},
         storage::ResourceIndexListBuilder,
         Partial,
@@ -23,9 +24,9 @@ use vulkan_low::{
     Context,
 };
 
-use super::{
-    BufferRanges, BufferType, MeshByteRange, MeshPackBinding, MeshPackData, MeshPackDataPartial,
-};
+use crate::resources::mesh::PackBufferBindings;
+
+use super::{BufferRanges, BufferType, MeshByteRange, MeshPackData, MeshPackDataPartial};
 
 impl<'a, V: Vertex> Partial for MeshPackPartial<'a, V> {
     #[inline]
@@ -88,6 +89,13 @@ pub struct MeshPack<V: Vertex> {
     _phantom: PhantomData<V>,
 }
 
+impl<V: Vertex> MeshPack<V> {
+    #[inline]
+    pub fn bindings(&self) -> PackBufferBindings {
+        self.data.bindings
+    }
+}
+
 impl<V: Vertex> Create for MeshPack<V> {
     type Config<'a> = (MeshPackPartial<'a, V>, Option<AllocatorIndex>);
     type CreateError = ResourceError;
@@ -110,7 +118,7 @@ impl<V: Vertex> Create for MeshPack<V> {
         let mut builder = StagingBufferBuilder::new();
         let vertex_range = builder.append::<V>(num_vertices);
         let index_range = builder.append::<u32>(num_indices);
-        let (vertex_ranges, index_ranges) = {
+        let (bindings, vertex_ranges, index_ranges) = {
             let mut staging_buffer = StagingBuffer::create(
                 (
                     DropGuard::new(StagingBufferPartial::create(builder, context)?),
@@ -128,11 +136,20 @@ impl<V: Vertex> Create for MeshPack<V> {
                 .iter()
                 .map(|mesh| index_writer.write(&mesh.indices))
                 .collect::<Vec<_>>();
-            context.operate_mut(index_list![buffer], |unpack_list![buffer]| {
-                staging_buffer.transfer_buffer_data(context, buffer, 0)
-            })??;
+            let bindings =
+                context.operate_mut(index_list![buffer], |unpack_list![buffer]| {
+                    staging_buffer.transfer_buffer_data(context, &mut *buffer, 0)?;
+                    let vertex_binding = buffer
+                        .bind_vertex(buffer_ranges.ranges[BufferType::Vertex as usize].unwrap());
+                    let index_binding = buffer.bind_index(
+                        buffer_ranges.ranges[BufferType::Index as usize].unwrap(),
+                        IndexType::U32,
+                    );
+                    let bindings = PackBufferBindings::new(vertex_binding, index_binding);
+                    Result::<_, ExtError>::Ok(bindings)
+                })??;
             let _ = staging_buffer.destroy(context);
-            (vertex_ranges, index_ranges)
+            (bindings, vertex_ranges, index_ranges)
         };
         let meshes = vertex_ranges
             .into_iter()
@@ -143,9 +160,10 @@ impl<V: Vertex> Create for MeshPack<V> {
             })
             .collect();
         let data = MeshPackData {
+            bindings,
             buffer,
-            buffer_ranges,
             meshes,
+            _buffer_ranges: buffer_ranges,
         };
         Ok(MeshPack {
             data,
@@ -193,16 +211,12 @@ impl<'a, V: Vertex, T: Vertex> TryFrom<&'a MeshPack<V>> for MeshPackRef<'a, T> {
     }
 }
 
-impl<'a, V: Vertex> From<MeshPackRef<'a, V>> for MeshPackBinding {
-    fn from(value: MeshPackRef<'a, V>) -> Self {
-        MeshPackBinding {
-            buffer: value.data.buffer,
-            buffer_ranges: value.data.buffer_ranges,
-        }
-    }
-}
-
 impl<'a, V: Vertex> MeshPackRef<'a, V> {
+    #[inline]
+    pub fn bindings(&self) -> PackBufferBindings {
+        self.data.bindings
+    }
+
     pub fn get(&self, index: usize) -> MeshRange<V> {
         MeshRange {
             vertices: self.data.meshes[index].vertices.into(),
@@ -224,12 +238,6 @@ impl<'a, V: Vertex> From<&'a MeshPack<V>> for &'a MeshPackData {
 impl<'a, V: Vertex> From<&'a mut MeshPack<V>> for &'a mut MeshPackData {
     fn from(value: &'a mut MeshPack<V>) -> Self {
         &mut value.data
-    }
-}
-
-impl<'a, V: Vertex> From<&'a MeshPack<V>> for MeshPackBinding {
-    fn from(value: &'a MeshPack<V>) -> Self {
-        (&value.data).into()
     }
 }
 
