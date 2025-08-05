@@ -3,8 +3,11 @@ use std::marker::PhantomData;
 use crate::resources::{
     error::GuardError,
     framebuffer::AttachmentList,
-    layout::{Layout, PipelineLayout, PushConstant},
-    pipeline::{get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantDataRef},
+    layout::{Layout, PipelineLayout, PushConstant, PushConstantList, PushRange},
+    pipeline::{
+        get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantData,
+        PushConstantDataRef,
+    },
     render_pass::{RenderPass, RenderPassConfig, Subpass},
     Resource, ResourceGuardError,
 };
@@ -42,7 +45,7 @@ use std::{any::type_name, convert::Infallible};
 
 use ash::vk;
 use bytemuck::AnyBitPattern;
-use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
+use type_kit::{Contains, Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec, Marker};
 
 use crate::{resources::error::ResourceError, Context};
 
@@ -193,25 +196,42 @@ impl<C: GraphicsPipelineConfig> From<&mut GraphicsPipeline<C>> for vk::Pipeline 
     }
 }
 
+pub type PipelinePushRanges<C> =
+    <<<C as GraphicsPipelineConfig>::Layout as Layout>::PushConstants as PushConstantList>::RangeList;
+
 impl<C: GraphicsPipelineConfig> GraphicsPipeline<C> {
+    #[inline]
     pub fn layout(&self) -> PipelineLayout<C::Layout> {
         unsafe { PipelineLayout::wrap(self.layout) }
     }
 
-    pub fn get_push_range<'a, P: PushConstant + AnyBitPattern>(
+    #[inline]
+    pub fn map<'a, P: PushConstant + AnyBitPattern, M: Marker>(
         &self,
-        push_constant_data: &'a P,
-    ) -> PushConstantDataRef<'a, P> {
-        PushConstantDataRef {
-            range: C::Layout::ranges().try_get_range::<P>().unwrap_or_else(|| {
-                panic!(
-                    "PushConstant {} not present in layout PushConstantRanges {}!",
-                    type_name::<P>(),
-                    type_name::<<C::Layout as Layout>::PushConstants>(),
-                )
-            }),
+        data: impl Into<P>,
+    ) -> PushConstantData<P>
+    where
+        PipelinePushRanges<C>: Contains<PushRange<P>, M>,
+    {
+        PushConstantData {
+            range: C::Layout::ranges().get_range::<P, _>(),
             layout: self.layout,
-            data: push_constant_data,
+            data: data.into(),
+        }
+    }
+
+    #[inline]
+    pub fn map_ref<'a, P: PushConstant + AnyBitPattern, M: Marker>(
+        &self,
+        data: impl Into<&'a P>,
+    ) -> PushConstantDataRef<'a, P>
+    where
+        PipelinePushRanges<C>: Contains<PushRange<P>, M>,
+    {
+        PushConstantDataRef {
+            range: C::Layout::ranges().get_range::<P, _>(),
+            layout: self.layout,
+            data: data.into(),
         }
     }
 }

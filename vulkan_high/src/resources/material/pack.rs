@@ -8,8 +8,8 @@ use vulkan_low::{
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
         buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-        command::{BindDescriptor, Graphics},
-        descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
+        command::Graphics,
+        descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
         error::ResourceResult,
         image::{DescriptorImageInfo, Image2D, Image2DReader, Texture, TexturePartial},
         layout::presets::{FragmentStage, PodUniform},
@@ -122,31 +122,36 @@ impl<'a, M: Material, T: Material> TryFrom<&'a MaterialPack<M>> for MaterialPack
 
 impl<M: Material> MaterialPackRef<M> {
     #[inline]
-    pub fn get_descriptor_binding_data<P: GraphicsPipelineConfig>(
+    pub fn try_get_descriptor_binding_data<P: GraphicsPipelineConfig>(
         &self,
         context: &Context,
         descriptor_index: u32,
         pipeline_index: ResourceIndex<GraphicsPipeline<P>>,
-    ) -> ResourceResult<BindDescriptor> {
-        context.operate_ref(
-            index_list![self.descriptors, pipeline_index],
-            |unpack_list![pipeline, material_descriptor]| {
-                let descriptor = material_descriptor.get(descriptor_index as usize);
-                descriptor.bind(pipeline)
-            },
-        )
+    ) -> Option<DescriptorBindingData> {
+        context
+            .operate_ref(
+                index_list![self.descriptors, pipeline_index],
+                |unpack_list![pipeline, material_descriptor]| {
+                    let descriptor = material_descriptor.get(descriptor_index as usize);
+                    descriptor.try_get_binding(pipeline)
+                },
+            )
+            .ok()
+            .flatten()
     }
 
     #[inline]
-    pub fn get_descriptor(
+    pub fn try_get_descriptor(
         &self,
         context: &Context,
         index: u32,
-    ) -> ResourceResult<Descriptor<M::DescriptorLayout>> {
-        context.operate_ref(
-            index_list![self.descriptors],
-            |unpack_list![material_descriptor]| material_descriptor.get(index as usize),
-        )
+    ) -> Option<Descriptor<M::DescriptorLayout>> {
+        context
+            .operate_ref(
+                index_list![self.descriptors],
+                |unpack_list![material_descriptor]| material_descriptor.get(index as usize),
+            )
+            .ok()
     }
 }
 

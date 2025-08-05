@@ -20,21 +20,49 @@ impl PushConstantRangeMapper {
         Self { layout, ranges }
     }
 
-    pub fn map_push_constant<'a, P: PushConstant + Pod>(
+    pub fn map_ref<'a, P: PushConstant + Pod>(
         &self,
-        push_constant_data: &'a P,
-    ) -> Option<PushConstantDataRef<'a, P>> {
-        self.ranges.iter().find_map(|(type_id, range)| {
-            if *type_id == TypeId::of::<P>() {
-                Some(PushConstantDataRef {
-                    layout: self.layout,
-                    range: *range,
-                    data: push_constant_data,
-                })
-            } else {
-                None
-            }
-        })
+        data: impl Into<&'a P>,
+    ) -> PushConstantDataRef<'a, P> {
+        let data = data.into();
+        self.ranges
+            .iter()
+            .find_map(|(type_id, range)| {
+                if *type_id == TypeId::of::<P>() {
+                    Some(PushConstantDataRef {
+                        layout: self.layout,
+                        range: *range,
+                        data,
+                    })
+                } else {
+                    None
+                }
+            })
+            .expect(&format!(
+                "Failed to map push constant of type {:?}",
+                TypeId::of::<P>()
+            ))
+    }
+
+    pub fn map<P: PushConstant + Pod>(&self, data: impl Into<P>) -> PushConstantData<P> {
+        let data = data.into();
+        self.ranges
+            .iter()
+            .find_map(|(type_id, range)| {
+                if *type_id == TypeId::of::<P>() {
+                    Some(PushConstantData {
+                        layout: self.layout,
+                        range: *range,
+                        data,
+                    })
+                } else {
+                    None
+                }
+            })
+            .expect(&format!(
+                "Failed to map push constant of type {:?}",
+                TypeId::of::<P>()
+            ))
     }
 
     fn get_next_range<L: PushConstantList>(
@@ -67,6 +95,13 @@ pub struct PushConstantData<T: PushConstant + AnyBitPattern> {
     pub layout: vk::PipelineLayout,
     pub range: vk::PushConstantRange,
     pub data: T,
+}
+
+impl<T: PushConstant + AnyBitPattern> PushConstantData<T> {
+    pub fn with_data(mut self, data: T) -> Self {
+        self.data = data;
+        self
+    }
 }
 
 impl<'a, T: PushConstant + AnyBitPattern, N: PushConstant + AnyBitPattern + From<&'a T>>

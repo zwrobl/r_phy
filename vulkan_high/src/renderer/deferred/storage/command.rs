@@ -71,7 +71,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                     context
                         .start_recording(command)
                         .push(&depth_prepass_pipeline.bind())
-                        .push(&camera_descriptor.bind(depth_prepass_pipeline))
+                        .push(&camera_descriptor.get_binding(depth_prepass_pipeline))
                         .stop_recording()
                 };
                 let shading_pass = {
@@ -84,7 +84,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                     context
                         .start_recording(command)
                         .push(&shading_pass_pipeline.bind())
-                        .push(&descriptors.get(0).bind(shading_pass_pipeline))
+                        .push(&descriptors.get(0).get_binding(shading_pass_pipeline))
                         .push(&common_meshes.draw(CommonMesh::Plane))
                         .stop_recording()
                 };

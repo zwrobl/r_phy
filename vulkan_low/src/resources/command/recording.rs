@@ -1,5 +1,6 @@
 use ash::vk;
 use bytemuck::{bytes_of, Pod};
+use type_kit::{Cons, Nil};
 
 use crate::{
     device::Device,
@@ -7,13 +8,13 @@ use crate::{
     resources::{
         buffer::Buffer,
         command::{BeginCommand, Command, FinishedCommand, Level, Lifetime, Operation, Secondary},
-        descriptor::{Descriptor, DescriptorBindingData},
+        descriptor::DescriptorBindingData,
         framebuffer::Clear,
         image::{Image, ImageType},
-        layout::{DescriptorLayout, PushConstant},
+        layout::PushConstant,
         pipeline::{
-            GraphicsPipeline, GraphicsPipelineConfig, PipelineBindData, PushConstantDataRef,
-            PushConstantRangeMapper,
+            GraphicsPipeline, GraphicsPipelineConfig, PipelineBindData, PushConstantData,
+            PushConstantDataRef,
         },
         render_pass::{RenderPass, RenderPassConfig},
         swapchain::SwapchainFrame,
@@ -278,33 +279,7 @@ impl Recorder for BindIndexBuffer {
     }
 }
 
-pub struct PushConstants<'a, P: PushConstant + Pod> {
-    data: PushConstantDataRef<'a, P>,
-}
-
-impl<C: GraphicsPipelineConfig> GraphicsPipeline<C> {
-    #[inline]
-    pub fn push_constants<'a, P: PushConstant + Pod>(
-        &self,
-        push_constant_data: &'a P,
-    ) -> PushConstants<'a, P> {
-        PushConstants {
-            data: self.get_push_range(push_constant_data),
-        }
-    }
-}
-
-impl PushConstantRangeMapper {
-    pub fn push_constants<'a, P: PushConstant + Pod>(
-        &self,
-        push_constant_data: &'a P,
-    ) -> Option<PushConstants<'a, P>> {
-        self.map_push_constant(push_constant_data)
-            .map(|data| PushConstants { data })
-    }
-}
-
-impl<'b, P: PushConstant + Pod> Recorder for PushConstants<'b, P> {
+impl<P: PushConstant + Pod> Recorder for PushConstantData<P> {
     #[inline]
     fn record<'a, T: Lifetime, L: Level, O: Operation>(
         &self,
@@ -314,33 +289,37 @@ impl<'b, P: PushConstant + Pod> Recorder for PushConstants<'b, P> {
         unsafe {
             device.cmd_push_constants(
                 L::buffer(&command.data),
-                self.data.layout,
-                self.data.range.stage_flags,
-                self.data.range.offset,
-                bytes_of(self.data.data),
+                self.layout,
+                self.range.stage_flags,
+                self.range.offset,
+                bytes_of(&self.data),
             );
         }
         RecordingCommand(command, device)
     }
 }
 
-pub struct BindDescriptor {
-    binding: DescriptorBindingData,
-}
-
-impl<T: DescriptorLayout> Descriptor<T> {
+impl<'b, P: PushConstant + Pod> Recorder for PushConstantDataRef<'b, P> {
     #[inline]
-    pub fn bind<C: GraphicsPipelineConfig>(
+    fn record<'a, T: Lifetime, L: Level, O: Operation>(
         &self,
-        pipeline: &GraphicsPipeline<C>,
-    ) -> BindDescriptor {
-        BindDescriptor {
-            binding: self.get_binding_data(pipeline),
+        command: RecordingCommand<'a, T, L, O>,
+    ) -> RecordingCommand<'a, T, L, O> {
+        let RecordingCommand(command, device) = command;
+        unsafe {
+            device.cmd_push_constants(
+                L::buffer(&command.data),
+                self.layout,
+                self.range.stage_flags,
+                self.range.offset,
+                bytes_of(self.data),
+            );
         }
+        RecordingCommand(command, device)
     }
 }
 
-impl Recorder for BindDescriptor {
+impl Recorder for DescriptorBindingData {
     #[inline]
     fn record<'a, 'b, T: Lifetime, L: Level, O: Operation>(
         &self,
@@ -352,10 +331,10 @@ impl Recorder for BindDescriptor {
                 L::buffer(&command.data),
                 // TODO: Needs to be changed if compute pipelines are used
                 vk::PipelineBindPoint::GRAPHICS,
-                self.binding.pipeline_layout,
-                self.binding.set_index,
+                self.pipeline_layout,
+                self.set_index,
                 // TODO: Could adapted used to bind multiple sets at once
-                &[self.binding.set],
+                &[self.set],
                 &[],
             );
         }
@@ -811,12 +790,66 @@ impl<'a, T: Lifetime, L: Level, O: Operation> RecordingCommand<'a, T, L, O> {
     }
 
     #[inline]
-    pub fn extend<P: Recorder>(self, operation: &[P]) -> Self {
-        operation.iter().fold(self, |command, op| command.push(op))
+    pub fn extend<'b, P: Recorder + 'b>(self, operation: impl IntoIterator<Item = &'b P>) -> Self {
+        operation
+            .into_iter()
+            .fold(self, |command, op| command.push(op))
     }
 
+    #[inline]
     pub fn stop_recording(self) -> BeginCommand<T, L, O> {
         let RecordingCommand(command, _) = self;
         BeginCommand(command)
+    }
+}
+
+impl Recorder for Nil {
+    #[inline]
+    fn record<'a, 'b, T: Lifetime, L: Level, O: Operation>(
+        &self,
+        command: RecordingCommand<'a, T, L, O>,
+    ) -> RecordingCommand<'a, T, L, O> {
+        command
+    }
+}
+
+impl<R: Recorder, N: Recorder> Recorder for Cons<R, N> {
+    #[inline]
+    fn record<'a, 'b, T: Lifetime, L: Level, O: Operation>(
+        &self,
+        command: RecordingCommand<'a, T, L, O>,
+    ) -> RecordingCommand<'a, T, L, O> {
+        command.push(&self.tail).push(&self.head)
+    }
+}
+
+pub struct CommandList<T: Recorder> {
+    commands: T,
+}
+
+impl CommandList<Nil> {
+    #[inline]
+    pub fn new() -> Self {
+        CommandList {
+            commands: Nil::new(),
+        }
+    }
+}
+
+impl<T: Recorder> CommandList<T> {
+    pub fn push<N: Recorder>(self, command: N) -> CommandList<Cons<N, T>> {
+        CommandList {
+            commands: Cons::new(command, self.commands),
+        }
+    }
+}
+
+impl<R: Recorder> Recorder for CommandList<R> {
+    #[inline]
+    fn record<'a, 'b, T: Lifetime, L: Level, O: Operation>(
+        &self,
+        command: RecordingCommand<'a, T, L, O>,
+    ) -> RecordingCommand<'a, T, L, O> {
+        self.commands.record(command)
     }
 }

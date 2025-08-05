@@ -1,5 +1,6 @@
 use std::{convert::Infallible, path::Path};
 
+use bytemuck::Zeroable;
 use graphics::renderer::camera::CameraMatrices;
 
 use math::types::Vector4;
@@ -8,15 +9,13 @@ use vulkan_low::{
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
-        command::{
-            BindDescriptor, BindPipeline, Level, Lifetime, Operation, Recorder, RecordingCommand,
-        },
-        descriptor::{DescriptorPool, DescriptorSetWriter},
+        command::{BindPipeline, Level, Lifetime, Operation, Recorder, RecordingCommand},
+        descriptor::{DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
         error::ResourceError,
         image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
         layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
         pipeline::{
-            GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PushConstantRangeMapper,
+            GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PushConstantData,
             ShaderDirectory,
         },
         storage::ResourceIndexListBuilder,
@@ -36,8 +35,8 @@ pub struct SkyboxPartial {
 
 struct SkyboxBindings {
     pipeline: BindPipeline,
-    descriptor: BindDescriptor,
-    range_mapper: PushConstantRangeMapper,
+    descriptor: DescriptorBindingData,
+    camera: PushConstantData<CameraMatrices>,
 }
 
 pub struct Skybox<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> {
@@ -109,8 +108,8 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Create for Skybox<L> {
             index_list![pipeline, descriptor],
             |unpack_list![descriptor, pipeline]| SkyboxBindings {
                 pipeline: pipeline.bind(),
-                descriptor: descriptor.get(0).bind(pipeline),
-                range_mapper: PushConstantRangeMapper::new(pipeline),
+                descriptor: descriptor.get(0).get_binding(pipeline),
+                camera: pipeline.map(CameraMatrices::zeroed()),
             },
         )?;
         Ok(Skybox {
@@ -162,18 +161,12 @@ impl<C: GraphicsPipelineConfig<Layout = LayoutSkybox>> Recorder for DrawSkybox<'
         &self,
         command: RecordingCommand<'a, T, L, O>,
     ) -> RecordingCommand<'a, T, L, O> {
+        let camera = self.skybox.bindings.camera.with_data(self.camera);
         command
             .push(&self.skybox.bindings.pipeline)
             .push(&self.skybox.bindings.descriptor)
             // TODO: Consider alternative approach to mapping push constants
-            .push(
-                &self
-                    .skybox
-                    .bindings
-                    .range_mapper
-                    .push_constants(&self.camera)
-                    .unwrap(),
-            )
+            .push(&camera)
             .push(&self.resources.draw(CommonMesh::Cube))
     }
 }

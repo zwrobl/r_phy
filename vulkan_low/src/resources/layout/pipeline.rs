@@ -13,18 +13,33 @@ use crate::{
     },
     Context,
 };
-use type_kit::{Cons, Create, Destroy, FromGuard, Nil};
+use type_kit::{Cons, Contains, Create, Destroy, FromGuard, Marker, Nil};
+
+pub struct PushRange<P: PushConstant> {
+    range: vk::PushConstantRange,
+    _phantom: PhantomData<P>,
+}
+
+impl<P: PushConstant> PushRange<P> {
+    #[inline]
+    pub fn new(range: vk::PushConstantRange) -> Self {
+        Self {
+            range,
+            _phantom: PhantomData,
+        }
+    }
+}
 
 pub trait Layout: 'static {
     type Descriptors: DescriptorLayoutList;
     type PushConstants: PushConstantList;
 
     fn ranges() -> PushConstantRanges<Self::PushConstants> {
-        PushConstantRanges::<Self::PushConstants>::builder()
+        PushConstantRanges::<Self::PushConstants>::new()
     }
 
     fn sets() -> DescriptorSets<Self::Descriptors> {
-        DescriptorSets::<Self::Descriptors>::builder()
+        DescriptorSets::<Self::Descriptors>::new()
     }
 }
 
@@ -35,9 +50,11 @@ pub trait PushConstant: 'static {
 pub trait PushConstantList: 'static {
     type Item: PushConstant;
     type Next: PushConstantList;
+    type RangeList;
 
     fn exhausted() -> bool;
     fn len() -> usize;
+    fn offset_list(offset: u32) -> Self::RangeList;
 }
 
 impl PushConstant for Nil {
@@ -49,6 +66,7 @@ impl PushConstant for Nil {
 impl PushConstantList for Nil {
     type Item = Self;
     type Next = Self;
+    type RangeList = Nil;
 
     fn exhausted() -> bool {
         true
@@ -57,11 +75,16 @@ impl PushConstantList for Nil {
     fn len() -> usize {
         0
     }
+
+    fn offset_list(_offset: u32) -> Self::RangeList {
+        Nil::new()
+    }
 }
 
 impl<P: PushConstant, N: PushConstantList> PushConstantList for Cons<P, N> {
     type Item = P;
     type Next = N;
+    type RangeList = Cons<PushRange<P>, N::RangeList>;
 
     fn exhausted() -> bool {
         false
@@ -70,36 +93,38 @@ impl<P: PushConstant, N: PushConstantList> PushConstantList for Cons<P, N> {
     fn len() -> usize {
         Self::Next::len() + 1
     }
+
+    fn offset_list(offset: u32) -> Self::RangeList {
+        let range = Self::Item::range(offset);
+        Cons::new(PushRange::new(range), N::offset_list(offset + range.size))
+    }
 }
 
 pub struct PushConstantRanges<N: PushConstantList> {
-    _phantom: PhantomData<N>,
+    ranges: N::RangeList,
 }
 
 impl<N: PushConstantList> Default for PushConstantRanges<N> {
+    #[inline]
     fn default() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
+        Self::new()
     }
 }
 
-#[allow(dead_code)]
 impl<N: PushConstantList> PushConstantRanges<N> {
-    pub fn new() -> PushConstantRanges<Nil> {
-        PushConstantRanges {
-            _phantom: PhantomData,
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            ranges: N::offset_list(0),
         }
     }
 
-    pub fn push<P: PushConstant>(self) -> PushConstantRanges<Cons<P, N>> {
-        PushConstantRanges {
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn builder() -> Self {
-        Self::default()
+    #[inline]
+    pub fn get_range<P: PushConstant, M: Marker>(&self) -> vk::PushConstantRange
+    where
+        N::RangeList: Contains<PushRange<P>, M>,
+    {
+        self.ranges.get().range
     }
 
     fn next_push_range<'a, T: PushConstantList>(
@@ -115,43 +140,42 @@ impl<N: PushConstantList> PushConstantRanges<N> {
         }
     }
 
-    pub fn get_ranges() -> Vec<vk::PushConstantRange> {
+    fn get_ranges() -> Vec<vk::PushConstantRange> {
         let mut ranges = vec![vk::PushConstantRange::default(); N::len()];
         Self::next_push_range::<N>(0, ranges.iter_mut());
         ranges
     }
+}
 
-    fn try_get_next_range<P: PushConstant, L: PushConstantList>(
-        offset: u32,
-    ) -> Option<vk::PushConstantRange> {
-        if !L::exhausted() {
-            let range = L::Item::range(offset);
-            if TypeId::of::<P>() == TypeId::of::<L::Item>() {
-                Some(range)
-            } else {
-                Self::try_get_next_range::<P, L::Next>(offset + range.size)
-            }
-        } else {
-            None
+pub struct DescriptorIndex<T: DescriptorLayout> {
+    index: u32,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: DescriptorLayout> DescriptorIndex<T> {
+    #[inline]
+    pub fn new(index: u32) -> Self {
+        Self {
+            index,
+            _phantom: PhantomData,
         }
-    }
-
-    pub fn try_get_range<P: PushConstant>(&self) -> Option<vk::PushConstantRange> {
-        Self::try_get_next_range::<P, N>(0)
     }
 }
 
 pub trait DescriptorLayoutList: 'static {
     type Item: DescriptorLayout;
     type Next: DescriptorLayoutList;
+    type IndexList;
 
     fn exhausted() -> bool;
     fn len() -> usize;
+    fn index_list(base_index: u32) -> Self::IndexList;
 }
 
 impl DescriptorLayoutList for Nil {
     type Item = Self;
     type Next = Self;
+    type IndexList = Nil;
 
     fn exhausted() -> bool {
         true
@@ -159,6 +183,10 @@ impl DescriptorLayoutList for Nil {
 
     fn len() -> usize {
         0
+    }
+
+    fn index_list(_base_index: u32) -> Self::IndexList {
+        Nil::new()
     }
 }
 
@@ -179,6 +207,7 @@ impl DescriptorLayout for Nil {
 impl<L: DescriptorLayout, N: DescriptorLayoutList> DescriptorLayoutList for Cons<L, N> {
     type Item = L;
     type Next = N;
+    type IndexList = Cons<DescriptorIndex<Self::Item>, N::IndexList>;
 
     fn exhausted() -> bool {
         false
@@ -187,33 +216,54 @@ impl<L: DescriptorLayout, N: DescriptorLayoutList> DescriptorLayoutList for Cons
     fn len() -> usize {
         Self::Next::len() + 1
     }
+
+    fn index_list(base_index: u32) -> Self::IndexList {
+        Cons::new(
+            DescriptorIndex::new(base_index),
+            N::index_list(base_index.saturating_sub(1)),
+        )
+    }
 }
 
 pub struct DescriptorSets<L: DescriptorLayoutList> {
-    _phantom: PhantomData<L>,
+    indices: L::IndexList,
+}
+
+impl<L: DescriptorLayoutList> Default for DescriptorSets<L> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<L: DescriptorLayoutList> DescriptorSets<L> {
-    pub fn builder() -> DescriptorSets<L> {
+    pub fn new() -> DescriptorSets<L> {
         DescriptorSets {
-            _phantom: PhantomData,
+            // TODO: Reverse list order to avoid subtraction here
+            indices: L::index_list(L::len().saturating_sub(1) as u32),
         }
     }
 
-    fn try_get_index<T: DescriptorLayout, N: DescriptorLayoutList>(index: u32) -> Option<u32> {
+    pub fn get_index<T: DescriptorLayout, M: Marker>(&self) -> u32
+    where
+        L::IndexList: Contains<DescriptorIndex<T>, M>,
+    {
+        self.indices.get().index
+    }
+
+    fn try_get_index_impl<T: DescriptorLayout, N: DescriptorLayoutList>(index: u32) -> Option<u32> {
         if !N::exhausted() {
             if TypeId::of::<T>() == TypeId::of::<N::Item>() {
                 Some(index - 1)
             } else {
-                Self::try_get_index::<T, N::Next>(index - 1)
+                Self::try_get_index_impl::<T, N::Next>(index - 1)
             }
         } else {
             None
         }
     }
 
-    pub fn get_set_index<T: DescriptorLayout>(&self) -> Option<u32> {
-        Self::try_get_index::<T, L>(L::len() as u32)
+    pub fn try_get_index<T: DescriptorLayout>(&self) -> Option<u32> {
+        Self::try_get_index_impl::<T, L>(L::len() as u32)
     }
 }
 

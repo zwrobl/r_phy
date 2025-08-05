@@ -16,8 +16,8 @@ use type_kit::{unpack_list, Cons};
 use vulkan_low::{
     index_list,
     resources::{
-        command::{BindDescriptor, BindPipeline, DrawIndexed},
-        descriptor::Descriptor,
+        command::{BindPipeline, CommandList, DrawIndexed},
+        descriptor::{Descriptor, DescriptorBindingData},
         layout::presets::{CameraDescriptorSet, ModelMatrix, ModelNormalMatrix},
         pipeline::PushConstantRangeMapper,
         storage::ResourceIndexListBuilder,
@@ -108,7 +108,7 @@ impl DescriptorIndex {
 }
 
 pub struct DescriptorState {
-    sets: Vec<BindDescriptor>,
+    sets: Vec<DescriptorBindingData>,
     buffer_states: HashMap<BufferIndex, BufferState>,
 }
 
@@ -196,7 +196,7 @@ impl PipelineState {
             .get(shader.index() as usize);
         let descriptor_index = DescriptorIndex::get(material);
         let material_binding_data = material_packs.try_get::<M>().map(|pack| {
-            pack.get_descriptor_binding_data(
+            pack.try_get_descriptor_binding_data(
                 context,
                 descriptor_index.material_index,
                 pipeline_index,
@@ -205,7 +205,7 @@ impl PipelineState {
         });
         let camera_binding_data = context
             .operate_ref(index_list![pipeline_index], |unpack_list![pipeline]| {
-                camera.bind(pipeline)
+                camera.get_binding(pipeline)
             })
             .unwrap();
         let state = DescriptorState {
@@ -393,9 +393,7 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                                             command,
                                             |command, instance| {
                                                 command
-                                                    .push(&pipeline.push_constants::<ModelMatrix>(
-                                                        &instance.into(),
-                                                    ))
+                                                    .push(&pipeline.map::<ModelMatrix, _>(instance))
                                                     .push(&model_state.mesh_bind_data)
                                             },
                                         )
@@ -429,15 +427,17 @@ impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
                                     .instances
                                     .iter()
                                     .fold(command, |command, instance| {
-                                        command
+                                        // TODO: For the time being, CommandList is used here as
+                                        // a test for this feature, this's could be replaced with direct
+                                        // push calls on the command, but does not pose an issue
+                                        // for the time being. and this code would be replaced anyway
+                                        let command_list = CommandList::new()
                                             .push(
-                                                &push_constant_mapper
-                                                    .push_constants::<ModelNormalMatrix>(
-                                                        &instance.into(),
-                                                    )
-                                                    .unwrap(),
+                                                push_constant_mapper
+                                                    .map::<ModelNormalMatrix>(instance),
                                             )
-                                            .push(&model_state.mesh_bind_data)
+                                            .push(model_state.mesh_bind_data);
+                                        command.push(&command_list)
                                     })
                             },
                         )

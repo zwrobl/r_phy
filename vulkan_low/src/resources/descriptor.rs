@@ -1,14 +1,14 @@
 mod writer;
 
 use std::{
-    any::{type_name, TypeId},
+    any::TypeId,
     convert::Infallible,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     ptr::NonNull,
 };
 
-use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
+use type_kit::{Contains, Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec, Marker};
 pub use writer::*;
 
 use ash::vk;
@@ -16,7 +16,9 @@ use ash::vk;
 use crate::{
     resources::{
         error::{GuardError, ResourceError},
-        layout::{DescriptorLayout, DescriptorSetLayout, Layout},
+        layout::{
+            DescriptorIndex, DescriptorLayout, DescriptorLayoutList, DescriptorSetLayout, Layout,
+        },
         pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
         Resource, ResourceGuardError,
     },
@@ -128,23 +130,37 @@ pub struct DescriptorBindingData {
     pub pipeline_layout: vk::PipelineLayout,
 }
 
+pub type PipelineSetIndices<C> = <<<C as GraphicsPipelineConfig>::Layout as Layout>::Descriptors as DescriptorLayoutList>::IndexList;
+
 impl<T: DescriptorLayout> Descriptor<T> {
-    pub fn get_binding_data<C: GraphicsPipelineConfig>(
+    pub fn get_binding<C: GraphicsPipelineConfig, M: Marker>(
         &self,
         pipeline: &GraphicsPipeline<C>,
-    ) -> DescriptorBindingData {
-        let set_index = C::Layout::sets().get_set_index::<T>().unwrap_or_else(|| {
-            panic!(
-                "DescriptorSet {} not present in layout DescriptorSets {}",
-                type_name::<T>(),
-                type_name::<<C::Layout as Layout>::Descriptors>()
-            )
-        });
+    ) -> DescriptorBindingData
+    where
+        PipelineSetIndices<C>: Contains<DescriptorIndex<T>, M>,
+    {
+        let set_index = C::Layout::sets().get_index::<T, _>();
         DescriptorBindingData {
             set_index,
             set: self.set,
             pipeline_layout: pipeline.layout().into(),
         }
+    }
+
+    pub fn try_get_binding<C: GraphicsPipelineConfig>(
+        &self,
+        pipeline: &GraphicsPipeline<C>,
+    ) -> Option<DescriptorBindingData> {
+        C::Layout::sets()
+            .try_get_index::<T>()
+            .and_then(|set_index| {
+                Some(DescriptorBindingData {
+                    set_index,
+                    set: self.set,
+                    pipeline_layout: pipeline.layout().into(),
+                })
+            })
     }
 }
 
