@@ -8,7 +8,7 @@ use vulkan_low::{
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
-        command::{level::Level, operation::Operation, RecordingCommand},
+        command::{Level, Lifetime, Operation, RecordingCommand},
         descriptor::{DescriptorPool, DescriptorSetWriter},
         error::{ResourceError, ResourceResult},
         image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
@@ -114,7 +114,7 @@ impl<L: GraphicsPipelineConfig<Layout = LayoutSkybox>> Destroy for Skybox<L> {
 
 pub fn draw_skybox<
     'a,
-    T,
+    T: Lifetime,
     L: Level,
     O: Operation,
     C: GraphicsPipelineConfig<Layout = LayoutSkybox>,

@@ -17,7 +17,7 @@ use crate::{
             persistent::PersistentBuffer, Buffer, BufferInfoBuilder, BufferPartial, BufferRaw,
             BufferUsage, SharingMode,
         },
-        command::operation::Operation,
+        command::Operation,
         error::{GuardError, ResourceError},
         Partial, Resource, ResourceGuardError,
     },

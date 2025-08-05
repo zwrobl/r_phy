@@ -21,10 +21,7 @@ use crate::{
         buffer::{
             BufferInfoBuilder, BufferPartial, BufferRaw, BufferUsage, PersistentBuffer, SharingMode,
         },
-        command::{
-            operation::{self, Operation},
-            SubmitSemaphoreState,
-        },
+        command::{Graphics, Operation, SubmitSemaphoreState, Transfer},
         error::{GuardError, ResourceError},
         image::{Image, ImageType},
         Partial, Resource, ResourceGuardError,
@@ -79,7 +76,7 @@ impl Create for StagingBufferPartial {
             BufferInfoBuilder::<HostCoherent>::new()
                 .with_usage(BufferUsage::TransferSrc)
                 .with_sharing_mode(SharingMode::Exclusive)
-                .with_queue_families(&[operation::Transfer::get_queue_family_index(context)])
+                .with_queue_families(&[Transfer::get_queue_family_index(context)])
                 .with_size(config.range.end),
             context,
         )?;
@@ -146,7 +143,7 @@ impl StagingBuffer {
         dst: impl Into<&'b mut Buffer<DeviceLocal>>,
         dst_offset: vk::DeviceSize,
     ) -> ExtResult<()> {
-        let command = context.allocate_transient_command::<operation::Transfer>()?;
+        let command = context.allocate_transient_command::<Transfer>()?;
         let command = context.begin_primary_command(command)?;
         let command = context
             .start_recording(command)
@@ -184,8 +181,8 @@ impl StagingBuffer {
         let image_info = dst.get_image_info();
         let mip_info = image_info.mip_info.unwrap_or_default();
         let old_layout = dst.get_vk_layout();
-        let command = context
-            .begin_primary_command(context.allocate_transient_command::<operation::Graphics>()?)?;
+        let command =
+            context.begin_primary_command(context.allocate_transient_command::<Graphics>()?)?;
         let command = context
             .start_recording(command)
             .change_layout(

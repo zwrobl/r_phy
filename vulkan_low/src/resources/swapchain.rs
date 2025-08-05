@@ -23,9 +23,7 @@ use crate::{
     device::Device,
     resources::{
         command::{
-            level::Primary,
-            operation::{Graphics, Operation},
-            FinishedCommand, Persistent, SubmitSemaphoreState,
+            FinishedCommand, Graphics, Operation, Persistent, Primary, SubmitSemaphoreState,
         },
         framebuffer::{Framebuffer, FramebufferHandle},
         storage::ResourceIndexListBuilder,

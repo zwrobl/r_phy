@@ -16,7 +16,7 @@ use vulkan_low::{
     memory::{range::ByteRange, DeviceLocal},
     resources::{
         buffer::{Buffer, BufferPartial},
-        command::{level::Level, operation::Operation, BufferBinding, IndexType, RecordingCommand},
+        command::{BufferBinding, IndexType, Level, Lifetime, Operation, RecordingCommand},
         storage::ResourceIndexListBuilder,
         ResourceIndex,
     },
@@ -113,7 +113,7 @@ impl<'a> From<&'a MeshPackData> for MeshPackBinding {
     }
 }
 
-pub fn bind_mesh_pack<'a, T, L: Level, O: Operation>(
+pub fn bind_mesh_pack<'a, T: Lifetime, L: Level, O: Operation>(
     context: &Context,
     command: RecordingCommand<'a, T, L, O>,
     pack: impl Into<MeshPackBinding>,

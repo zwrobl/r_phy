@@ -22,11 +22,7 @@ use vulkan_low::{
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
         buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-        command::{
-            level::{Primary, Secondary},
-            operation::Graphics,
-            BeginCommand, Persistent, PersistentCommandPool,
-        },
+        command::{BeginCommand, Graphics, Persistent, PersistentCommandPool, Primary, Secondary},
         descriptor::{Descriptor, DescriptorPool, DescriptorSetWriter},
         error::ResourceError,
         layout::presets::CameraDescriptorSet,

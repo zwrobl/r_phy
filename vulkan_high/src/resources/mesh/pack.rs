@@ -15,10 +15,7 @@ use vulkan_low::{
             BufferInfoBuilder, BufferPartial, BufferUsage, SharingMode, StagingBuffer,
             StagingBufferBuilder, StagingBufferPartial,
         },
-        command::{
-            operation::{self, Operation},
-            DrawIndexed,
-        },
+        command::{DrawIndexed, Graphics, Operation},
         error::{ResourceError, ResourceResult},
         storage::ResourceIndexListBuilder,
         Partial,
@@ -57,7 +54,7 @@ impl<'b, V: Vertex> Create for MeshPackPartial<'b, V> {
                 .with_usage(BufferUsage::VertexBuffer)
                 .with_usage(BufferUsage::IndexBuffer)
                 .with_usage(BufferUsage::TransferDst)
-                .with_queue_families(&[operation::Graphics::get_queue_family_index(context)])
+                .with_queue_families(&[Graphics::get_queue_family_index(context)])
                 .with_size(buffer_ranges.get_rquired_buffer_size()),
             context,
         )?;

@@ -6,7 +6,7 @@ use bytemuck::AnyBitPattern;
 use crate::{
     resources::{
         buffer::UniformBuffer,
-        command::operation::Operation,
+        command::Operation,
         image::DescriptorImageInfo,
         layout::{DescriptorBinding, DescriptorLayout, DescriptorType},
     },

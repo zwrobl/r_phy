@@ -12,7 +12,7 @@ use type_kit::{Create, CreateResult, Destroy};
 use vulkan_low::{
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
-        command::{level::Level, operation::Operation, RecordingCommand},
+        command::{Level, Lifetime, Operation, RecordingCommand},
         error::ResourceError,
         Partial,
     },
@@ -112,7 +112,7 @@ impl Create for CommonResources {
 
 impl CommonResources {
     #[inline]
-    pub fn draw<'a, T, L: Level, O: Operation>(
+    pub fn draw<'a, T: Lifetime, L: Level, O: Operation>(
         &self,
         context: &Context,
         command: RecordingCommand<'a, T, L, O>,

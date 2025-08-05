@@ -6,11 +6,7 @@ use vulkan_low::{
     error::ExtError,
     index_list,
     resources::{
-        command::{
-            level::{Primary, Secondary},
-            operation::Graphics,
-            BeginCommand, FinishedCommand, Persistent,
-        },
+        command::{BeginCommand, FinishedCommand, Graphics, Persistent, Primary, Secondary},
         descriptor::Descriptor,
         framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
         layout::presets::CameraDescriptorSet,

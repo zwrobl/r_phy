@@ -8,7 +8,7 @@ use vulkan_low::{
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
         buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
-        command::operation::Graphics,
+        command::Graphics,
         descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
         error::ResourceResult,
         image::{DescriptorImageInfo, Image2D, Image2DReader, Texture, TexturePartial},
