@@ -343,6 +343,9 @@ impl<T: 'static, N: TypeList> TypeList for Cons<T, N> {
     type MutList<'a> = Cons<&'a mut Self::Item, N::MutList<'a>>;
 }
 
+pub type ListRefType<'a, T> = <T as TypeList>::RefList<'a>;
+pub type ListMutType<'a, T> = <T as TypeList>::MutList<'a>;
+
 #[cfg(test)]
 mod test_macro {
     use crate::{list_type, list_value, unpack_any, Cons, Nil};
