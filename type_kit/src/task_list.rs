@@ -2,23 +2,10 @@ use crate::{Cons, Marked, Marker, Nil, Subset, TypeList};
 
 pub trait Task: 'static {
     type Resources: TypeList;
-    // Here the explicit repetition of expected Ref and Mut type is necessary
-    // to ensure that the compiler can infer the correct types in the context of execute method.
-    // Otherwise the trait is not usable in practice as the types returned by sub_get and sub_get_mut
-    // are not known at compile time.
-    //
-    // TODO: Consider implementing a macro to reduce boilerplate.
-    type ResourcesRef<'a>;
-    type ResourcesMut<'a>;
 
-    fn execute<'a, M: Marker, R: TypeList>(&'a mut self, resources: &'a mut R)
+    fn execute<M: Marker, R: TypeList>(&mut self, resources: &mut R)
     where
-        Self::Resources: Subset<
-            R,
-            M,
-            SubsetRef<'a> = Self::ResourcesRef<'a>,
-            SubsetMut<'a> = Self::ResourcesMut<'a>,
-        >;
+        Self::Resources: Subset<R, M>;
 }
 
 // Trait that acts as a layer of indirection to allow for the pipeline stages to be used
@@ -37,8 +24,7 @@ pub(crate) trait TaskExecutor<R: TypeList>: 'static {
 
 impl<I: Task, M: Marker, R: TypeList> TaskExecutor<R> for Marked<I, M>
 where
-    for<'a> I::Resources:
-        Subset<R, M, SubsetRef<'a> = I::ResourcesRef<'a>, SubsetMut<'a> = I::ResourcesMut<'a>>,
+    for<'a> I::Resources: Subset<R, M>,
 {
     type Marker = M;
     type Resources = I::Resources;
@@ -109,8 +95,7 @@ impl<R: TypeList, S: TaskList<R>> TaskListBuilder<R, S> {
         stage: I,
     ) -> TaskListBuilder<R, Cons<Marked<I, M>, S>>
     where
-        for<'a> I::Resources:
-            Subset<R, M, SubsetRef<'a> = I::ResourcesRef<'a>, SubsetMut<'a> = I::ResourcesMut<'a>>,
+        for<'a> I::Resources: Subset<R, M>,
     {
         TaskListBuilder {
             resources: self.resources,
@@ -159,7 +144,9 @@ impl<R: TypeList, S: TaskList<R>> Executor for SynchronousExecutor<R, S> {
 
 #[cfg(test)]
 mod test_pipeline_stack {
-    use crate::{list_type, unpack_list, Cons, Executor, Marker, Nil, Subset, SynchronousExecutor, TypeList};
+    use crate::{
+        list_type, unpack_list, Cons, Executor, Marker, Nil, Subset, SynchronousExecutor, TypeList,
+    };
 
     use super::Task;
 
@@ -167,17 +154,10 @@ mod test_pipeline_stack {
 
     impl Task for Generate {
         type Resources = list_type![Vec<u16>, Nil];
-        type ResourcesRef<'a> = list_type![&'a Vec<u16>, &'a Nil];
-        type ResourcesMut<'a> = list_type![&'a mut Vec<u16>, &'a mut Nil];
 
-        fn execute<'a, M: Marker, R: TypeList>(&'a mut self, resources: &'a mut R)
+        fn execute<M: Marker, R: TypeList>(&mut self, resources: &mut R)
         where
-            Self::Resources: Subset<
-                R,
-                M,
-                SubsetRef<'a> = Self::ResourcesRef<'a>,
-                SubsetMut<'a> = Self::ResourcesMut<'a>,
-            >,
+            Self::Resources: Subset<R, M>,
         {
             let unpack_list![a] = unsafe { Self::Resources::sub_get_mut(resources) };
             println!("Begin: Generate; resources: Vec<u16>: {:?}", a);
@@ -190,17 +170,10 @@ mod test_pipeline_stack {
 
     impl Task for Process {
         type Resources = list_type![Vec<u16>, u16, Nil];
-        type ResourcesRef<'a> = list_type![&'a Vec<u16>, &'a u16, &'a Nil];
-        type ResourcesMut<'a> = list_type![&'a mut Vec<u16>, &'a mut u16, &'a mut Nil];
 
-        fn execute<'a, M: Marker, R: TypeList>(&'a mut self, resources: &'a mut R)
+        fn execute<M: Marker, R: TypeList>(&mut self, resources: &mut R)
         where
-            Self::Resources: Subset<
-                R,
-                M,
-                SubsetRef<'a> = Self::ResourcesRef<'a>,
-                SubsetMut<'a> = Self::ResourcesMut<'a>,
-            >,
+            Self::Resources: Subset<R, M>,
         {
             let _subset = unsafe { Self::Resources::sub_get_mut(resources) };
             let unpack_list![vec_u16, sum] = _subset;
@@ -220,18 +193,10 @@ mod test_pipeline_stack {
 
     impl Task for Cleanup {
         type Resources = list_type![Vec<u16>, u16, String, Nil];
-        type ResourcesRef<'a> = list_type![&'a Vec<u16>, &'a u16, &'a String, &'a Nil];
-        type ResourcesMut<'a> =
-            list_type![&'a mut Vec<u16>, &'a mut u16, &'a mut String, &'a mut Nil];
 
-        fn execute<'a, M: Marker, R: TypeList>(&'a mut self, resources: &'a mut R)
+        fn execute<M: Marker, R: TypeList>(&mut self, resources: &mut R)
         where
-            Self::Resources: Subset<
-                R,
-                M,
-                SubsetRef<'a> = Self::ResourcesRef<'a>,
-                SubsetMut<'a> = Self::ResourcesMut<'a>,
-            >,
+            Self::Resources: Subset<R, M>,
         {
             let subset = unsafe { Self::Resources::sub_get_mut(resources) };
             let unpack_list![a, b, c] = subset;

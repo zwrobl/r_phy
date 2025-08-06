@@ -300,6 +300,8 @@ pub trait TypeList: Sized + 'static {
     const LEN: usize;
     type Item;
     type Next: TypeList;
+    type RefList<'a>;
+    type MutList<'a>;
 
     #[inline]
     fn len(&self) -> usize {
@@ -321,18 +323,24 @@ impl<N: 'static> TypeList for TypedNil<N> {
     const LEN: usize = 0;
     type Item = N;
     type Next = Self;
+    type RefList<'a> = &'a Self;
+    type MutList<'a> = &'a mut Self;
 }
 
 impl<T: 'static> TypeList for Fin<T> {
     const LEN: usize = 1;
     type Item = T;
     type Next = Nil;
+    type RefList<'a> = &'a Self;
+    type MutList<'a> = &'a mut Self;
 }
 
 impl<T: 'static, N: TypeList> TypeList for Cons<T, N> {
     const LEN: usize = N::LEN + 1;
     type Item = T;
     type Next = N;
+    type RefList<'a> = Cons<&'a Self::Item, N::RefList<'a>>;
+    type MutList<'a> = Cons<&'a mut Self::Item, N::MutList<'a>>;
 }
 
 #[cfg(test)]
@@ -607,10 +615,10 @@ impl<T> Contains<TypedNil<T>, Here> for TypedNil<T> {
 }
 
 pub trait Subset<L: TypeList, T: Marker>: TypeList {
-    type SubsetRef<'a>;
-    type SubsetMut<'a>;
+    // type SubsetRef<'a>;
+    // type SubsetMut<'a>;
 
-    fn sub_get<'a>(superset: &'a L) -> Self::SubsetRef<'a>;
+    fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a>;
 
     /// # Safety
     /// If subset lists each element uniquely, then
@@ -619,21 +627,21 @@ pub trait Subset<L: TypeList, T: Marker>: TypeList {
     /// element may be obtained, which is not allowed and may cause undefined behavior due to aliasing mutable references.
     ///
     /// User must ensure that the subset list does not contain duplicate elements.
-    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::SubsetMut<'a>;
+    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a>;
 }
 
 impl<L: TypeList, M: Marker> Subset<L, M> for Nil
 where
     L: Contains<Nil, M>,
 {
-    type SubsetRef<'a> = &'a Nil;
-    type SubsetMut<'a> = &'a mut Nil;
+    // type SubsetRef<'a> = &'a Nil;
+    // type SubsetMut<'a> = &'a mut Nil;
 
-    fn sub_get<'a>(superset: &'a L) -> Self::SubsetRef<'a> {
+    fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         superset.get()
     }
 
-    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::SubsetMut<'a> {
+    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a> {
         superset.get_mut()
     }
 }
@@ -646,14 +654,14 @@ impl<T: 'static, L: TypeList, M1: Marker, M2: Marker, N: Subset<L, M2>> Subset<L
 where
     L: Contains<T, M1>,
 {
-    type SubsetRef<'a> = Cons<&'a T, N::SubsetRef<'a>>;
-    type SubsetMut<'a> = Cons<&'a mut T, N::SubsetMut<'a>>;
+    // type SubsetRef<'a> = Cons<&'a T, N::SubsetRef<'a>>;
+    // type SubsetMut<'a> = Cons<&'a mut T, N::SubsetMut<'a>>;
 
-    fn sub_get<'a>(superset: &'a L) -> Self::SubsetRef<'a> {
+    fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         Cons::new(superset.get(), N::sub_get(superset))
     }
 
-    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::SubsetMut<'a> {
+    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a> {
         let mut reborrow = NonNull::new_unchecked(superset);
         Cons::new(superset.get_mut(), N::sub_get_mut(reborrow.as_mut()))
     }
@@ -662,20 +670,25 @@ where
 // This trait could act as a markr trait, the methods as currently defined
 // are tehnically valid, but are not usefull in practice as the type inference
 // will not be able to infer the correct type for `L` and `T`.
+// Its use requires to explicity state te superet type in the method invocation,
+// making the syntax more complex and less ergonomic than directly using Subset methods
 // Temporary left here for future reference and potential improvements.
-pub trait Superset<L: TypeList, T: Marker>: TypeList
+pub trait Superset<L: TypeList, T: Marker>: TypeList {
+    fn super_get<'a>(&'a self) -> L::RefList<'a>;
+    unsafe fn super_get_mut<'a>(&'a mut self) -> L::MutList<'a>;
+}
+
+impl<T: TypeList, L: TypeList, M: Marker> Superset<L, M> for T
 where
-    L: Subset<Self, T>,
+    L: Subset<T, M>,
 {
-    fn super_get<'a>(&'a self) -> <L as Subset<Self, T>>::SubsetRef<'a> {
+    fn super_get<'a>(&'a self) -> L::RefList<'a> {
         L::sub_get(self)
     }
-    unsafe fn super_get_mut<'a>(&'a mut self) -> <L as Subset<Self, T>>::SubsetMut<'a> {
+    unsafe fn super_get_mut<'a>(&'a mut self) -> L::MutList<'a> {
         L::sub_get_mut(self)
     }
 }
-
-impl<T: TypeList, L: TypeList, M: Marker> Superset<L, M> for T where L: Subset<T, M> {}
 
 #[cfg(test)]
 mod test_subset {
@@ -688,7 +701,7 @@ mod test_subset {
         true
     }
 
-    fn should_compile_superset<M: Marker, L: Subset<S, M>, S: Superset<L, M>>() -> bool {
+    fn should_compile_superset<M: Marker, L: TypeList, S: Superset<L, M>>() -> bool {
         true
     }
 
@@ -702,6 +715,16 @@ mod test_subset {
     fn test_sub_get() {
         let superset: SupersetList = list_value![1u16, 2u32, 3u64, "Hello".to_string(), Nil::new()];
         let unpack_list![a, b, c] = SubsetList::sub_get(&superset);
+        assert_eq!(*a, 2u32);
+        assert_eq!(*b, "Hello");
+        assert_eq!(*c, 1u16);
+    }
+
+    #[test]
+    fn test_super_get() {
+        let superset: SupersetList = list_value![1u16, 2u32, 3u64, "Hello".to_string(), Nil::new()];
+        let subset = <SupersetList as Superset<SubsetList, _>>::super_get(&superset);
+        let unpack_list![a, b, c] = subset;
         assert_eq!(*a, 2u32);
         assert_eq!(*b, "Hello");
         assert_eq!(*c, 1u16);
