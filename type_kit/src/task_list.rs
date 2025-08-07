@@ -1,4 +1,4 @@
-use std::{convert::Infallible, error::Error, marker::PhantomData};
+use std::{any::type_name, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 
 use crate::{Cons, ListMutType, Marked, Marker, Nil, Subset, TypeList};
 
@@ -8,6 +8,7 @@ use crate::{Cons, ListMutType, Marked, Marker, Nil, Subset, TypeList};
 /// method can safely access the resources without causing the TaskExecutor to create
 /// aliased mutable references to the same resource, causing undefined behavior.
 pub unsafe trait Task: 'static {
+    type Dependencies: DependencyList;
     type ResourceSet: TypeList;
     type TaskError: Error;
 
@@ -15,6 +16,42 @@ pub unsafe trait Task: 'static {
         &'a mut self,
         resources: ListMutType<'a, Self::ResourceSet>,
     ) -> Result<(), Self::TaskError>;
+}
+
+pub struct Dependency<T: Task> {
+    _task: PhantomData<T>,
+}
+
+impl<T: Task> Debug for Dependency<T> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dependency")
+            .field("Task", &type_name::<T>())
+            .finish()
+    }
+}
+
+impl<T: Task> Dependency<T> {
+    #[inline]
+    pub fn new() -> Self {
+        Self { _task: PhantomData }
+    }
+}
+
+pub trait DependencyList: TypeList {}
+
+impl DependencyList for Nil {}
+
+impl<T: Task, N: DependencyList> DependencyList for Cons<Dependency<T>, N> {}
+
+#[macro_export]
+macro_rules! dependency_list {
+    [$head:ty] => {
+        Cons<Dependency<$head>, Nil>
+    };
+    [$head:ty $(, $tail:ty)*] => {
+        Cons<Dependency<$head>, dependency_list![$($tail),*]>
+    };
 }
 
 // Trait that acts as a layer of indirection to allow for the pipeline stages to be used
@@ -75,9 +112,10 @@ pub struct ResourceListBuilder<R: TypeList> {
     resources: R,
 }
 
-pub struct TaskListBuilder<R: TypeList, E: Error, S: TaskList<R, E>> {
+pub struct TaskListBuilder<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E>> {
     resources: R,
     stages: S,
+    dependencies: D,
     _error: PhantomData<E>,
 }
 
@@ -99,28 +137,31 @@ impl<R: TypeList> ResourceListBuilder<R> {
     }
 
     #[inline]
-    pub fn finalize_resource_list(self) -> TaskListBuilder<R, Infallible, Nil> {
+    pub fn finalize_resource_list(self) -> TaskListBuilder<Infallible, R, Nil, Nil> {
         TaskListBuilder {
             resources: self.resources,
             stages: Nil::new(),
+            dependencies: Nil::new(),
             _error: PhantomData,
         }
     }
 }
 
-impl<R: TypeList, E: Error, S: TaskList<R, E>> TaskListBuilder<R, E, S> {
+impl<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E>> TaskListBuilder<E, R, D, S> {
     #[inline]
-    pub fn push_task<M: Marker, I: Task>(
+    pub fn push_task<M1: Marker, M2: Marker, I: Task>(
         self,
         stage: I,
-    ) -> TaskListBuilder<R, I::TaskError, Cons<Marked<I, M>, S>>
+    ) -> TaskListBuilder<I::TaskError, R, Cons<Dependency<I>, D>, Cons<Marked<I, M1>, S>>
     where
         S: TaskList<R, I::TaskError>,
-        I::ResourceSet: Subset<R, M>,
+        I::ResourceSet: Subset<R, M1>,
+        I::Dependencies: Subset<D, M2>,
     {
         TaskListBuilder {
             resources: self.resources,
             stages: Cons::new(Marked::new(stage), self.stages),
+            dependencies: Cons::new(Dependency::<I>::new(), self.dependencies),
             _error: PhantomData,
         }
     }
@@ -172,14 +213,16 @@ impl<R: TypeList, S: TaskList<R, E>, E: Error> Executor for SynchronousExecutor<
 mod test_task_list {
     use std::{convert::Infallible, error::Error, fmt::Display};
 
-    use crate::{list_type, unpack_list, Cons, Executor, ListMutType, Nil, SynchronousExecutor};
-
-    use super::Task;
+    use crate::{
+        dependency_list, list_type, unpack_list, Cons, Dependency, Executor, ListMutType, Nil,
+        SynchronousExecutor, Task,
+    };
 
     struct Generate;
 
     unsafe impl Task for Generate {
         type ResourceSet = list_type![Vec<u16>, Nil];
+        type Dependencies = Nil;
         type TaskError = Infallible;
 
         fn execute<'a>(
@@ -197,6 +240,7 @@ mod test_task_list {
 
     unsafe impl Task for Process {
         type ResourceSet = list_type![Vec<u16>, u16, Nil];
+        type Dependencies = dependency_list![Generate];
         type TaskError = Infallible;
 
         fn execute<'a>(
@@ -220,6 +264,7 @@ mod test_task_list {
 
     unsafe impl Task for Cleanup {
         type ResourceSet = list_type![Vec<u16>, u16, String, Nil];
+        type Dependencies = dependency_list![Process];
         type TaskError = Infallible;
 
         fn execute<'a>(
@@ -282,6 +327,7 @@ mod test_task_list {
 
     unsafe impl Task for DummyPassingStage {
         type ResourceSet = Nil;
+        type Dependencies = Nil;
         type TaskError = DummyError;
 
         fn execute<'a>(
@@ -295,6 +341,7 @@ mod test_task_list {
 
     unsafe impl Task for FailingStage {
         type ResourceSet = Nil;
+        type Dependencies = Nil;
         type TaskError = DummyError;
 
         fn execute<'a>(
@@ -319,6 +366,7 @@ mod test_task_list {
 
     unsafe impl Task for InfallibleStage {
         type ResourceSet = Nil;
+        type Dependencies = Nil;
         type TaskError = Infallible;
 
         fn execute<'a>(
