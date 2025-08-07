@@ -317,6 +317,16 @@ pub trait TypeList: Sized + 'static {
     fn append<N>(self, item: N) -> Cons<N, Self> {
         Cons::new(item, self)
     }
+
+    #[inline]
+    fn sub_ref<'a, M: Marker, S: Subset<Self, M>>(&'a self) -> S::RefList<'a> {
+        S::sub_get(self)
+    }
+
+    #[inline]
+    unsafe fn sub_mut<'a, M: Marker, S: Subset<Self, M>>(&'a mut self) -> S::MutList<'a> {
+        S::sub_get_mut(self)
+    }
 }
 
 impl<N: 'static> TypeList for TypedNil<N> {

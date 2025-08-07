@@ -5,7 +5,7 @@ use crate::{Cons, Here, ListMutType, Marked, Marker, Nil, Subset, TypeList};
 /// # Safety
 /// Task implementator is required to ensure that the ResourceSet associated type
 /// does not repeat the same type more than once. This is required so that the `execute`
-/// method can safely access the resources without causing the TaskExecutor to create
+/// method can safely access the resources without causing the TaskList to create
 /// aliased mutable references to the same resource, causing undefined behavior.
 pub unsafe trait Task: 'static {
     type Dependencies: DependencyList;
@@ -56,29 +56,25 @@ macro_rules! dependency_list {
     };
 }
 
-// Trait that acts as a layer of indirection to allow for the pipeline stages to be used
-// with various compatible resource lists.
-// Moving R as the type parameter for the Pipeline trait would make more burdensome to implement
-// and less flexible, as it would require the user to specify the type of resource list,
-// requiring separate implementations for any compatible resource list, alternatively
-// the user could manage with complex trait bounds and blanket implementations.
-// Current solution seems to be most flexible and ergonomic.
-pub trait TaskExecutor<R: TypeList, E: Error>: 'static {
+pub trait TaskList<R: TypeList, E: Error>: 'static {
     type TaskResult;
-    type Marker: Marker;
-    type Resources: Subset<R, Self::Marker>;
-
     fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E>;
 }
 
-impl<I: Task, M: Marker, E: Error, R: TypeList> TaskExecutor<R, E> for Marked<I, M>
+impl<R: TypeList, E: Error> TaskList<R, E> for Nil {
+    type TaskResult = ();
+    #[inline]
+    fn execute(&mut self, _resources: &mut R) -> Result<Self::TaskResult, E> {
+        Ok(())
+    }
+}
+
+impl<I: Task, M: Marker, E: Error, R: TypeList> TaskList<R, E> for Marked<I, M>
 where
     I::TaskError: Into<E>,
     I::ResourceSet: Subset<R, M>,
 {
-    type Marker = M;
     type TaskResult = I::TaskResult;
-    type Resources = I::ResourceSet;
 
     #[inline]
     fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E> {
@@ -89,22 +85,13 @@ where
     }
 }
 
-pub trait TaskList<R: TypeList, E: Error>: 'static {
-    type TaskResult;
-    fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E>;
-}
-
-impl<R: TypeList, E: Error> TaskList<R, E> for Nil {
-    type TaskResult = ();
-    fn execute(&mut self, _resources: &mut R) -> Result<Self::TaskResult, E> {
-        Ok(())
-    }
-}
-
-impl<R: TypeList, E: Error, S: TaskExecutor<R, E>, N: TaskList<R, E>> TaskList<R, E>
-    for Cons<S, N>
+impl<R: TypeList, E: Error, M: Marker, I: Task, N: TaskList<R, E>> TaskList<R, E>
+    for Cons<Marked<I, M>, N>
+where
+    I::TaskError: Into<E>,
+    I::ResourceSet: Subset<R, M>,
 {
-    type TaskResult = S::TaskResult;
+    type TaskResult = I::TaskResult;
 
     #[inline]
     fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E> {
@@ -281,7 +268,7 @@ mod test_task_list {
 
     use crate::{
         dependency_list, list_type, list_value, unpack_list, Cons, Dependency, Executor,
-        ListMutType, Nil, SynchronousExecutor, Task,
+        ListMutType, Nil, SynchronousExecutor, Task, TypeList,
     };
 
     struct Generate;
@@ -342,19 +329,30 @@ mod test_task_list {
 
     #[test]
     fn test_simple_task() {
-        let mut stack = SynchronousExecutor::builder()
+        let mut executor = SynchronousExecutor::builder()
             .register_resource(0u16)
             .register_resource(Vec::<u16>::new())
             .push_task(Generate)
             .push_task(Process)
             .push_task(Cleanup)
             .build();
-        let result = stack.execute(list_value!(43u16, Nil::new()));
+        let result = executor.execute(list_value!(43u16, Nil::new()));
         assert!(result.is_ok());
-        let unpack_list![vec_u16, sum] = stack.resources;
-        assert_eq!(sum, 0u16);
+        let unpack_list![vec_u16, sum] = executor
+            .resources
+            .sub_ref::<_, list_type![Vec<u16>, u16, Nil]>();
+        assert_eq!(*sum, 0u16);
         assert!(vec_u16.is_empty());
         assert_eq!(result.unwrap(), "ComputedValue: 903");
+        // Execution stack is reusable
+        let result = executor.execute(list_value!(22u16, Nil::new()));
+        assert!(result.is_ok());
+        let unpack_list![vec_u16, sum] = executor
+            .resources
+            .sub_ref::<_, list_type![Vec<u16>, u16, Nil]>();
+        assert_eq!(*sum, 0u16);
+        assert!(vec_u16.is_empty());
+        assert_eq!(result.unwrap(), "ComputedValue: 231");
     }
 
     #[derive(Debug)]
