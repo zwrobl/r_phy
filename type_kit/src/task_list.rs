@@ -11,11 +11,12 @@ pub unsafe trait Task: 'static {
     type Dependencies: DependencyList;
     type ResourceSet: TypeList;
     type TaskError: Error;
+    type TaskResult;
 
     fn execute<'a>(
         &'a mut self,
         resources: ListMutType<'a, Self::ResourceSet>,
-    ) -> Result<(), Self::TaskError>;
+    ) -> Result<Self::TaskResult, Self::TaskError>;
 }
 
 pub struct Dependency<T: Task> {
@@ -61,11 +62,12 @@ macro_rules! dependency_list {
 // requiring separate implementations for any compatible resource list, alternatively
 // the user could manage with complex trait bounds and blanket implementations.
 // Current solution seems to be most flexible and ergonomic.
-pub(crate) trait TaskExecutor<R: TypeList, E: Error>: 'static {
+pub trait TaskExecutor<R: TypeList, E: Error>: 'static {
+    type TaskResult;
     type Marker: Marker;
     type Resources: Subset<R, Self::Marker>;
 
-    fn execute(&mut self, resources: &mut R) -> Result<(), E>;
+    fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E>;
 }
 
 impl<I: Task, M: Marker, E: Error, R: TypeList> TaskExecutor<R, E> for Marked<I, M>
@@ -74,10 +76,11 @@ where
     I::ResourceSet: Subset<R, M>,
 {
     type Marker = M;
+    type TaskResult = I::TaskResult;
     type Resources = I::ResourceSet;
 
     #[inline]
-    fn execute(&mut self, resources: &mut R) -> Result<(), E> {
+    fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E> {
         // This is safe because the Task trait guarantees that the ResourceSet does not repeat types.
         self.value
             .execute(unsafe { I::ResourceSet::sub_get_mut(resources) })
@@ -86,11 +89,13 @@ where
 }
 
 pub trait TaskList<R: TypeList, E: Error>: 'static {
-    fn execute(&mut self, resources: &mut R) -> Result<(), E>;
+    type TaskResult;
+    fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E>;
 }
 
 impl<R: TypeList, E: Error> TaskList<R, E> for Nil {
-    fn execute(&mut self, _resources: &mut R) -> Result<(), E> {
+    type TaskResult = ();
+    fn execute(&mut self, _resources: &mut R) -> Result<Self::TaskResult, E> {
         Ok(())
     }
 }
@@ -98,13 +103,15 @@ impl<R: TypeList, E: Error> TaskList<R, E> for Nil {
 impl<R: TypeList, E: Error, S: TaskExecutor<R, E>, N: TaskList<R, E>> TaskList<R, E>
     for Cons<S, N>
 {
+    type TaskResult = S::TaskResult;
+
     #[inline]
-    fn execute(&mut self, resources: &mut R) -> Result<(), E> {
+    fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E> {
         // Task list execute form its tail to head to ensure that the order of execution
         // is the same as order of task insertion in the task list builder.
         self.tail.execute(resources)?;
-        self.head.execute(resources)?;
-        Ok(())
+        let result = self.head.execute(resources)?;
+        Ok(result)
     }
 }
 
@@ -147,7 +154,9 @@ impl<R: TypeList> ResourceListBuilder<R> {
     }
 }
 
-impl<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E>> TaskListBuilder<E, R, D, S> {
+impl<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E, TaskResult = ()>>
+    TaskListBuilder<E, R, D, S>
+{
     #[inline]
     pub fn push_task<M1: Marker, M2: Marker, I: Task>(
         self,
@@ -165,7 +174,9 @@ impl<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E>> TaskListBuilde
             _error: PhantomData,
         }
     }
+}
 
+impl<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E>> TaskListBuilder<E, R, D, S> {
     #[inline]
     pub fn build(self) -> SynchronousExecutor<E, R, S> {
         SynchronousExecutor {
@@ -195,7 +206,12 @@ pub trait Executor {
     type TaskError: Error;
     type TaskList: TaskList<Self::Resources, Self::TaskError>;
 
-    fn execute(&mut self) -> Result<(), Self::TaskError>;
+    fn execute(
+        &mut self,
+    ) -> Result<
+        <Self::TaskList as TaskList<Self::Resources, Self::TaskError>>::TaskResult,
+        Self::TaskError,
+    >;
 }
 
 impl<R: TypeList, S: TaskList<R, E>, E: Error> Executor for SynchronousExecutor<E, R, S> {
@@ -204,7 +220,12 @@ impl<R: TypeList, S: TaskList<R, E>, E: Error> Executor for SynchronousExecutor<
     type TaskList = S;
 
     #[inline]
-    fn execute(&mut self) -> Result<(), Self::TaskError> {
+    fn execute(
+        &mut self,
+    ) -> Result<
+        <Self::TaskList as TaskList<Self::Resources, Self::TaskError>>::TaskResult,
+        Self::TaskError,
+    > {
         self.stages.execute(&mut self.resources)
     }
 }
@@ -224,14 +245,13 @@ mod test_task_list {
         type ResourceSet = list_type![Vec<u16>, Nil];
         type Dependencies = Nil;
         type TaskError = Infallible;
+        type TaskResult = ();
 
         fn execute<'a>(
             &mut self,
             unpack_list![a]: ListMutType<'a, Self::ResourceSet>,
         ) -> Result<(), Self::TaskError> {
-            println!("Begin: Generate; resources: Vec<u16>: {:?}", a);
             (1..43).for_each(|i| a.push(i as u16));
-            println!("End: Generate; resources: Vec<u16>: {:?}", a);
             Ok(())
         }
     }
@@ -242,20 +262,13 @@ mod test_task_list {
         type ResourceSet = list_type![Vec<u16>, u16, Nil];
         type Dependencies = dependency_list![Generate];
         type TaskError = Infallible;
+        type TaskResult = ();
 
         fn execute<'a>(
             &mut self,
             unpack_list![vec_u16, sum]: ListMutType<'a, Self::ResourceSet>,
-        ) -> Result<(), Self::TaskError> {
-            println!(
-                "Begin: StageB; resources: Vec<u16>: {:?}, sum: {}",
-                vec_u16, sum
-            );
+        ) -> Result<Self::TaskResult, Self::TaskError> {
             *sum = vec_u16.iter().sum();
-            println!(
-                "End: StageB; resources: Vec<u16>: {:?}, sum: {}",
-                vec_u16, sum
-            );
             Ok(())
         }
     }
@@ -263,26 +276,19 @@ mod test_task_list {
     struct Cleanup;
 
     unsafe impl Task for Cleanup {
-        type ResourceSet = list_type![Vec<u16>, u16, String, Nil];
+        type ResourceSet = list_type![Vec<u16>, u16, Nil];
         type Dependencies = dependency_list![Process];
         type TaskError = Infallible;
+        type TaskResult = String;
 
         fn execute<'a>(
             &mut self,
-            unpack_list![a, b, c]: ListMutType<'a, Self::ResourceSet>,
-        ) -> Result<(), Self::TaskError> {
-            println!(
-                "Begin: StageC; resources: Vec<u16>: {:?}, u16: {}, String: {}",
-                a, b, c
-            );
-            *c = format!("ComputedValue: {}", b);
+            unpack_list![a, b]: ListMutType<'a, Self::ResourceSet>,
+        ) -> Result<Self::TaskResult, Self::TaskError> {
+            let result = format!("ComputedValue: {}", b);
             a.clear();
             *b = 0;
-            println!(
-                "End: StageC; resources: Vec<u16>: {:?}, u16: {}, String: {}",
-                a, b, c
-            );
-            Ok(())
+            Ok(result)
         }
     }
 
@@ -299,17 +305,17 @@ mod test_task_list {
         let mut stack = SynchronousExecutor::builder()
             .register_resource(0u16)
             .register_resource(Vec::<u16>::new())
-            .register_resource("Hello".to_owned())
             .finalize_resource_list()
             .push_task(Generate)
             .push_task(Process)
             .push_task(Cleanup)
             .build();
-        assert!(stack.execute().is_ok());
-        let unpack_list![string, vec_u16, sum] = stack.resources;
+        let result = stack.execute();
+        assert!(result.is_ok());
+        let unpack_list![vec_u16, sum] = stack.resources;
         assert_eq!(sum, 0u16);
         assert!(vec_u16.is_empty());
-        assert_eq!(string, "ComputedValue: 903");
+        assert_eq!(result.unwrap(), "ComputedValue: 903");
     }
 
     #[derive(Debug)]
@@ -329,11 +335,12 @@ mod test_task_list {
         type ResourceSet = Nil;
         type Dependencies = Nil;
         type TaskError = DummyError;
+        type TaskResult = ();
 
         fn execute<'a>(
             &mut self,
             _resources: ListMutType<'a, Self::ResourceSet>,
-        ) -> Result<(), Self::TaskError> {
+        ) -> Result<Self::TaskResult, Self::TaskError> {
             Ok(())
         }
     }
@@ -343,11 +350,12 @@ mod test_task_list {
         type ResourceSet = Nil;
         type Dependencies = Nil;
         type TaskError = DummyError;
+        type TaskResult = ();
 
         fn execute<'a>(
             &mut self,
             _resources: ListMutType<'a, Self::ResourceSet>,
-        ) -> Result<(), Self::TaskError> {
+        ) -> Result<Self::TaskResult, Self::TaskError> {
             Err(DummyError)
         }
     }
@@ -368,11 +376,12 @@ mod test_task_list {
         type ResourceSet = Nil;
         type Dependencies = Nil;
         type TaskError = Infallible;
+        type TaskResult = ();
 
         fn execute<'a>(
             &mut self,
             _resources: ListMutType<'a, Self::ResourceSet>,
-        ) -> Result<(), Self::TaskError> {
+        ) -> Result<Self::TaskResult, Self::TaskError> {
             Ok(())
         }
     }
