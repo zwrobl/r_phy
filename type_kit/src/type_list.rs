@@ -631,15 +631,14 @@ pub trait Subset<L: TypeList, T: Marker>: TypeList {
     ///
     /// User must ensure that the subset list does not contain duplicate elements.
     unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a>;
+
+    fn sub_write(self, superset: &mut L);
 }
 
 impl<L: TypeList, M: Marker> Subset<L, M> for Nil
 where
     L: Contains<Nil, M>,
 {
-    // type SubsetRef<'a> = &'a Nil;
-    // type SubsetMut<'a> = &'a mut Nil;
-
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         superset.get()
     }
@@ -647,6 +646,9 @@ where
     unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a> {
         superset.get_mut()
     }
+
+    // No need to write anything to the superset for an empty subset
+    fn sub_write(self, _superset: &mut L) {}
 }
 
 /// Implements `Subset` for a type-level list, where `Cons<T, N>` is a subset of superset `L`
@@ -660,13 +662,22 @@ where
     // type SubsetRef<'a> = Cons<&'a T, N::SubsetRef<'a>>;
     // type SubsetMut<'a> = Cons<&'a mut T, N::SubsetMut<'a>>;
 
+    #[inline]
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         Cons::new(superset.get(), N::sub_get(superset))
     }
 
+    #[inline]
     unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a> {
         let mut reborrow = NonNull::new_unchecked(superset);
         Cons::new(superset.get_mut(), N::sub_get_mut(reborrow.as_mut()))
+    }
+
+    #[inline]
+    fn sub_write(self, superset: &mut L) {
+        let Cons { head, tail } = self;
+        *superset.get_mut() = head;
+        tail.sub_write(superset);
     }
 }
 
@@ -721,6 +732,17 @@ mod test_subset {
         assert_eq!(*a, 2u32);
         assert_eq!(*b, "Hello");
         assert_eq!(*c, 1u16);
+    }
+
+    #[test]
+    fn test_sub_write() {
+        let mut superset: SupersetList = list_value![0u16, 0u32, 0u64, String::new(), Nil::new()];
+        let subset = list_value![2u32, "Hello".to_string(), 1u16, Nil::new()];
+        subset.sub_write(&mut superset);
+        let unpack_list![a, b, _64, c] = superset;
+        assert_eq!(a, 1u16);
+        assert_eq!(c, "Hello");
+        assert_eq!(b, 2u32);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use std::{any::type_name, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 
-use crate::{Cons, ListMutType, Marked, Marker, Nil, Subset, TypeList};
+use crate::{Cons, Here, ListMutType, Marked, Marker, Nil, Subset, TypeList};
 
 /// # Safety
 /// Task implementator is required to ensure that the ResourceSet associated type
@@ -10,6 +10,7 @@ use crate::{Cons, ListMutType, Marked, Marker, Nil, Subset, TypeList};
 pub unsafe trait Task: 'static {
     type Dependencies: DependencyList;
     type ResourceSet: TypeList;
+    type InitializerList: TypeList;
     type TaskError: Error;
     type TaskResult;
 
@@ -119,11 +120,19 @@ pub struct ResourceListBuilder<R: TypeList> {
     resources: R,
 }
 
-pub struct TaskListBuilder<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E>> {
+pub struct TaskListBuilder<
+    E: Error,
+    M: Marker,
+    R: TypeList,
+    D: DependencyList,
+    S: TaskList<R, E>,
+    I: Subset<R, M>,
+> {
     resources: R,
     stages: S,
     dependencies: D,
     _error: PhantomData<E>,
+    _initializer: PhantomData<Marked<I, M>>,
 }
 
 impl ResourceListBuilder<Nil> {
@@ -144,56 +153,83 @@ impl<R: TypeList> ResourceListBuilder<R> {
     }
 
     #[inline]
-    pub fn finalize_resource_list(self) -> TaskListBuilder<Infallible, R, Nil, Nil> {
+    pub fn push_task<T: Task<Dependencies = Nil>, M1: Marker, M2: Marker>(
+        self,
+        stage: T,
+    ) -> TaskListBuilder<
+        T::TaskError,
+        M2,
+        R,
+        Cons<Dependency<T>, Nil>,
+        Cons<Marked<T, M1>, Nil>,
+        T::InitializerList,
+    >
+    where
+        T::ResourceSet: Subset<R, M1>,
+        T::InitializerList: Subset<R, M2>,
+    {
         TaskListBuilder {
             resources: self.resources,
-            stages: Nil::new(),
-            dependencies: Nil::new(),
+            stages: Cons::new(Marked::new(stage), Nil::new()),
+            dependencies: Cons::new(Dependency::<T>::new(), Nil::new()),
             _error: PhantomData,
+            _initializer: PhantomData,
         }
     }
 }
 
-impl<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E, TaskResult = ()>>
-    TaskListBuilder<E, R, D, S>
+impl<
+        E: Error,
+        M: Marker,
+        R: TypeList,
+        D: DependencyList,
+        S: TaskList<R, E, TaskResult = ()>,
+        I: Subset<R, M>,
+    > TaskListBuilder<E, M, R, D, S, I>
 {
     #[inline]
-    pub fn push_task<M1: Marker, M2: Marker, I: Task>(
+    pub fn push_task<M1: Marker, M2: Marker, T: Task<InitializerList = Nil>>(
         self,
-        stage: I,
-    ) -> TaskListBuilder<I::TaskError, R, Cons<Dependency<I>, D>, Cons<Marked<I, M1>, S>>
+        stage: T,
+    ) -> TaskListBuilder<T::TaskError, M, R, Cons<Dependency<T>, D>, Cons<Marked<T, M1>, S>, I>
     where
-        S: TaskList<R, I::TaskError>,
-        I::ResourceSet: Subset<R, M1>,
-        I::Dependencies: Subset<D, M2>,
+        S: TaskList<R, T::TaskError>,
+        T::ResourceSet: Subset<R, M1>,
+        T::Dependencies: Subset<D, M2>,
     {
         TaskListBuilder {
             resources: self.resources,
             stages: Cons::new(Marked::new(stage), self.stages),
-            dependencies: Cons::new(Dependency::<I>::new(), self.dependencies),
+            dependencies: Cons::new(Dependency::<T>::new(), self.dependencies),
             _error: PhantomData,
+            _initializer: PhantomData,
         }
     }
 }
 
-impl<E: Error, R: TypeList, D: DependencyList, S: TaskList<R, E>> TaskListBuilder<E, R, D, S> {
+impl<E: Error, M: Marker, R: TypeList, D: DependencyList, S: TaskList<R, E>, I: Subset<R, M>>
+    TaskListBuilder<E, M, R, D, S, I>
+{
     #[inline]
-    pub fn build(self) -> SynchronousExecutor<E, R, S> {
+    pub fn build(self) -> SynchronousExecutor<E, M, R, I, S> {
         SynchronousExecutor {
             resources: self.resources,
             stages: self.stages,
             _error: PhantomData,
+            _initializer: PhantomData,
         }
     }
 }
 
-pub struct SynchronousExecutor<E: Error, R: TypeList, S: TaskList<R, E>> {
+pub struct SynchronousExecutor<E: Error, M: Marker, R: TypeList, I: Subset<R, M>, S: TaskList<R, E>>
+{
     resources: R,
     stages: S,
     _error: PhantomData<E>,
+    _initializer: PhantomData<Marked<I, M>>,
 }
 
-impl SynchronousExecutor<Infallible, Nil, Nil> {
+impl SynchronousExecutor<Infallible, Here, Nil, Nil, Nil> {
     #[inline]
     pub fn builder() -> ResourceListBuilder<Nil> {
         ResourceListBuilder::new()
@@ -202,30 +238,39 @@ impl SynchronousExecutor<Infallible, Nil, Nil> {
 
 pub trait Executor {
     // Is it usefull to have this information here?
+    type Marker: Marker;
     type Resources: TypeList;
     type TaskError: Error;
     type TaskList: TaskList<Self::Resources, Self::TaskError>;
+    type InitializerList: Subset<Self::Resources, Self::Marker>;
 
     fn execute(
         &mut self,
+        initializer: Self::InitializerList,
     ) -> Result<
         <Self::TaskList as TaskList<Self::Resources, Self::TaskError>>::TaskResult,
         Self::TaskError,
     >;
 }
 
-impl<R: TypeList, S: TaskList<R, E>, E: Error> Executor for SynchronousExecutor<E, R, S> {
+impl<R: TypeList, M: Marker, I: Subset<R, M>, S: TaskList<R, E>, E: Error> Executor
+    for SynchronousExecutor<E, M, R, I, S>
+{
+    type Marker = M;
     type Resources = R;
     type TaskError = E;
     type TaskList = S;
+    type InitializerList = I;
 
     #[inline]
     fn execute(
         &mut self,
+        initializer: Self::InitializerList,
     ) -> Result<
         <Self::TaskList as TaskList<Self::Resources, Self::TaskError>>::TaskResult,
         Self::TaskError,
     > {
+        initializer.sub_write(&mut self.resources);
         self.stages.execute(&mut self.resources)
     }
 }
@@ -235,23 +280,24 @@ mod test_task_list {
     use std::{convert::Infallible, error::Error, fmt::Display};
 
     use crate::{
-        dependency_list, list_type, unpack_list, Cons, Dependency, Executor, ListMutType, Nil,
-        SynchronousExecutor, Task,
+        dependency_list, list_type, list_value, unpack_list, Cons, Dependency, Executor,
+        ListMutType, Nil, SynchronousExecutor, Task,
     };
 
     struct Generate;
 
     unsafe impl Task for Generate {
-        type ResourceSet = list_type![Vec<u16>, Nil];
+        type ResourceSet = list_type![Vec<u16>, u16, Nil];
+        type InitializerList = list_type![u16, Nil];
         type Dependencies = Nil;
         type TaskError = Infallible;
         type TaskResult = ();
 
         fn execute<'a>(
             &mut self,
-            unpack_list![a]: ListMutType<'a, Self::ResourceSet>,
+            unpack_list![a, b]: ListMutType<'a, Self::ResourceSet>,
         ) -> Result<(), Self::TaskError> {
-            (1..43).for_each(|i| a.push(i as u16));
+            (1..*b).for_each(|i| a.push(i as u16));
             Ok(())
         }
     }
@@ -260,6 +306,7 @@ mod test_task_list {
 
     unsafe impl Task for Process {
         type ResourceSet = list_type![Vec<u16>, u16, Nil];
+        type InitializerList = Nil;
         type Dependencies = dependency_list![Generate];
         type TaskError = Infallible;
         type TaskResult = ();
@@ -277,6 +324,7 @@ mod test_task_list {
 
     unsafe impl Task for Cleanup {
         type ResourceSet = list_type![Vec<u16>, u16, Nil];
+        type InitializerList = Nil;
         type Dependencies = dependency_list![Process];
         type TaskError = Infallible;
         type TaskResult = String;
@@ -293,24 +341,15 @@ mod test_task_list {
     }
 
     #[test]
-    fn test_empty_task_list() {
-        let mut stack = SynchronousExecutor::builder()
-            .finalize_resource_list()
-            .build();
-        assert!(stack.execute().is_ok());
-    }
-
-    #[test]
     fn test_simple_task() {
         let mut stack = SynchronousExecutor::builder()
             .register_resource(0u16)
             .register_resource(Vec::<u16>::new())
-            .finalize_resource_list()
             .push_task(Generate)
             .push_task(Process)
             .push_task(Cleanup)
             .build();
-        let result = stack.execute();
+        let result = stack.execute(list_value!(43u16, Nil::new()));
         assert!(result.is_ok());
         let unpack_list![vec_u16, sum] = stack.resources;
         assert_eq!(sum, 0u16);
@@ -333,6 +372,7 @@ mod test_task_list {
 
     unsafe impl Task for DummyPassingStage {
         type ResourceSet = Nil;
+        type InitializerList = Nil;
         type Dependencies = Nil;
         type TaskError = DummyError;
         type TaskResult = ();
@@ -348,6 +388,7 @@ mod test_task_list {
 
     unsafe impl Task for FailingStage {
         type ResourceSet = Nil;
+        type InitializerList = Nil;
         type Dependencies = Nil;
         type TaskError = DummyError;
         type TaskResult = ();
@@ -363,17 +404,17 @@ mod test_task_list {
     #[test]
     fn test_failing_stage() {
         let mut stack = SynchronousExecutor::builder()
-            .finalize_resource_list()
             .push_task(DummyPassingStage)
             .push_task(FailingStage)
             .build();
-        assert!(stack.execute().is_err());
+        assert!(stack.execute(Nil::new()).is_err());
     }
 
     struct InfallibleStage;
 
     unsafe impl Task for InfallibleStage {
         type ResourceSet = Nil;
+        type InitializerList = Nil;
         type Dependencies = Nil;
         type TaskError = Infallible;
         type TaskResult = ();
@@ -395,10 +436,9 @@ mod test_task_list {
     #[test]
     fn test_mixed_error_types() {
         let mut stack = SynchronousExecutor::builder()
-            .finalize_resource_list()
             .push_task(InfallibleStage)
             .push_task(FailingStage)
             .build();
-        assert!(stack.execute().is_err());
+        assert!(stack.execute(Nil::new()).is_err());
     }
 }
