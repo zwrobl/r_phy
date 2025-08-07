@@ -94,4 +94,11 @@ impl<S: ShaderType> ShaderHandle<S> {
     pub fn index(&self) -> u32 {
         self.index
     }
+
+    pub fn map<T: ShaderType + From<S>>(self) -> ShaderHandle<T> {
+        ShaderHandle {
+            index: self.index,
+            _phantom: PhantomData,
+        }
+    }
 }

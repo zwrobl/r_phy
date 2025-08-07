@@ -1,6 +1,6 @@
 use std::{any::type_name, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 
-use crate::{Cons, Here, ListMutType, Marked, Marker, Nil, Subset, TypeList};
+use crate::{Cons, Here, ListMutType, Marked, Marker, Nil, Subset, TypeList, TypedNil};
 
 /// # Safety
 /// Task implementator is required to ensure that the ResourceSet associated type
@@ -42,7 +42,7 @@ impl<T: Task> Dependency<T> {
 
 pub trait DependencyList: TypeList {}
 
-impl DependencyList for Nil {}
+impl<T: 'static> DependencyList for TypedNil<T> {}
 
 impl<T: Task, N: DependencyList> DependencyList for Cons<Dependency<T>, N> {}
 
@@ -61,7 +61,7 @@ pub trait TaskList<R: TypeList, E: Error>: 'static {
     fn execute(&mut self, resources: &mut R) -> Result<Self::TaskResult, E>;
 }
 
-impl<R: TypeList, E: Error> TaskList<R, E> for Nil {
+impl<T: 'static, R: TypeList, E: Error> TaskList<R, E> for TypedNil<T> {
     type TaskResult = ();
     #[inline]
     fn execute(&mut self, _resources: &mut R) -> Result<Self::TaskResult, E> {
@@ -103,8 +103,9 @@ where
     }
 }
 
-pub struct ResourceListBuilder<R: TypeList> {
+pub struct ResourceListBuilder<R: TypeList, L: TypeList> {
     resources: R,
+    tasks: L,
 }
 
 pub struct TaskListBuilder<
@@ -122,43 +123,62 @@ pub struct TaskListBuilder<
     _initializer: PhantomData<Marked<I, M>>,
 }
 
-impl ResourceListBuilder<Nil> {
+impl<R: 'static, T: 'static> ResourceListBuilder<TypedNil<R>, TypedNil<T>> {
     #[inline]
     fn new() -> Self {
         Self {
-            resources: Nil::new(),
+            resources: TypedNil::new(),
+            tasks: TypedNil::new(),
         }
+    }
+
+    #[inline]
+    pub fn with_resource_terminator_type<N: 'static>(
+        self,
+    ) -> ResourceListBuilder<TypedNil<N>, TypedNil<T>> {
+        ResourceListBuilder::new()
+    }
+
+    #[inline]
+    pub fn with_task_terminator_type<N: 'static>(
+        self,
+    ) -> ResourceListBuilder<TypedNil<R>, TypedNil<N>> {
+        ResourceListBuilder::new()
     }
 }
 
-impl<R: TypeList> ResourceListBuilder<R> {
+impl<R: TypeList, T: 'static> ResourceListBuilder<R, TypedNil<T>> {
     #[inline]
-    pub fn register_resource<T: 'static>(self, resource: T) -> ResourceListBuilder<Cons<T, R>> {
+    pub fn register_resource<U: 'static>(
+        self,
+        resource: U,
+    ) -> ResourceListBuilder<Cons<U, R>, TypedNil<T>> {
         ResourceListBuilder {
             resources: Cons::new(resource, self.resources),
+            tasks: self.tasks,
         }
     }
 
     #[inline]
-    pub fn push_task<T: Task<Dependencies = Nil>, M1: Marker, M2: Marker>(
+    pub fn push_task<I: Task<Dependencies = Nil>, M1: Marker, M2: Marker>(
         self,
-        stage: T,
+        stage: I,
     ) -> TaskListBuilder<
-        T::TaskError,
+        I::TaskError,
         M2,
         R,
-        Cons<Dependency<T>, Nil>,
-        Cons<Marked<T, M1>, Nil>,
-        T::InitializerList,
+        Cons<Dependency<I>, Nil>,
+        Cons<Marked<I, M1>, TypedNil<T>>,
+        I::InitializerList,
     >
     where
-        T::ResourceSet: Subset<R, M1>,
-        T::InitializerList: Subset<R, M2>,
+        I::ResourceSet: Subset<R, M1>,
+        I::InitializerList: Subset<R, M2>,
     {
         TaskListBuilder {
             resources: self.resources,
-            stages: Cons::new(Marked::new(stage), Nil::new()),
-            dependencies: Cons::new(Dependency::<T>::new(), Nil::new()),
+            stages: Cons::new(Marked::new(stage), self.tasks),
+            dependencies: Cons::new(Dependency::<I>::new(), TypedNil::new()),
             _error: PhantomData,
             _initializer: PhantomData,
         }
@@ -218,36 +238,34 @@ pub struct SynchronousExecutor<E: Error, M: Marker, R: TypeList, I: Subset<R, M>
 
 impl SynchronousExecutor<Infallible, Here, Nil, Nil, Nil> {
     #[inline]
-    pub fn builder() -> ResourceListBuilder<Nil> {
+    pub fn builder() -> ResourceListBuilder<Nil, Nil> {
         ResourceListBuilder::new()
     }
 }
 
 pub trait Executor {
-    // Is it usefull to have this information here?
-    type Marker: Marker;
+    type InitializerList: TypeList;
     type Resources: TypeList;
+    type TaskResult;
     type TaskError: Error;
     type TaskList: TaskList<Self::Resources, Self::TaskError>;
-    type InitializerList: Subset<Self::Resources, Self::Marker>;
 
     fn execute(
         &mut self,
         initializer: Self::InitializerList,
-    ) -> Result<
-        <Self::TaskList as TaskList<Self::Resources, Self::TaskError>>::TaskResult,
-        Self::TaskError,
-    >;
+    ) -> Result<Self::TaskResult, Self::TaskError>;
+
+    fn into_inner(self) -> (Self::Resources, Self::TaskList);
 }
 
 impl<R: TypeList, M: Marker, I: Subset<R, M>, S: TaskList<R, E>, E: Error> Executor
     for SynchronousExecutor<E, M, R, I, S>
 {
-    type Marker = M;
+    type InitializerList = I;
     type Resources = R;
+    type TaskResult = S::TaskResult;
     type TaskError = E;
     type TaskList = S;
-    type InitializerList = I;
 
     #[inline]
     fn execute(
@@ -259,6 +277,11 @@ impl<R: TypeList, M: Marker, I: Subset<R, M>, S: TaskList<R, E>, E: Error> Execu
     > {
         initializer.sub_write(&mut self.resources);
         self.stages.execute(&mut self.resources)
+    }
+
+    #[inline]
+    fn into_inner(self) -> (Self::Resources, Self::TaskList) {
+        (self.resources, self.stages)
     }
 }
 

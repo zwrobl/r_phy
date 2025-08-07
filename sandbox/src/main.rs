@@ -3,10 +3,7 @@ use graphics::{
     shader::Shader,
 };
 use std::{error::Error, result::Result};
-use vulkan_high::{
-    renderer::deferred::DeferredRenderer, VulkanContextBuilder, VulkanRendererBuilder,
-    VulkanRendererConfig,
-};
+use vulkan_high::{context::VulkanContextBuilder, VulkanRendererBuilder, VulkanRendererConfig};
 use winit::{
     dpi::PhysicalSize,
     window::{WindowBuilder, WindowButtons},
@@ -21,8 +18,8 @@ use physics::shape::Cube;
 use system::{LoopBuilder, Object};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let renderer_builder = VulkanRendererBuilder::<DeferredRenderer>::new()
-        .with_config(VulkanRendererConfig::builder().build()?);
+    let renderer_builder =
+        VulkanRendererBuilder::new().with_config(VulkanRendererConfig::builder().build()?);
     let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-3, 1e3);
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize {

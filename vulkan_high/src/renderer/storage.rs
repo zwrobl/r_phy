@@ -1,9 +1,8 @@
 use std::{
     any::TypeId,
     collections::{hash_map::Values, HashMap},
-    error::Error,
+    convert::Infallible,
     hash::Hash,
-    marker::PhantomData,
 };
 
 use graphics::{
@@ -12,29 +11,23 @@ use graphics::{
 };
 
 use math::types::Matrix4;
-use type_kit::{unpack_list, Cons};
+use type_kit::{unpack_list, Cons, Contains, Destroy, Marker};
 use vulkan_low::{
     index_list,
     resources::{
-        command::{BindPipeline, CommandList, DrawIndexed},
-        descriptor::{Descriptor, DescriptorBindingData},
-        layout::presets::{CameraDescriptorSet, ModelMatrix, ModelNormalMatrix},
-        pipeline::PushConstantRangeMapper,
+        command::{BindPipeline, DrawIndexed},
+        descriptor::{Descriptor, DescriptorBindingData, PipelineSetIndices},
+        layout::{presets::CameraDescriptorSet, DescriptorIndex},
+        pipeline::{GraphicsPipelineConfig, PushConstantRangeMapper},
         storage::ResourceIndexListBuilder,
-        swapchain::SwapchainFrame,
     },
     Context,
 };
 
 use crate::{
-    renderer::deferred::{
-        presets::{AttachmentsGBuffer, DeferedRenderPass, GBufferWritePass},
-        DeferredRendererContext, DeferredRendererFrameState, DeferredShader,
-    },
+    context::VulkanResourcePack,
     resources::{GraphicsPipelinePackList, MaterialPackList, MeshPackList, PackBufferBindings},
 };
-
-use super::CommandStorage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeshIndex {
@@ -49,8 +42,8 @@ impl MeshIndex {
 }
 
 pub struct ModelState {
-    mesh_bind_data: DrawIndexed,
-    instances: Vec<Matrix4>,
+    pub mesh_bind_data: DrawIndexed,
+    pub instances: Vec<Matrix4>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,8 +59,8 @@ impl BufferIndex {
 }
 
 pub struct BufferState {
-    mesh_pack_binding: PackBufferBindings,
-    model_states: HashMap<MeshIndex, ModelState>,
+    pub mesh_pack_binding: PackBufferBindings,
+    pub model_states: HashMap<MeshIndex, ModelState>,
 }
 
 impl BufferState {
@@ -91,12 +84,12 @@ impl BufferState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DescriptorIndex {
+pub struct DescriptorSetIndex {
     material_pack_index: TypeId,
     material_index: u32,
 }
 
-impl DescriptorIndex {
+impl DescriptorSetIndex {
     pub fn get<M: Material>(handle: MaterialHandle<M>) -> Self {
         let material_pack_index = TypeId::of::<M>();
         let material_index = handle.index();
@@ -108,7 +101,7 @@ impl DescriptorIndex {
 }
 
 pub struct DescriptorState {
-    sets: Vec<DescriptorBindingData>,
+    pub sets: Vec<DescriptorBindingData>,
     buffer_states: HashMap<BufferIndex, BufferState>,
 }
 
@@ -143,15 +136,16 @@ impl PipelineIndex {
 }
 
 pub struct PipelineState {
-    bind_data: BindPipeline,
-    push_constant_mapper: PushConstantRangeMapper,
-    descriptor_states: HashMap<DescriptorIndex, DescriptorState>,
+    pub bind_data: BindPipeline,
+    pub push_constant_mapper: PushConstantRangeMapper,
+    pub descriptor_states: HashMap<DescriptorSetIndex, DescriptorState>,
 }
 
 impl PipelineState {
     fn get_descriptor_state<
+        T: Marker,
         M: Material,
-        S: ShaderType<Material = M>,
+        S: ShaderType<Material = M> + GraphicsPipelineConfig,
         L: MaterialPackList,
         P: GraphicsPipelinePackList,
     >(
@@ -162,8 +156,11 @@ impl PipelineState {
         material: MaterialHandle<M>,
         material_packs: &L,
         pipelines: &P,
-    ) -> &mut DescriptorState {
-        let descriptor_index = DescriptorIndex::get(material);
+    ) -> &mut DescriptorState
+    where
+        PipelineSetIndices<S>: Contains<DescriptorIndex<CameraDescriptorSet>, T>,
+    {
+        let descriptor_index = DescriptorSetIndex::get(material);
         if !self.descriptor_states.contains_key(&descriptor_index) {
             self.insert_descriptor_state(
                 context,
@@ -178,8 +175,9 @@ impl PipelineState {
     }
 
     fn insert_descriptor_state<
+        T: Marker,
         M: Material,
-        S: ShaderType<Material = M>,
+        S: ShaderType<Material = M> + GraphicsPipelineConfig,
         L: MaterialPackList,
         P: GraphicsPipelinePackList,
     >(
@@ -190,11 +188,11 @@ impl PipelineState {
         material: MaterialHandle<M>,
         material_packs: &L,
         pipelines: &P,
-    ) {
-        let pipeline_index = pipelines
-            .get::<DeferredShader<S>>()
-            .get(shader.index() as usize);
-        let descriptor_index = DescriptorIndex::get(material);
+    ) where
+        PipelineSetIndices<S>: Contains<DescriptorIndex<CameraDescriptorSet>, T>,
+    {
+        let pipeline_index = pipelines.get::<S>().get(shader.index() as usize);
+        let descriptor_index = DescriptorSetIndex::get(material);
         let material_binding_data = material_packs.try_get::<M>().map(|pack| {
             pack.try_get_descriptor_binding_data(
                 context,
@@ -218,7 +216,7 @@ impl PipelineState {
         self.descriptor_states.insert(descriptor_index, state);
     }
 
-    fn process<
+    pub fn process<
         T,
         F1: Fn(T, &PipelineState) -> T,
         F2: Fn(T, &DescriptorState) -> T,
@@ -254,7 +252,6 @@ impl PipelineState {
 }
 
 pub struct DrawStorage {
-    // TODO: Change representation to use indexed linear buffers
     pub pipeline_states: HashMap<PipelineIndex, PipelineState>,
 }
 
@@ -271,7 +268,11 @@ impl DrawStorage {
         }
     }
 
-    fn get_pipeline_state<'a, S: ShaderType, P: GraphicsPipelinePackList>(
+    fn get_pipeline_state<
+        'a,
+        S: ShaderType + GraphicsPipelineConfig,
+        P: GraphicsPipelinePackList,
+    >(
         &'a mut self,
         context: &Context,
         shader: ShaderHandle<S>,
@@ -284,15 +285,16 @@ impl DrawStorage {
         self.pipeline_states.get_mut(&pipeline_index).unwrap()
     }
 
-    fn insert_pipeline_state<S: ShaderType, P: GraphicsPipelinePackList>(
+    fn insert_pipeline_state<
+        S: ShaderType + GraphicsPipelineConfig,
+        P: GraphicsPipelinePackList,
+    >(
         &mut self,
         context: &Context,
         shader: ShaderHandle<S>,
         pipelines: &P,
     ) {
-        let pipeline = pipelines
-            .get::<DeferredShader<S>>()
-            .get(shader.index() as usize);
+        let pipeline = pipelines.get::<S>().get(shader.index() as usize);
         let (bind_data, push_constant_mapper) = context
             .operate_ref(index_list![pipeline], |unpack_list![pipeline]| {
                 let binding = pipeline.bind();
@@ -319,139 +321,91 @@ impl<'a> IntoIterator for &'a DrawStorage {
     }
 }
 
-impl<'a, P: GraphicsPipelinePackList> DeferredRendererContext<'a, P> {
-    pub fn append_draw_call<
-        D: Drawable,
-        S: ShaderType<Material = D::Material, Vertex = D::Vertex>,
-        M: MaterialPackList,
-        V: MeshPackList,
-    >(
-        &mut self,
-        context: &Context,
-        material_packs: &M,
-        mesh_packs: &V,
-        shader: ShaderHandle<S>,
-        drawable: &D,
-        transform: &Matrix4,
-    ) {
-        if let Some(mut current_frame) = self.current_frame.take() {
-            let state = &mut current_frame.renderer_state;
-            let pipeline_state =
-                state
-                    .draw_graph
-                    .get_pipeline_state(context, shader, &self.pipelines.write_pass);
-            let descriptor_state = pipeline_state.get_descriptor_state(
-                context,
-                current_frame.camera_descriptor,
-                shader,
-                drawable.material(),
-                material_packs,
-                &self.pipelines.write_pass,
-            );
-            let buffer_state = descriptor_state.get_buffer_state::<D::Vertex, _>(mesh_packs);
-            buffer_state.push_model_state(drawable.mesh(), transform, mesh_packs);
-            self.current_frame.replace(current_frame);
+impl Destroy for DrawStorage {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy(&mut self, _context: &Context) -> Result<(), Self::DestroyError> {
+        self.pipeline_states.clear();
+        Ok(())
+    }
+}
+
+pub struct DrawStorageTyped<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> {
+    camera: Option<Descriptor<CameraDescriptorSet>>,
+    storage: Option<DrawStorage>,
+    resources: VulkanResourcePack<M, V, P>,
+}
+
+impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> DrawStorageTyped<M, V, P> {
+    #[inline]
+    pub fn new(resources: VulkanResourcePack<M, V, P>) -> Self {
+        Self {
+            camera: None,
+            storage: None,
+            resources,
         }
     }
 
-    pub fn record_draw_calls(
+    #[inline]
+    pub fn begin_frame(&mut self, camera: Descriptor<CameraDescriptorSet>) {
+        self.camera = Some(camera);
+        self.storage = Some(DrawStorage::new());
+    }
+
+    #[inline]
+    pub fn append_draw_call<
+        T: Marker,
+        D: Drawable,
+        S: ShaderType<Material = D::Material, Vertex = D::Vertex> + GraphicsPipelineConfig,
+    >(
         &mut self,
         context: &Context,
-        state: DeferredRendererFrameState<P>,
-        swapchain_frame: &SwapchainFrame<DeferedRenderPass<AttachmentsGBuffer>>,
-    ) -> Result<CommandStorage<P>, Box<dyn Error>> {
-        let DeferredRendererFrameState {
-            commands:
-                CommandStorage {
-                    depth_prepass,
-                    shading_pass,
-                    skybox_pass,
-                    mut write_pass,
-                    ..
-                },
-            draw_graph,
-            ..
-        } = state;
-        let depth_prepass = context
-            .operate_ref(
-                index_list![self.pipelines.depth_prepass],
-                |unpack_list![pipeline]| {
-                    draw_graph
-                        .into_iter()
-                        .fold(
-                            context.start_recording(depth_prepass),
-                            |command, pipeline_state| {
-                                pipeline_state.process(
-                                    command,
-                                    |command, _| command,
-                                    |command, _| command,
-                                    |command, buffer_state| {
-                                        command.push(&buffer_state.mesh_pack_binding)
-                                    },
-                                    |command, model_state, _| {
-                                        model_state.instances.iter().fold(
-                                            command,
-                                            |command, instance| {
-                                                command
-                                                    .push(&pipeline.map::<ModelMatrix, _>(instance))
-                                                    .push(&model_state.mesh_bind_data)
-                                            },
-                                        )
-                                    },
-                                )
-                            },
-                        )
-                        .stop_recording()
-                },
-            )
-            .unwrap();
-        context.operate_mut(
-            index_list![self.frames.secondary_commands],
-            |unpack_list![secondary_commands]| {
-                draw_graph.into_iter().for_each(|pipeline_state| {
-                    let command = context
-                        .begin_secondary_command::<_, _, _, GBufferWritePass<AttachmentsGBuffer>>(
-                            secondary_commands.next_command().1,
-                            self.renderer.render_pass,
-                            swapchain_frame.framebuffer,
-                        )
-                        .unwrap();
-                    let command = pipeline_state
-                        .process(
-                            context.start_recording(command),
-                            |command, pipeline_state| command.push(&pipeline_state.bind_data),
-                            |command, descriptor_state| command.extend(&descriptor_state.sets),
-                            |command, buffer_state| command.push(&buffer_state.mesh_pack_binding),
-                            |command, model_state, push_constant_mapper| {
-                                model_state
-                                    .instances
-                                    .iter()
-                                    .fold(command, |command, instance| {
-                                        // TODO: For the time being, CommandList is used here as
-                                        // a test for this feature, this's could be replaced with direct
-                                        // push calls on the command, but does not pose an issue
-                                        // for the time being. and this code would be replaced anyway
-                                        let command_list = CommandList::new()
-                                            .push(
-                                                push_constant_mapper
-                                                    .map::<ModelNormalMatrix>(instance),
-                                            )
-                                            .push(model_state.mesh_bind_data);
-                                        command.push(&command_list)
-                                    })
-                            },
-                        )
-                        .stop_recording();
-                    write_pass.push(command);
-                });
-            },
-        )?;
-        Ok(CommandStorage {
-            depth_prepass,
-            write_pass,
-            shading_pass,
-            skybox_pass,
-            _phantom: PhantomData,
-        })
+        shader: ShaderHandle<S>,
+        drawable: &D,
+        transform: &Matrix4,
+    ) where
+        PipelineSetIndices<S>: Contains<DescriptorIndex<CameraDescriptorSet>, T>,
+    {
+        let camera = self.camera.unwrap();
+        let pipeline_state = self.storage.as_mut().unwrap().get_pipeline_state(
+            context,
+            shader,
+            &self.resources.pipelines,
+        );
+        let descriptor_state = pipeline_state.get_descriptor_state(
+            context,
+            camera,
+            shader,
+            drawable.material(),
+            &self.resources.materials,
+            &self.resources.pipelines,
+        );
+        let buffer_state =
+            descriptor_state.get_buffer_state::<D::Vertex, _>(&self.resources.meshes);
+        buffer_state.push_model_state(drawable.mesh(), transform, &self.resources.meshes);
+    }
+
+    #[inline]
+    pub fn end_frame(&mut self) -> DrawStorage {
+        let storage = self.storage.take().unwrap();
+        self.camera = None;
+        storage
+    }
+}
+
+impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
+    for DrawStorageTyped<M, V, P>
+{
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy(&mut self, context: &Context) -> Result<(), Self::DestroyError> {
+        self.resources.destroy(context)?;
+        self.storage = None;
+        self.camera = None;
+        Ok(())
     }
 }

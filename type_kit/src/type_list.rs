@@ -123,6 +123,17 @@ impl<T, M: Marker> DerefMut for Marked<T, M> {
     }
 }
 
+impl<T: Destroy, M: Marker> Destroy for Marked<T, M> {
+    type Context<'a> = T::Context<'a>;
+
+    type DestroyError = T::DestroyError;
+
+    #[inline]
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.value.destroy(context)
+    }
+}
+
 pub struct TypedNil<T> {
     _phantom: PhantomData<T>,
 }
@@ -548,6 +559,19 @@ impl<H: Destroy, T: Destroy> Display for ConsDestroyError<H, T> {
 
 impl<H: Destroy, T: Destroy> Error for ConsDestroyError<H, T> {}
 
+impl<H: Destroy<DestroyError = Infallible>, T: Destroy> From<ConsDestroyError<H, T>> for Infallible
+where
+    T::DestroyError: Into<Infallible>,
+{
+    #[inline]
+    fn from(err: ConsDestroyError<H, T>) -> Self {
+        unreachable!(
+            "ConsDestroyError with Infallible errors should never occur: {:?}",
+            err
+        )
+    }
+}
+
 impl<H: Destroy, T: Destroy> Destroy for Cons<H, T>
 where
     for<'a> H::Context<'a>: Clone + Copy,
@@ -645,9 +669,9 @@ pub trait Subset<L: TypeList, T: Marker>: TypeList {
     fn sub_write(self, superset: &mut L);
 }
 
-impl<L: TypeList, M: Marker> Subset<L, M> for Nil
+impl<T: 'static, L: TypeList, M: Marker> Subset<L, M> for TypedNil<T>
 where
-    L: Contains<Nil, M>,
+    L: Contains<TypedNil<T>, M>,
 {
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         superset.get()

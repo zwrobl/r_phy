@@ -57,6 +57,20 @@ pub struct SwapchainRaw {
     handle: vk::SwapchainKHR,
 }
 
+pub struct SwapchainPartial<C: RenderPassConfig> {
+    extent: vk::Extent2D,
+    images: Box<[SwapchainImage]>,
+    handle: vk::SwapchainKHR,
+    _phantom: PhantomData<C>,
+}
+
+impl<C: RenderPassConfig> SwapchainPartial<C> {
+    #[inline]
+    pub fn num_images(&self) -> usize {
+        self.images.len()
+    }
+}
+
 pub struct Swapchain<C: RenderPassConfig> {
     pub num_images: usize,
     pub extent: vk::Extent2D,
@@ -249,11 +263,11 @@ pub trait SwapchainFramebufferConfigBuilder<C: RenderPassConfig> {
     ) -> FramebufferBuilder<C>;
 }
 
-impl<C: RenderPassConfig> Create for Swapchain<C> {
-    type Config<'a> = &'a dyn SwapchainFramebufferConfigBuilder<C>;
+impl<C: RenderPassConfig> Create for SwapchainPartial<C> {
+    type Config<'a> = ();
     type CreateError = ResourceError;
 
-    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+    fn create<'a, 'b>(_config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let surface_properties = &context.physical_device.surface_properties;
         let &PhysicalDeviceSurfaceProperties {
             capabilities:
@@ -291,21 +305,65 @@ impl<C: RenderPassConfig> Create for Swapchain<C> {
                 .map(|image| context.create_swapchain_image(image, surface_format))
                 .collect::<Result<Box<_>, _>>()?
         };
+        Ok(SwapchainPartial {
+            extent: image_extent,
+            images,
+            handle,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<C: RenderPassConfig> Destroy for SwapchainPartial<C> {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
+        self.images.iter_mut().for_each(|image| {
+            let _ = image.view.destroy(context);
+        });
+        unsafe {
+            context
+                .get_extensions()
+                .swapchain
+                .destroy_swapchain(self.handle, None);
+        }
+        Ok(())
+    }
+}
+
+impl<C: RenderPassConfig> Create for Swapchain<C> {
+    type Config<'a> = (
+        &'a dyn SwapchainFramebufferConfigBuilder<C>,
+        SwapchainPartial<C>,
+    );
+    type CreateError = ResourceError;
+
+    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
+        let (framebuffer_builder, swapchain_partial) = config;
+        let SwapchainPartial {
+            images,
+            extent,
+            handle,
+            ..
+        } = swapchain_partial;
         let framebuffers = images
             .iter()
             .map(|image| {
                 context
-                    .create_resource::<Framebuffer<C>, _>(config.get_framebuffer_builder(
-                        context,
-                        &image.view,
-                        Extent2D::new(image_extent.width, image_extent.height),
-                    ))
+                    .create_resource::<Framebuffer<C>, _>(
+                        framebuffer_builder.get_framebuffer_builder(
+                            context,
+                            &image.view,
+                            Extent2D::new(extent.width, extent.height),
+                        ),
+                    )
                     .map(|index| index.into_inner())
             })
             .collect::<Result<Box<_>, _>>()?;
         Ok(Swapchain {
             num_images: images.len(),
-            extent: image_extent,
+            extent,
             images,
             framebuffers,
             handle,
