@@ -11,13 +11,13 @@ use graphics::{
 };
 
 use math::types::Matrix4;
-use type_kit::{unpack_list, Cons, Contains, Destroy, Marker};
+use type_kit::{unpack_list, Cons, Destroy};
 use vulkan_low::{
     index_list,
     resources::{
         command::{BindPipeline, DrawIndexed},
-        descriptor::{Descriptor, DescriptorBindingData, PipelineSetIndices},
-        layout::{presets::CameraDescriptorSet, DescriptorIndex},
+        descriptor::{Descriptor, DescriptorBindingData},
+        layout::presets::CameraDescriptorSet,
         pipeline::{GraphicsPipelineConfig, PushConstantRangeMapper},
         storage::ResourceIndexListBuilder,
     },
@@ -26,6 +26,7 @@ use vulkan_low::{
 
 use crate::{
     context::VulkanResourcePack,
+    renderer::{Renderer, ShaderDescriptor},
     resources::{GraphicsPipelinePackList, MaterialPackList, MeshPackList, PackBufferBindings},
 };
 
@@ -143,9 +144,8 @@ pub struct PipelineState {
 
 impl PipelineState {
     fn get_descriptor_state<
-        T: Marker,
         M: Material,
-        S: ShaderType<Material = M> + GraphicsPipelineConfig,
+        S: ShaderType<Material = M> + ShaderDescriptor<CameraDescriptorSet>,
         L: MaterialPackList,
         P: GraphicsPipelinePackList,
     >(
@@ -156,10 +156,7 @@ impl PipelineState {
         material: MaterialHandle<M>,
         material_packs: &L,
         pipelines: &P,
-    ) -> &mut DescriptorState
-    where
-        PipelineSetIndices<S>: Contains<DescriptorIndex<CameraDescriptorSet>, T>,
-    {
+    ) -> &mut DescriptorState {
         let descriptor_index = DescriptorSetIndex::get(material);
         if !self.descriptor_states.contains_key(&descriptor_index) {
             self.insert_descriptor_state(
@@ -175,9 +172,8 @@ impl PipelineState {
     }
 
     fn insert_descriptor_state<
-        T: Marker,
         M: Material,
-        S: ShaderType<Material = M> + GraphicsPipelineConfig,
+        S: ShaderType<Material = M> + ShaderDescriptor<CameraDescriptorSet>,
         L: MaterialPackList,
         P: GraphicsPipelinePackList,
     >(
@@ -188,9 +184,7 @@ impl PipelineState {
         material: MaterialHandle<M>,
         material_packs: &L,
         pipelines: &P,
-    ) where
-        PipelineSetIndices<S>: Contains<DescriptorIndex<CameraDescriptorSet>, T>,
-    {
+    ) {
         let pipeline_index = pipelines.get::<S>().get(shader.index() as usize);
         let descriptor_index = DescriptorSetIndex::get(material);
         let material_binding_data = material_packs.try_get::<M>().map(|pack| {
@@ -201,11 +195,7 @@ impl PipelineState {
             )
             .unwrap()
         });
-        let camera_binding_data = context
-            .operate_ref(index_list![pipeline_index], |unpack_list![pipeline]| {
-                camera.get_binding(pipeline)
-            })
-            .unwrap();
+        let camera_binding_data = S::get_mapper().get_binding(context, camera).unwrap();
         let state = DescriptorState {
             sets: [material_binding_data, Some(camera_binding_data)]
                 .into_iter()
@@ -332,15 +322,22 @@ impl Destroy for DrawStorage {
     }
 }
 
-pub struct DrawStorageTyped<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> {
+pub struct DrawStorageTyped<
+    R: Renderer,
+    M: MaterialPackList,
+    V: MeshPackList,
+    P: GraphicsPipelinePackList,
+> {
     camera: Option<Descriptor<CameraDescriptorSet>>,
     storage: Option<DrawStorage>,
-    resources: VulkanResourcePack<M, V, P>,
+    resources: VulkanResourcePack<R, M, V, P>,
 }
 
-impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> DrawStorageTyped<M, V, P> {
+impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
+    DrawStorageTyped<R, M, V, P>
+{
     #[inline]
-    pub fn new(resources: VulkanResourcePack<M, V, P>) -> Self {
+    pub fn new(resources: VulkanResourcePack<R, M, V, P>) -> Self {
         Self {
             camera: None,
             storage: None,
@@ -356,18 +353,16 @@ impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> DrawStor
 
     #[inline]
     pub fn append_draw_call<
-        T: Marker,
         D: Drawable,
-        S: ShaderType<Material = D::Material, Vertex = D::Vertex> + GraphicsPipelineConfig,
+        S: ShaderType<Material = D::Material, Vertex = D::Vertex>
+            + ShaderDescriptor<CameraDescriptorSet>,
     >(
         &mut self,
         context: &Context,
         shader: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
-    ) where
-        PipelineSetIndices<S>: Contains<DescriptorIndex<CameraDescriptorSet>, T>,
-    {
+    ) {
         let camera = self.camera.unwrap();
         let pipeline_state = self.storage.as_mut().unwrap().get_pipeline_state(
             context,
@@ -395,8 +390,8 @@ impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> DrawStor
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
-    for DrawStorageTyped<M, V, P>
+impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
+    for DrawStorageTyped<R, M, V, P>
 {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;

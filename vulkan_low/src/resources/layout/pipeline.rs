@@ -148,9 +148,17 @@ impl<N: PushConstantList> PushConstantRanges<N> {
 }
 
 pub struct DescriptorIndex<T: DescriptorLayout> {
-    index: u32,
+    pub index: u32,
     _phantom: PhantomData<T>,
 }
+
+impl<T: DescriptorLayout> Clone for DescriptorIndex<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: DescriptorLayout> Copy for DescriptorIndex<T> {}
 
 impl<T: DescriptorLayout> DescriptorIndex<T> {
     #[inline]
@@ -243,11 +251,11 @@ impl<L: DescriptorLayoutList> DescriptorSets<L> {
         }
     }
 
-    pub fn get_index<T: DescriptorLayout, M: Marker>(&self) -> u32
+    pub fn get_index<T: DescriptorLayout, M: Marker>(&self) -> DescriptorIndex<T>
     where
         L::IndexList: Contains<DescriptorIndex<T>, M>,
     {
-        self.indices.get().index
+        *self.indices.get()
     }
 
     fn try_get_index_impl<T: DescriptorLayout, N: DescriptorLayoutList>(index: u32) -> Option<u32> {

@@ -1,11 +1,14 @@
 use std::{convert::Infallible, ops::Deref, rc::Rc};
 
-use graphics::renderer::camera::CameraMatrices;
+use graphics::{renderer::camera::CameraMatrices, shader::ShaderType};
 use type_kit::{list_type, Cons, Destroy, TypedNil};
 use vulkan_low::{
     memory::allocator::AllocatorIndex,
     resources::{
-        descriptor::Descriptor, error::ResourceResult, layout::presets::CameraDescriptorSet,
+        descriptor::{Descriptor, DescriptorSetMapper},
+        error::ResourceResult,
+        layout::{presets::CameraDescriptorSet, DescriptorLayout},
+        pipeline::{GraphicsPipelineConfig, ModuleLoader},
         Partial,
     },
     Context,
@@ -52,8 +55,15 @@ impl Destroy for ExternalResources {
     }
 }
 
-pub trait Renderer {
-    fn destroy(&mut self, context: &Context);
+pub trait ShaderDescriptor<T: DescriptorLayout>: GraphicsPipelineConfig {
+    fn get_mapper() -> DescriptorSetMapper<T, Self::Layout>;
+}
+
+pub trait Renderer: for<'a> Destroy<Context<'a> = &'a Context, DestroyError = Infallible> {
+    type ShaderType<T: ShaderType>: ShaderDescriptor<CameraDescriptorSet>
+        + ShaderType<Vertex = T::Vertex, Material = T::Material>
+        + ModuleLoader
+        + From<T>;
 
     fn begin_frame(
         &mut self,
@@ -71,7 +81,7 @@ pub trait RendererBuilder:
 
     fn new(context: Rc<VulkanContext>, config: Self::Config<'_>) -> ResourceResult<Self>;
 
-    fn with_allocator(self, allocator: AllocatorIndex) -> Self;
+    fn with_allocator<T: Into<AllocatorIndex>>(self, allocator: T) -> Self;
 
     fn build<'a>(self) -> ResourceResult<impl Renderer>;
 }

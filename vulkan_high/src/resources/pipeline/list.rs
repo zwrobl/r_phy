@@ -2,38 +2,41 @@ use std::any::type_name;
 
 use graphics::shader::ShaderType;
 use type_kit::{Cons, Create, Destroy, Nil, TypeList};
-use vulkan_low::{
-    error::VkResult,
-    resources::pipeline::{GraphicsPipelineConfig, ModuleLoader},
-    Context,
-};
+use vulkan_low::{error::VkResult, resources::pipeline::GraphicsPipelineConfig, Context};
+
+use crate::renderer::Renderer;
 
 use super::{PipelinePack, PipelinePackRef};
 
 pub trait GraphicsPipelineListBuilder: TypeList {
-    type Pack: GraphicsPipelinePackList;
+    type Pack<R: Renderer>: GraphicsPipelinePackList;
 
-    fn build(&self, context: &Context) -> VkResult<Self::Pack>;
+    fn build<R: Renderer>(self, context: &Context) -> VkResult<Self::Pack<R>>;
 }
 
 impl GraphicsPipelineListBuilder for Nil {
-    type Pack = Nil;
+    type Pack<R: Renderer> = Nil;
 
-    fn build(&self, _context: &Context) -> VkResult<Self::Pack> {
+    fn build<R: Renderer>(self, _context: &Context) -> VkResult<Self::Pack<R>> {
         Ok(Nil::new())
     }
 }
 
-impl<T: GraphicsPipelineConfig + ModuleLoader + ShaderType, N: GraphicsPipelineListBuilder>
-    GraphicsPipelineListBuilder for Cons<Vec<T>, N>
+impl<T: ShaderType, N: GraphicsPipelineListBuilder> GraphicsPipelineListBuilder
+    for Cons<Vec<T>, N>
 {
-    type Pack = Cons<PipelinePack<T>, N::Pack>;
+    type Pack<R: Renderer> = Cons<PipelinePack<R::ShaderType<T>>, N::Pack<R>>;
 
-    fn build(&self, context: &Context) -> VkResult<Self::Pack> {
-        let pack = PipelinePack::create(&self.head, context)?;
+    fn build<R: Renderer>(self, context: &Context) -> VkResult<Self::Pack<R>> {
+        let Cons { head, tail } = self;
+        let shaders = head
+            .into_iter()
+            .map(|shader| shader.into())
+            .collect::<Vec<R::ShaderType<T>>>();
+        let pack = PipelinePack::create(&shaders, context)?;
         Ok(Cons {
             head: pack,
-            tail: self.tail.build(context)?,
+            tail: tail.build(context)?,
         })
     }
 }

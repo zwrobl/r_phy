@@ -18,7 +18,7 @@ use winit::window::Window;
 use vulkan_low::memory::allocator::{AllocatorBuilder, AllocatorIndexTyped, Static, StaticConfig};
 use vulkan_low::resources::Partial;
 
-use crate::renderer::deferred::{DeferredRendererBuilder, DeferredShader};
+use crate::renderer::deferred::DeferredRendererBuilder;
 use crate::renderer::storage::DrawStorageTyped;
 use crate::renderer::{Renderer, RendererBuilder};
 use crate::resources::{
@@ -59,17 +59,24 @@ impl Drop for VulkanContext {
     }
 }
 
-pub struct VulkanResourcePack<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> {
+pub struct VulkanResourcePack<
+    R: Renderer,
+    M: MaterialPackList,
+    V: MeshPackList,
+    P: GraphicsPipelinePackList,
+> {
     pub materials: M,
     pub meshes: V,
     pub pipelines: P,
+    _phantom: PhantomData<R>,
 }
 
 struct VulkanResourcePackPartial<
     'a,
+    R: Renderer,
     M: MaterialPackList,
     V: MeshPackList,
-    P: GraphicsPipelinePackList,
+    P: GraphicsPipelineListBuilder,
     PM: MaterialPackListPartial<Pack = M>,
     PV: MeshPackListPartial<Pack = V>,
 > where
@@ -79,17 +86,18 @@ struct VulkanResourcePackPartial<
     materials: PM,
     meshes: PV,
     pipelines: P,
-    _phantom: PhantomData<&'a ()>,
+    _phantom: PhantomData<&'a R>,
 }
 
 impl<
         'a,
+        R: Renderer,
         M: MaterialPackList,
         V: MeshPackList,
-        P: GraphicsPipelinePackList,
+        P: GraphicsPipelineListBuilder,
         PM: MaterialPackListPartial<Pack = M>,
         PV: MeshPackListPartial<Pack = V>,
-    > VulkanResourcePackPartial<'a, M, V, P, PM, PV>
+    > VulkanResourcePackPartial<'a, R, M, V, P, PM, PV>
 where
     for<'b> PM: Destroy<Context<'b> = &'b Context>,
     for<'b> PV: Destroy<Context<'b> = &'b Context>,
@@ -98,7 +106,7 @@ where
         self,
         context: &Context,
         allocator: AllocatorIndexTyped<Static>,
-    ) -> Result<VulkanResourcePack<M, V, P>, Box<dyn Error>> {
+    ) -> Result<VulkanResourcePack<R, M, V, P::Pack<R>>, Box<dyn Error>> {
         let Self {
             materials,
             meshes,
@@ -107,22 +115,25 @@ where
         } = self;
         let meshes = meshes.allocate(context, allocator.into())?;
         let materials = materials.allocate(context, allocator.into())?;
+        let pipelines = pipelines.build(context)?;
         Ok(VulkanResourcePack {
             materials,
             meshes,
             pipelines,
+            _phantom: PhantomData,
         })
     }
 }
 
 impl<
         'a,
+        R: Renderer,
         M: MaterialPackList,
         V: MeshPackList,
-        P: GraphicsPipelinePackList,
+        P: GraphicsPipelineListBuilder,
         PM: MaterialPackListPartial<Pack = M>,
         PV: MeshPackListPartial<Pack = V>,
-    > Destroy for VulkanResourcePackPartial<'a, M, V, P, PM, PV>
+    > Destroy for VulkanResourcePackPartial<'a, R, M, V, P, PM, PV>
 where
     for<'b> PM: Destroy<Context<'b> = &'b Context>,
     for<'b> PV: Destroy<Context<'b> = &'b Context>,
@@ -132,18 +143,18 @@ where
     fn destroy<'b>(&mut self, context: Self::Context<'b>) -> DestroyResult<Self> {
         let _ = self.materials.destroy(context);
         let _ = self.meshes.destroy(context);
-        let _ = self.pipelines.destroy(context);
         Ok(())
     }
 }
 impl<
         'a,
+        R: Renderer,
         M: MaterialPackList,
         V: MeshPackList,
-        P: GraphicsPipelinePackList,
+        P: GraphicsPipelineListBuilder,
         PM: MaterialPackListPartial<Pack = M>,
         PV: MeshPackListPartial<Pack = V>,
-    > Partial for VulkanResourcePackPartial<'a, M, V, P, PM, PV>
+    > Partial for VulkanResourcePackPartial<'a, R, M, V, P, PM, PV>
 where
     for<'b> PM: Destroy<Context<'b> = &'b Context>,
     for<'b> PV: Destroy<Context<'b> = &'b Context>,
@@ -154,8 +165,9 @@ where
     }
 }
 
-type PackPartial<'a, M, V, P, MB, MV> = VulkanResourcePackPartial<
+type PackPartial<'a, R, M, V, P, MB, MV> = VulkanResourcePackPartial<
     'a,
+    R,
     M,
     V,
     P,
@@ -163,23 +175,22 @@ type PackPartial<'a, M, V, P, MB, MV> = VulkanResourcePackPartial<
     <MV as MeshPackListBuilder>::Partial<'a>,
 >;
 
-impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
-    VulkanResourcePack<M, V, P>
+impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
+    VulkanResourcePack<R, M, V, P>
 {
     fn prepare<
         'a,
         MB: MaterialPackListBuilder<Pack = M>,
         MV: MeshPackListBuilder<Pack = V>,
-        MP: GraphicsPipelineListBuilder<Pack = P>,
+        MP: GraphicsPipelineListBuilder<Pack<R> = P>,
     >(
         context: &Context,
         materials: &'a MB,
         meshes: &'a MV,
-        pipelines: &'a MP,
-    ) -> Result<PackPartial<'a, M, V, P, MB, MV>, Box<dyn Error>> {
+        pipelines: MP,
+    ) -> Result<PackPartial<'a, R, M, V, MP, MB, MV>, Box<dyn Error>> {
         let materials = materials.prepare(context)?;
         let meshes = meshes.prepare(context)?;
-        let pipelines = pipelines.build(context)?;
         Ok(VulkanResourcePackPartial {
             materials,
             meshes,
@@ -189,8 +200,8 @@ impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
     }
 }
 
-impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
-    for VulkanResourcePack<M, V, P>
+impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
+    for VulkanResourcePack<R, M, V, P>
 {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
@@ -211,7 +222,7 @@ pub struct VulkanRendererContext<
 > {
     // TODO: Remove dynamic dispatch here
     renderer: R,
-    draw_storage: DrawStorageTyped<M, V, P>,
+    draw_storage: DrawStorageTyped<R, M, V, P>,
     context: Rc<VulkanContext>,
     allocator: AllocatorIndexTyped<Static>,
 }
@@ -267,22 +278,22 @@ impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
     ) -> Result<impl RendererContext, Box<dyn Error>> {
         let context = context.context.clone();
         let mut config = StaticConfig::new();
+        let renderer = DeferredRendererBuilder::new(
+            context.clone(),
+            (Path::new("_resources/assets/skybox/skybox"), P::LEN),
+        )?;
         let resources = VulkanResourcePack::prepare(
             &context.context,
             &self.materials,
             &self.meshes,
-            &self.shaders,
+            self.shaders,
         )?;
-        let renderer = DeferredRendererBuilder::<P::Pack>::new(
-            context.clone(),
-            Path::new("_resources/assets/skybox/skybox"),
-        )?;
-        resources.register_memory_requirements(&mut config);
         renderer.register_memory_requirements(&mut config);
+        resources.register_memory_requirements(&mut config);
         let allocator = context.create_allocator::<Static, _>(config)?;
+        let renderer = renderer.with_allocator(allocator).build()?;
         let resources = resources.load(&context, allocator)?;
         let draw_storage = DrawStorageTyped::new(resources);
-        let renderer = renderer.build()?;
         Ok(VulkanRendererContext {
             context,
             renderer,
@@ -314,7 +325,7 @@ fn push_and_get_index<V>(vec: &mut Vec<V>, value: V) -> u32 {
     index.try_into().unwrap()
 }
 
-type ShaderCollection<V, M> = Vec<DeferredShader<Shader<V, M>>>;
+type ShaderCollection<V, M> = Vec<Shader<V, M>>;
 
 impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackListBuilder>
     VulkanContextBuilder<S, M, V>
@@ -410,10 +421,7 @@ impl<
         drawable: &D,
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
-        // Currently only Deferred Shaders are supported
-        // TODO: Implement mapper from user facing common Shader type
-        // to ShaderType + GraphicsPipelineConfig type used by configured rendering pipeline
-        let shader = shader.map::<DeferredShader<T>>();
+        let shader = shader.map::<R::ShaderType<T>>();
         self.draw_storage
             .append_draw_call(&self.context, shader, drawable, transform);
         Ok(())

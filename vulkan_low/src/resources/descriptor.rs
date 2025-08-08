@@ -15,9 +15,10 @@ use ash::vk;
 
 use crate::{
     resources::{
-        error::{GuardError, ResourceError},
+        error::{GuardError, ResourceError, ResourceResult},
         layout::{
             DescriptorIndex, DescriptorLayout, DescriptorLayoutList, DescriptorSetLayout, Layout,
+            PipelineLayout,
         },
         pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
         Resource, ResourceGuardError,
@@ -123,6 +124,27 @@ impl<'a, T: DescriptorLayout> DescriptorPoolRef<'a, T> {
     }
 }
 
+pub struct DescriptorSetMapper<T: DescriptorLayout, L: Layout> {
+    set_index: DescriptorIndex<T>,
+    _layout: PhantomData<L>,
+}
+
+impl<T: DescriptorLayout, L: Layout> DescriptorSetMapper<T, L> {
+    #[inline]
+    pub fn get_binding(
+        &self,
+        context: &Context,
+        descriptor: Descriptor<T>,
+    ) -> ResourceResult<DescriptorBindingData> {
+        let layout = context.get_unique_resource::<PipelineLayout<L>, _>()?;
+        Ok(DescriptorBindingData {
+            set_index: self.set_index.index,
+            set: descriptor.set,
+            pipeline_layout: layout.into(),
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct DescriptorBindingData {
     pub set_index: u32,
@@ -133,6 +155,16 @@ pub struct DescriptorBindingData {
 pub type PipelineSetIndices<C> = <<<C as GraphicsPipelineConfig>::Layout as Layout>::Descriptors as DescriptorLayoutList>::IndexList;
 
 impl<T: DescriptorLayout> Descriptor<T> {
+    pub fn get_mapper<C: GraphicsPipelineConfig, M: Marker>() -> DescriptorSetMapper<T, C::Layout>
+    where
+        PipelineSetIndices<C>: Contains<DescriptorIndex<T>, M>,
+    {
+        DescriptorSetMapper {
+            set_index: C::Layout::sets().get_index::<T, _>(),
+            _layout: PhantomData,
+        }
+    }
+
     pub fn get_binding<C: GraphicsPipelineConfig, M: Marker>(
         &self,
         pipeline: &GraphicsPipeline<C>,
@@ -140,7 +172,7 @@ impl<T: DescriptorLayout> Descriptor<T> {
     where
         PipelineSetIndices<C>: Contains<DescriptorIndex<T>, M>,
     {
-        let set_index = C::Layout::sets().get_index::<T, _>();
+        let set_index = C::Layout::sets().get_index::<T, _>().index;
         DescriptorBindingData {
             set_index,
             set: self.set,

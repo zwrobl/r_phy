@@ -95,7 +95,7 @@ impl<S: ShaderType> ShaderHandle<S> {
         self.index
     }
 
-    pub fn map<T: ShaderType + From<S>>(self) -> ShaderHandle<T> {
+    pub fn map<T: ShaderType>(self) -> ShaderHandle<T> {
         ShaderHandle {
             index: self.index,
             _phantom: PhantomData,

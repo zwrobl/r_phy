@@ -2,7 +2,7 @@ pub mod presets;
 mod resources;
 mod stage;
 
-use std::{convert::Infallible, marker::PhantomData, path::Path, rc::Rc};
+use std::{convert::Infallible, path::Path, rc::Rc};
 
 use graphics::{renderer::camera::CameraMatrices, shader::ShaderType};
 use type_kit::{
@@ -13,7 +13,7 @@ use vulkan_low::{
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
-        descriptor::Descriptor,
+        descriptor::{Descriptor, DescriptorSetMapper},
         error::{ResourceError, ResourceResult, ShaderResult},
         layout::presets::CameraDescriptorSet,
         pipeline::{GraphicsPipelineConfig, ModuleLoader, Modules, ShaderDirectory},
@@ -40,8 +40,9 @@ use crate::{
         frame::{Frame, FrameCell, FramePool, FramePoolPartial},
         storage::DrawStorage,
         DestroyTerminator, ExternalResources, FrameData, Renderer, RendererBuilder,
+        ShaderDescriptor,
     },
-    resources::{GraphicsPipelinePackList, SkyboxPartial},
+    resources::SkyboxPartial,
     VulkanContext,
 };
 
@@ -49,7 +50,6 @@ pub type DeferredFrameData = FrameData<DeferedRenderPass<AttachmentsGBuffer>>;
 
 pub struct DeferredRenderer<
     E: Executor<InitializerList = DeferredFrameData, TaskError = ResourceError>,
-    P: GraphicsPipelinePackList,
 > where
     for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
     <E::Resources as Destroy>::DestroyError: Into<Infallible>,
@@ -60,17 +60,16 @@ pub struct DeferredRenderer<
     g_buffer: GBuffer,
     frame: FrameCell<DeferedRenderPass<AttachmentsGBuffer>>,
     frame_pool: FramePool<DeferedRenderPass<AttachmentsGBuffer>>,
-    _phantom: PhantomData<P>,
 }
 
-pub struct DeferredRendererPartial<P: GraphicsPipelinePackList> {
+pub struct DeferredRendererPartial {
     g_buffer_partial: GBufferPartial,
     skybox_partial: SkyboxPartial,
     frame_pool_partial: DropGuard<FramePoolPartial<DeferedRenderPass<AttachmentsGBuffer>>>,
-    _phantom: PhantomData<P>,
+    num_shaders: usize,
 }
 
-impl<P: GraphicsPipelinePackList> Partial for DeferredRendererPartial<P> {
+impl Partial for DeferredRendererPartial {
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
         self.g_buffer_partial.register_memory_requirements(builder);
         self.skybox_partial.register_memory_requirements(builder);
@@ -79,27 +78,28 @@ impl<P: GraphicsPipelinePackList> Partial for DeferredRendererPartial<P> {
     }
 }
 
-impl<P: GraphicsPipelinePackList> Create for DeferredRendererPartial<P> {
-    type Config<'a> = &'a Path;
+impl Create for DeferredRendererPartial {
+    type Config<'a> = (&'a Path, usize);
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
+        let (path, num_shaders) = config;
         let g_buffer_partial = GBufferPartial::create((), context)?;
         let frame_pool_partial = DropGuard::new(FramePoolPartial::create((), context)?);
-        let skybox_partial = SkyboxPartial::create(config, context)?;
+        let skybox_partial = SkyboxPartial::create(path, context)?;
         Ok(Self {
             g_buffer_partial,
             skybox_partial,
             frame_pool_partial,
-            _phantom: PhantomData,
+            num_shaders,
         })
     }
 }
 
-impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererPartial<P> {
+impl Destroy for DeferredRendererPartial {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
@@ -112,10 +112,8 @@ impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererPartial<P> {
     }
 }
 
-impl<
-        E: Executor<InitializerList = DeferredFrameData, TaskError = ResourceError>,
-        P: GraphicsPipelinePackList,
-    > Destroy for DeferredRenderer<E, P>
+impl<E: Executor<InitializerList = DeferredFrameData, TaskError = ResourceError>> Destroy
+    for DeferredRenderer<E>
 where
     for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
     <E::Resources as Destroy>::DestroyError: Into<Infallible>,
@@ -142,17 +140,14 @@ impl<
             TaskError = ResourceError,
             TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
         >,
-        P: GraphicsPipelinePackList,
-    > Renderer for DeferredRenderer<E, P>
+    > Renderer for DeferredRenderer<E>
 where
     for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
     <E::Resources as Destroy>::DestroyError: Into<Infallible>,
     for<'a> E::TaskList: Destroy<Context<'a> = &'a Context>,
     <E::TaskList as Destroy>::DestroyError: Into<Infallible>,
 {
-    fn destroy(&mut self, context: &Context) {
-        let _ = <Self as Destroy>::destroy(self, context);
-    }
+    type ShaderType<T: ShaderType> = DeferredShader<T>;
 
     fn begin_frame(
         &mut self,
@@ -175,19 +170,19 @@ where
     }
 }
 
-pub struct DeferredRendererBuilder<P: GraphicsPipelinePackList> {
+pub struct DeferredRendererBuilder {
     context: Rc<VulkanContext>,
     allocator: Option<AllocatorIndex>,
-    partial: DeferredRendererPartial<P>,
+    partial: DeferredRendererPartial,
 }
 
-impl<P: GraphicsPipelinePackList> Partial for DeferredRendererBuilder<P> {
+impl Partial for DeferredRendererBuilder {
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
         self.partial.register_memory_requirements(builder);
     }
 }
 
-impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererBuilder<P> {
+impl Destroy for DeferredRendererBuilder {
     type Context<'a> = &'a Context;
     type DestroyError = Infallible;
 
@@ -198,13 +193,12 @@ impl<P: GraphicsPipelinePackList> Destroy for DeferredRendererBuilder<P> {
     }
 }
 
-impl<P: GraphicsPipelinePackList> RendererBuilder for DeferredRendererBuilder<P> {
-    type Config<'a> = &'a Path;
+impl RendererBuilder for DeferredRendererBuilder {
+    type Config<'a> = (&'a Path, usize);
 
     #[inline]
     fn new(context: Rc<VulkanContext>, config: Self::Config<'_>) -> ResourceResult<Self> {
-        let skybox_path = config;
-        let partial = DeferredRendererPartial::create(skybox_path, &context)?;
+        let partial = DeferredRendererPartial::create(config, &context)?;
         Ok(DeferredRendererBuilder {
             context,
             allocator: None,
@@ -213,9 +207,9 @@ impl<P: GraphicsPipelinePackList> RendererBuilder for DeferredRendererBuilder<P>
     }
 
     #[inline]
-    fn with_allocator(self, allocator: AllocatorIndex) -> Self {
+    fn with_allocator<T: Into<AllocatorIndex>>(self, allocator: T) -> Self {
         Self {
-            allocator: Some(allocator),
+            allocator: Some(allocator.into()),
             ..self
         }
     }
@@ -229,7 +223,7 @@ impl<P: GraphicsPipelinePackList> RendererBuilder for DeferredRendererBuilder<P>
                     g_buffer_partial,
                     skybox_partial,
                     frame_pool_partial,
-                    ..
+                    num_shaders,
                 },
         } = self;
         let g_buffer = GBuffer::create((g_buffer_partial, allocator), &context)?;
@@ -245,7 +239,7 @@ impl<P: GraphicsPipelinePackList> RendererBuilder for DeferredRendererBuilder<P>
             .register_resource(FrameCell::<DeferedRenderPass<AttachmentsGBuffer>>::empty())
             .register_resource(DrawStorage::new())
             .register_resource(DeferredSharedResources::create(
-                (framebuffer, frame_pool.num_images() * (P::LEN + 4)),
+                (framebuffer, frame_pool.num_images() * (num_shaders + 4)),
                 &context,
             )?)
             .push_task(LoadResources)
@@ -259,7 +253,6 @@ impl<P: GraphicsPipelinePackList> RendererBuilder for DeferredRendererBuilder<P>
             g_buffer,
             frame: FrameCell::empty(),
             frame_pool,
-            _phantom: PhantomData::<P>,
         };
         Ok(new_deferred)
     }
@@ -267,6 +260,13 @@ impl<P: GraphicsPipelinePackList> RendererBuilder for DeferredRendererBuilder<P>
 
 pub struct DeferredShader<S: ShaderType> {
     shader: S,
+}
+
+impl<T: ShaderType> ShaderDescriptor<CameraDescriptorSet> for DeferredShader<T> {
+    #[inline]
+    fn get_mapper() -> DescriptorSetMapper<CameraDescriptorSet, Self::Layout> {
+        Descriptor::<CameraDescriptorSet>::get_mapper::<Self, _>()
+    }
 }
 
 impl<S: ShaderType> ShaderType for DeferredShader<S> {
