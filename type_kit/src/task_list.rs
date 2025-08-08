@@ -246,9 +246,11 @@ impl SynchronousExecutor<Infallible, Here, Nil, Nil, Nil> {
 pub trait Executor {
     type InitializerList: TypeList;
     type Resources: TypeList;
-    type TaskResult;
-    type TaskError: Error;
     type TaskList: TaskList<Self::Resources, Self::TaskError>;
+    type TaskError: Error;
+    type TaskResult: Into<
+        <Self::TaskList as TaskList<Self::Resources, Self::TaskError>>::TaskResult,
+    >;
 
     fn execute(
         &mut self,
@@ -263,18 +265,15 @@ impl<R: TypeList, M: Marker, I: Subset<R, M>, S: TaskList<R, E>, E: Error> Execu
 {
     type InitializerList = I;
     type Resources = R;
-    type TaskResult = S::TaskResult;
-    type TaskError = E;
     type TaskList = S;
+    type TaskError = E;
+    type TaskResult = S::TaskResult;
 
     #[inline]
     fn execute(
         &mut self,
         initializer: Self::InitializerList,
-    ) -> Result<
-        <Self::TaskList as TaskList<Self::Resources, Self::TaskError>>::TaskResult,
-        Self::TaskError,
-    > {
+    ) -> Result<Self::TaskResult, Self::TaskError> {
         initializer.sub_write(&mut self.resources);
         self.stages.execute(&mut self.resources)
     }
