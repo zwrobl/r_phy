@@ -203,10 +203,14 @@ impl<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
     }
 }
 
-pub struct VulkanRendererContext<M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
-{
+pub struct VulkanRendererContext<
+    M: MaterialPackList,
+    V: MeshPackList,
+    P: GraphicsPipelinePackList,
+    R: Renderer,
+> {
     // TODO: Remove dynamic dispatch here
-    renderer: Box<dyn Renderer>,
+    renderer: R,
     draw_storage: DrawStorageTyped<M, V, P>,
     context: Rc<VulkanContext>,
     allocator: AllocatorIndexTyped<Static>,
@@ -230,8 +234,8 @@ impl VulkanContext {
     }
 }
 
-impl<'a, M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList> Drop
-    for VulkanRendererContext<M, V, S>
+impl<'a, M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList, R: Renderer> Drop
+    for VulkanRendererContext<M, V, S, R>
 {
     fn drop(&mut self) {
         let _ = self.context.wait_idle();
@@ -256,9 +260,11 @@ impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
     ContextBuilder for VulkanContextBuilder<P, M, V>
 {
     type Renderer = VulkanRenderer;
-    type Context<'a> = VulkanRendererContext<M::Pack, V::Pack, P::Pack>;
 
-    fn build<'a>(self, context: &'a Self::Renderer) -> Result<Self::Context<'a>, Box<dyn Error>> {
+    fn build<'a>(
+        self,
+        context: &'a Self::Renderer,
+    ) -> Result<impl RendererContext, Box<dyn Error>> {
         let context = context.context.clone();
         let mut config = StaticConfig::new();
         let resources = VulkanResourcePack::prepare(
@@ -276,7 +282,7 @@ impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
         let allocator = context.create_allocator::<Static, _>(config)?;
         let resources = resources.load(&context, allocator)?;
         let draw_storage = DrawStorageTyped::new(resources);
-        let renderer = Box::new(renderer.build()?);
+        let renderer = renderer.build()?;
         Ok(VulkanRendererContext {
             context,
             renderer,
@@ -378,7 +384,8 @@ impl<
         M: MaterialPackList + 'static,
         V: MeshPackList + 'static,
         S: GraphicsPipelinePackList + 'static,
-    > RendererContext for VulkanRendererContext<M, V, S>
+        R: Renderer,
+    > RendererContext for VulkanRendererContext<M, V, S, R>
 {
     type Shaders = S;
     type Materials = M;

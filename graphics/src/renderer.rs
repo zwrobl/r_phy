@@ -16,9 +16,8 @@ pub trait Renderer: 'static {}
 
 pub trait ContextBuilder {
     type Renderer: Renderer;
-    type Context<'a>: RendererContext;
 
-    fn build<'a>(self, renderer: &'a Self::Renderer) -> Result<Self::Context<'a>, Box<dyn Error>>;
+    fn build(self, renderer: &Self::Renderer) -> Result<impl RendererContext, Box<dyn Error>>;
 }
 
 pub trait RendererContext {
@@ -45,9 +44,8 @@ impl Renderer for Nil {}
 
 impl ContextBuilder for Nil {
     type Renderer = Nil;
-    type Context<'a> = Nil;
 
-    fn build<'a>(self, _renderer: &'a Self::Renderer) -> Result<Self::Context<'a>, Box<dyn Error>> {
+    fn build(self, _renderer: &Self::Renderer) -> Result<impl RendererContext, Box<dyn Error>> {
         Ok(Nil::new())
     }
 }
