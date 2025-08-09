@@ -9,17 +9,16 @@ use graphics::{
     shader::{ShaderHandle, ShaderType},
 };
 use std::error::Error;
+use std::marker::PhantomData;
 use std::ops::Deref;
-use std::path::Path;
 use std::rc::Rc;
 use winit::window::Window;
 
 use vulkan_low::memory::allocator::{AllocatorIndexTyped, Static, StaticConfig};
 use vulkan_low::resources::Partial;
 
-use crate::renderer::deferred::DeferredRendererBuilder;
 use crate::renderer::storage::DrawStorageTyped;
-use crate::renderer::{Renderer, RendererBuilder};
+use crate::renderer::Renderer;
 use crate::resources::{
     CommonResources, CommonResourcesPartial, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
     MaterialPackList, MaterialPackListBuilder, MeshPackList, MeshPackListBuilder, ResourcePack,
@@ -58,19 +57,19 @@ impl Drop for VulkanContext {
 }
 
 pub struct VulkanRendererContext<
+    'a,
     M: MaterialPackList,
     V: MeshPackList,
     P: GraphicsPipelinePackList,
     R: Renderer,
 > {
-    renderer: R,
+    renderer: &'a mut VulkanRenderer<R>,
     draw_storage: DrawStorageTyped<R, M, V, P>,
-    context: Rc<VulkanContext>,
     allocator: AllocatorIndexTyped<Static>,
 }
 
 impl VulkanContext {
-    pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Self, Box<dyn Error>> {
+    pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Rc<Self>, Box<dyn Error>> {
         let context = Context::build(window)?;
         let common_resources = CommonResourcesPartial::create((), &context)?;
         let mut allocator_config = StaticConfig::new();
@@ -78,28 +77,30 @@ impl VulkanContext {
         let allocator = context.create_allocator::<Static, _>(allocator_config)?;
         let common_resources =
             CommonResources::create((common_resources, allocator.into()), &context)?;
-        Ok(VulkanContext {
+        let context = VulkanContext {
             context,
             common_resources,
             allocator,
             _config: config,
-        })
+        };
+        Ok(Rc::new(context))
     }
 }
 
 impl<'a, M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList, R: Renderer> Drop
-    for VulkanRendererContext<M, V, S, R>
+    for VulkanRendererContext<'a, M, V, S, R>
 {
     fn drop(&mut self) {
-        let _ = self.context.wait_idle();
-        let _ = self.draw_storage.destroy(&self.context);
-        let _ = self.renderer.destroy(&self.context);
-        let _ = self.context.destroy_allocator(self.allocator);
+        let context = self.renderer.context();
+        let _ = context.wait_idle();
+        let _ = self.draw_storage.destroy(context);
+        let _ = context.destroy_allocator(self.allocator);
     }
 }
 
 #[derive(Debug)]
 pub struct VulkanContextBuilder<
+    R: Renderer,
     P: GraphicsPipelineListBuilder,
     M: MaterialPackListBuilder,
     V: MeshPackListBuilder,
@@ -107,56 +108,132 @@ pub struct VulkanContextBuilder<
     shaders: P,
     materials: M,
     meshes: V,
+    _renderer: PhantomData<R>,
 }
 
-impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackListBuilder>
-    ContextBuilder for VulkanContextBuilder<P, M, V>
+impl<
+        R: Renderer,
+        P: GraphicsPipelineListBuilder,
+        M: MaterialPackListBuilder,
+        V: MeshPackListBuilder,
+    > ContextBuilder for VulkanContextBuilder<R, P, M, V>
 {
-    type Renderer = VulkanRenderer;
+    type Materials = M;
+    type Shaders = P;
+    type Meshes = V;
+    type Renderer = VulkanRenderer<R>;
 
-    fn build<'a>(
-        self,
-        context: &'a Self::Renderer,
-    ) -> Result<impl RendererContext, Box<dyn Error>> {
-        let context = context.context.clone();
+    fn build(self, renderer: &mut Self::Renderer) -> Result<impl RendererContext, Box<dyn Error>> {
+        let context = renderer.context();
         let mut config = StaticConfig::new();
-        let renderer = DeferredRendererBuilder::new(
-            context.clone(),
-            (Path::new("_resources/assets/skybox/skybox"), P::LEN),
-        )?;
-        let resources = ResourcePack::prepare(
-            &context.context,
-            &self.materials,
-            &self.meshes,
-            self.shaders,
-        )?;
-        renderer.register_memory_requirements(&mut config);
+        let resources =
+            ResourcePack::prepare(context, &self.materials, &self.meshes, self.shaders)?;
         resources.register_memory_requirements(&mut config);
-        let allocator = context.create_allocator::<Static, _>(config)?;
-        let renderer = renderer.with_allocator(allocator).build()?;
-        let resources = resources.with_allocator(allocator).build(&context)?;
+        let allocator = context.create_allocator(config)?;
+        let resources = resources.with_allocator(allocator).build(context)?;
         let draw_storage = DrawStorageTyped::new(resources);
         Ok(VulkanRendererContext {
-            context,
             renderer,
             draw_storage,
             allocator,
         })
     }
+
+    fn with_material_type<N: Material>(
+        self,
+    ) -> impl ContextBuilder<
+        Renderer = Self::Renderer,
+        Materials = Cons<Vec<N>, Self::Materials>,
+        Shaders = Self::Shaders,
+        Meshes = Self::Meshes,
+    > {
+        VulkanContextBuilder {
+            materials: Cons::<Vec<N>, _> {
+                head: vec![],
+                tail: self.materials,
+            },
+            meshes: self.meshes,
+            shaders: self.shaders,
+            _renderer: PhantomData,
+        }
+    }
+
+    fn with_mesh_type<N: Vertex>(
+        self,
+    ) -> impl ContextBuilder<
+        Renderer = Self::Renderer,
+        Materials = Self::Materials,
+        Shaders = Self::Shaders,
+        Meshes = Cons<Vec<Mesh<N>>, Self::Meshes>,
+    > {
+        VulkanContextBuilder {
+            meshes: Cons::<Vec<Mesh<N>>, _> {
+                head: vec![],
+                tail: self.meshes,
+            },
+            materials: self.materials,
+            shaders: self.shaders,
+            _renderer: PhantomData,
+        }
+    }
+
+    fn with_shader_type<N: Vertex, T: Material>(
+        self,
+    ) -> impl ContextBuilder<
+        Renderer = Self::Renderer,
+        Materials = Self::Materials,
+        Shaders = Cons<Vec<Shader<N, T>>, Self::Shaders>,
+        Meshes = Self::Meshes,
+    > {
+        VulkanContextBuilder {
+            shaders: Cons::<Vec<Shader<N, T>>, _> {
+                head: vec![],
+                tail: self.shaders,
+            },
+            materials: self.materials,
+            meshes: self.meshes,
+            _renderer: PhantomData,
+        }
+    }
+
+    fn add_material<N: Material, T: Marker>(&mut self, material: N) -> MaterialHandle<N>
+    where
+        Self::Materials: Contains<Vec<N>, T>,
+    {
+        MaterialHandle::new(push_and_get_index(self.materials.get_mut(), material))
+    }
+
+    fn add_mesh<N: Vertex, T: Marker>(&mut self, mesh: Mesh<N>) -> MeshHandle<N>
+    where
+        Self::Meshes: Contains<Vec<Mesh<N>>, T>,
+    {
+        MeshHandle::new(push_and_get_index(self.meshes.get_mut(), mesh))
+    }
+
+    fn add_shader<N: Vertex, T: Material, K: Marker>(
+        &mut self,
+        shader: Shader<N, T>,
+    ) -> ShaderHandle<Shader<N, T>>
+    where
+        Self::Shaders: Contains<Vec<Shader<N, T>>, K>,
+    {
+        ShaderHandle::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
+    }
 }
 
-impl Default for VulkanContextBuilder<Nil, Nil, Nil> {
+impl<R: Renderer> Default for VulkanContextBuilder<R, Nil, Nil, Nil> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VulkanContextBuilder<Nil, Nil, Nil> {
+impl<R: Renderer> VulkanContextBuilder<R, Nil, Nil, Nil> {
     pub fn new() -> Self {
         VulkanContextBuilder {
             shaders: Nil::new(),
             materials: Nil::new(),
             meshes: Nil::new(),
+            _renderer: PhantomData,
         }
     }
 }
@@ -167,78 +244,13 @@ fn push_and_get_index<V>(vec: &mut Vec<V>, value: V) -> u32 {
     index.try_into().unwrap()
 }
 
-type ShaderCollection<V, M> = Vec<Shader<V, M>>;
-
-impl<S: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackListBuilder>
-    VulkanContextBuilder<S, M, V>
-{
-    pub fn with_material_type<N: Material>(self) -> VulkanContextBuilder<S, Cons<Vec<N>, M>, V> {
-        VulkanContextBuilder {
-            materials: Cons {
-                head: vec![],
-                tail: self.materials,
-            },
-            meshes: self.meshes,
-            shaders: self.shaders,
-        }
-    }
-
-    pub fn with_mesh_type<N: Vertex>(self) -> VulkanContextBuilder<S, M, Cons<Vec<Mesh<N>>, V>> {
-        VulkanContextBuilder {
-            meshes: Cons {
-                head: vec![],
-                tail: self.meshes,
-            },
-            materials: self.materials,
-            shaders: self.shaders,
-        }
-    }
-
-    pub fn with_shader_type<N: Vertex, T: Material>(
-        self,
-    ) -> VulkanContextBuilder<Cons<ShaderCollection<N, T>, S>, M, V> {
-        VulkanContextBuilder {
-            shaders: Cons {
-                head: vec![],
-                tail: self.shaders,
-            },
-            materials: self.materials,
-            meshes: self.meshes,
-        }
-    }
-
-    pub fn add_material<N: Material, T: Marker>(&mut self, material: N) -> MaterialHandle<N>
-    where
-        M: Contains<Vec<N>, T>,
-    {
-        MaterialHandle::new(push_and_get_index(self.materials.get_mut(), material))
-    }
-
-    pub fn add_mesh<N: Vertex, T: Marker>(&mut self, mesh: Mesh<N>) -> MeshHandle<N>
-    where
-        V: Contains<Vec<Mesh<N>>, T>,
-    {
-        MeshHandle::new(push_and_get_index(self.meshes.get_mut(), mesh))
-    }
-
-    pub fn add_shader<N: Vertex, T: Material, K: Marker>(
-        &mut self,
-        shader: Shader<N, T>,
-    ) -> ShaderHandle<Shader<N, T>>
-    where
-        S: Contains<ShaderCollection<N, T>, K>,
-    {
-        ShaderHandle::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
-    }
-}
-
 impl<
         'a,
         M: MaterialPackList + 'static,
         V: MeshPackList + 'static,
         S: GraphicsPipelinePackList + 'static,
         R: Renderer,
-    > RendererContext for VulkanRendererContext<M, V, S, R>
+    > RendererContext for VulkanRendererContext<'a, M, V, S, R>
 {
     type Shaders = S;
     type Materials = M;
@@ -246,14 +258,14 @@ impl<
 
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
-        let camera_descriptor = self.renderer.begin_frame(&self.context, camera_matrices)?;
+        let camera_descriptor = self.renderer.begin_frame(camera_matrices)?;
         self.draw_storage.begin_frame(camera_descriptor);
         Ok(())
     }
 
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
         let draw_storage = self.draw_storage.end_frame();
-        self.renderer.render(&self.context, draw_storage)?;
+        self.renderer.end_frame(draw_storage)?;
         Ok(())
     }
 
@@ -265,7 +277,7 @@ impl<
     ) -> Result<(), Box<dyn Error>> {
         let shader = shader.map::<R::ShaderType<T>>();
         self.draw_storage
-            .append_draw_call(&self.context, shader, drawable, transform);
+            .append_draw_call(&self.renderer.context(), shader, drawable, transform);
         Ok(())
     }
 }

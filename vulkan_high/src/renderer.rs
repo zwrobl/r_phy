@@ -77,9 +77,9 @@ pub trait Renderer: for<'a> Destroy<Context<'a> = &'a Context, DestroyError = In
 pub trait RendererBuilder:
     Partial + for<'a> Destroy<Context<'a> = &'a Context, DestroyError = Infallible>
 {
-    type Config<'a>;
+    type Config;
 
-    fn new(context: Rc<VulkanContext>, config: Self::Config<'_>) -> ResourceResult<Self>;
+    fn new(context: &Rc<VulkanContext>, config: Self::Config) -> ResourceResult<Self>;
 
     fn with_allocator<T: Into<AllocatorIndex>>(self, allocator: T) -> Self;
 

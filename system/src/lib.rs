@@ -94,23 +94,17 @@ impl CursorState {
 }
 
 pub struct LoopBuilder<R: RendererBuilder, C: CameraBuilder> {
+    renderer: R,
     camera: Option<C>,
-    renderer: Option<R>,
     window: Option<WindowBuilder>,
 }
 
-impl Default for LoopBuilder<Nil, CameraNone> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LoopBuilder<Nil, CameraNone> {
-    pub fn new() -> Self {
+impl<N: RendererBuilder> LoopBuilder<N, CameraNone> {
+    pub fn new(renderer: N) -> Self {
         Self {
             camera: None,
             window: None,
-            renderer: None,
+            renderer,
         }
     }
 }
@@ -120,15 +114,6 @@ impl<R: RendererBuilder, C: CameraBuilder> LoopBuilder<R, C> {
         Self {
             window: Some(window),
             ..self
-        }
-    }
-
-    pub fn with_renderer<N: RendererBuilder>(self, renderer: N) -> LoopBuilder<N, C> {
-        let Self { window, camera, .. } = self;
-        LoopBuilder {
-            renderer: Some(renderer),
-            window,
-            camera,
         }
     }
 
@@ -143,7 +128,7 @@ impl<R: RendererBuilder, C: CameraBuilder> LoopBuilder<R, C> {
         }
     }
 
-    pub fn build(self) -> Result<Loop<R::Renderer, C::Camera>, Box<dyn Error>> {
+    pub fn build(self) -> Result<Loop<impl Renderer, C::Camera>, Box<dyn Error>> {
         let Self {
             window,
             renderer,
@@ -156,9 +141,7 @@ impl<R: RendererBuilder, C: CameraBuilder> LoopBuilder<R, C> {
                 .ok_or("Window configuration not provided for Loop!")?
                 .build(&event_loop)?,
         );
-        let renderer = renderer
-            .ok_or("Renderer backend not selected for Loop!")?
-            .build(&window)?;
+        let renderer = renderer.build(window.clone())?;
         let camera = camera
             .ok_or("Camera not selected for Loop!")?
             .build(&mut input_handler);
@@ -294,7 +277,7 @@ impl<R: Renderer, C: Camera> LoopTypes for Loop<R, C> {
 }
 
 pub struct Scene<D: DrawableCollection, B: ContextBuilder> {
-    builder: B,
+    renderer_context: B,
     objects: D,
 }
 
@@ -308,7 +291,7 @@ impl<D: DrawableCollection, B: ContextBuilder> Scene<D, B> {
         objects: Vec<Object<T>>,
     ) -> Scene<Cons<DrawableContainer<S, T>, D>, B> {
         Scene {
-            builder: self.builder,
+            renderer_context: self.renderer_context,
             objects: Cons {
                 head: DrawableContainer { shader, objects },
                 tail: self.objects,
@@ -318,12 +301,16 @@ impl<D: DrawableCollection, B: ContextBuilder> Scene<D, B> {
 }
 
 impl<R: Renderer, C: Camera> Loop<R, C> {
+    pub fn renderer_context_builder(&self) -> impl ContextBuilder<Renderer = R> {
+        R::context_builder()
+    }
+
     pub fn scene<B: ContextBuilder<Renderer = R>>(
         &self,
         builder: B,
     ) -> Result<Scene<Nil, B>, Box<dyn Error>> {
         Ok(Scene {
-            builder,
+            renderer_context: builder,
             objects: Nil::new(),
         })
     }
@@ -335,11 +322,11 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
         let Self {
             window,
             event_loop,
-            renderer,
+            mut renderer,
             mut input_handler,
             camera,
         } = self;
-        let mut context = scene.builder.build(&renderer)?;
+        let mut context = scene.renderer_context.build(&mut renderer)?;
         let cursor_state = Rc::new(RefCell::new(CursorState::new()));
         let shared_cursor_state = cursor_state.clone();
         let shared_window = window.clone();

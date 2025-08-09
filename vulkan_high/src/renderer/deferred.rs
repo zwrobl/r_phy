@@ -2,7 +2,11 @@ pub mod presets;
 mod resources;
 mod stage;
 
-use std::{convert::Infallible, path::Path, rc::Rc};
+use std::{
+    convert::Infallible,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use graphics::{renderer::camera::CameraMatrices, shader::ShaderType};
 use type_kit::{
@@ -79,22 +83,22 @@ impl Partial for DeferredRendererPartial {
 }
 
 impl Create for DeferredRendererPartial {
-    type Config<'a> = (&'a Path, usize);
+    type Config<'a> = DeferredRendererConfig;
     type CreateError = ResourceError;
 
     fn create<'a, 'b>(
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (path, num_shaders) = config;
+        let DeferredRendererConfig { skybox } = config;
         let g_buffer_partial = GBufferPartial::create((), context)?;
         let frame_pool_partial = DropGuard::new(FramePoolPartial::create((), context)?);
-        let skybox_partial = SkyboxPartial::create(path, context)?;
+        let skybox_partial = SkyboxPartial::create(&skybox, context)?;
         Ok(Self {
             g_buffer_partial,
             skybox_partial,
             frame_pool_partial,
-            num_shaders,
+            num_shaders: 1,
         })
     }
 }
@@ -193,14 +197,27 @@ impl Destroy for DeferredRendererBuilder {
     }
 }
 
+pub struct DeferredRendererConfig {
+    skybox: PathBuf,
+}
+
+impl DeferredRendererConfig {
+    #[inline]
+    pub fn new(skybox: &Path) -> Self {
+        Self {
+            skybox: skybox.to_path_buf(),
+        }
+    }
+}
+
 impl RendererBuilder for DeferredRendererBuilder {
-    type Config<'a> = (&'a Path, usize);
+    type Config = DeferredRendererConfig;
 
     #[inline]
-    fn new(context: Rc<VulkanContext>, config: Self::Config<'_>) -> ResourceResult<Self> {
+    fn new(context: &Rc<VulkanContext>, config: Self::Config) -> ResourceResult<Self> {
         let partial = DeferredRendererPartial::create(config, &context)?;
         Ok(DeferredRendererBuilder {
-            context,
+            context: context.clone(),
             allocator: None,
             partial,
         })

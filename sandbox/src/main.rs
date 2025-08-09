@@ -1,9 +1,13 @@
 use graphics::{
     model::{CommonVertex, EmptyMaterial, Model, PbrMaterial, SimpleVertex, UnlitMaterial},
+    renderer::ContextBuilder,
     shader::Shader,
 };
-use std::{error::Error, result::Result};
-use vulkan_high::{context::VulkanContextBuilder, VulkanRendererBuilder, VulkanRendererConfig};
+use std::{error::Error, path::Path, result::Result};
+use vulkan_high::{
+    renderer::deferred::{DeferredRendererBuilder, DeferredRendererConfig},
+    VulkanRendererBuilder, VulkanRendererConfig,
+};
 use winit::{
     dpi::PhysicalSize,
     window::{WindowBuilder, WindowButtons},
@@ -18,8 +22,6 @@ use physics::shape::Cube;
 use system::{LoopBuilder, Object};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let renderer_builder =
-        VulkanRendererBuilder::new().with_config(VulkanRendererConfig::builder().build()?);
     let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-3, 1e3);
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize {
@@ -31,12 +33,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_title("r_phy")
         .with_transparent(false);
     let camera_builder = FirstPersonCameraBuilder::new(proj);
-    let game_loop = LoopBuilder::new()
-        .with_window(window_builder)
-        .with_renderer(renderer_builder)
-        .with_camera(camera_builder)
-        .build()?;
-    let mut context_builder = VulkanContextBuilder::new()
+    let game_loop = LoopBuilder::new(
+        VulkanRendererBuilder::<DeferredRendererBuilder>::new(DeferredRendererConfig::new(
+            Path::new("_resources/assets/skybox/skybox"),
+        ))
+        .with_config(VulkanRendererConfig::builder().build()?),
+    )
+    .with_window(window_builder)
+    .with_camera(camera_builder)
+    .build()?;
+    let mut renderer_context = game_loop
+        .renderer_context_builder()
         .with_material_type::<UnlitMaterial>()
         .with_material_type::<PbrMaterial>()
         .with_material_type::<EmptyMaterial>()
@@ -45,12 +52,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_shader_type::<CommonVertex, EmptyMaterial>()
         .with_shader_type::<CommonVertex, UnlitMaterial>()
         .with_shader_type::<CommonVertex, PbrMaterial>();
-    let empty_material = context_builder.add_material(EmptyMaterial::default());
-    let cube_mesh = context_builder.add_mesh(Cube::new(1.0f32).into());
-    let checker_shader = context_builder.add_shader(Shader::<CommonVertex, EmptyMaterial>::new(
+    let empty_material = renderer_context.add_material(EmptyMaterial::default());
+    let cube_mesh = renderer_context.add_mesh(Cube::new(1.0f32).into());
+    let checker_shader = renderer_context.add_shader(Shader::<CommonVertex, EmptyMaterial>::new(
         "_resources/shaders/spv/deferred/gbuffer_write/checker",
     ));
-    let scene = game_loop.scene(context_builder)?.with_objects(
+    let scene = game_loop.scene(renderer_context)?.with_objects(
         checker_shader,
         vec![
             Object::new(
