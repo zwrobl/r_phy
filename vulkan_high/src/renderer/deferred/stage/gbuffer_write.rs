@@ -7,8 +7,11 @@ use type_kit::{
 use vulkan_low::{
     index_list,
     resources::{
-        command::NextRenderPass, error::ResourceError, layout::presets::ModelNormalMatrix,
-        render_pass::RenderPass, storage::ResourceIndexListBuilder,
+        command::{Graphics, NextRenderPass, PersistentCommandPool, Secondary},
+        error::ResourceError,
+        layout::presets::ModelNormalMatrix,
+        render_pass::RenderPass,
+        storage::ResourceIndexListBuilder,
     },
     Context,
 };
@@ -17,11 +20,10 @@ use crate::renderer::{
     deferred::{
         presets::{AttachmentsGBuffer, DeferedRenderPass, GBufferWritePass},
         stage::draw_skybox::DrawSkybox,
-        DeferredSharedResources,
     },
     frame::FrameCell,
     storage::DrawStorage,
-    DestroyTerminator, ExternalResources,
+    DestroyTerminator, ExternalResources, ResourceCell,
 };
 
 pub struct GBufferWrite;
@@ -40,7 +42,7 @@ unsafe impl Task for GBufferWrite {
     type Dependencies = dependency_list![DrawSkybox];
     type ResourceSet = list_type![
         ExternalResources,
-        DeferredSharedResources,
+        ResourceCell<PersistentCommandPool<Secondary, Graphics>>,
         FrameCell<DeferedRenderPass<AttachmentsGBuffer>>,
         DrawStorage,
         TypedNil<DestroyTerminator>
@@ -51,13 +53,16 @@ unsafe impl Task for GBufferWrite {
 
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, shared, frame, draw_storage]: ListMutType<'a, Self::ResourceSet>,
+        unpack_list![context, command_pool, frame, draw_storage]: ListMutType<
+            'a,
+            Self::ResourceSet,
+        >,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let context = &context.context;
         let render_pass = context
             .get_unique_resource::<RenderPass<DeferedRenderPass<AttachmentsGBuffer>>, _>()?;
         let commands = context.operate_mut(
-            index_list![shared.command_pool],
+            index_list![command_pool.index()],
             |unpack_list![command_pool]| {
                 let commands = draw_storage
                     .into_iter()

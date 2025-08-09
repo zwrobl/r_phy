@@ -8,7 +8,6 @@ use vulkan_low::{
         DeviceLocal,
     },
     resources::{
-        command::{Graphics, PersistentCommandPool, Secondary},
         descriptor::{DescriptorPool, DescriptorSetWriter},
         error::ResourceError,
         framebuffer::{
@@ -156,15 +155,11 @@ impl Destroy for GBuffer {
 }
 
 pub struct DeferredSharedResources {
-    pub command_pool: ResourceIndex<PersistentCommandPool<Secondary, Graphics>>,
     pub descriptor_pool: ResourceIndex<DescriptorPool<GBufferDescriptorSet>>,
 }
 
 impl Create for DeferredSharedResources {
-    type Config<'a> = (
-        ResourceIndex<Framebuffer<DeferedRenderPass<AttachmentsGBuffer>>>,
-        usize,
-    );
+    type Config<'a> = ResourceIndex<Framebuffer<DeferedRenderPass<AttachmentsGBuffer>>>;
     type CreateError = ResourceError;
 
     #[inline]
@@ -172,9 +167,8 @@ impl Create for DeferredSharedResources {
         config: Self::Config<'a>,
         context: Self::Context<'b>,
     ) -> type_kit::CreateResult<Self> {
-        let (framebuffer, num_secondary) = config;
         let descriptor_pool = {
-            context.operate_ref(index_list![framebuffer], |unpack_list![framebuffer]| {
+            context.operate_ref(index_list![config], |unpack_list![framebuffer]| {
                 context.create_resource::<DescriptorPool<_>, _>(
                     DescriptorSetWriter::<GBufferDescriptorSet>::new(1)
                         .write_images::<InputAttachment>(
@@ -187,11 +181,7 @@ impl Create for DeferredSharedResources {
                 )
             })??
         };
-        let command_pool = context.create_resource(num_secondary)?;
-        Ok(Self {
-            command_pool,
-            descriptor_pool,
-        })
+        Ok(Self { descriptor_pool })
     }
 }
 
@@ -201,7 +191,6 @@ impl Destroy for DeferredSharedResources {
 
     #[inline]
     fn destroy(&mut self, context: &Context) -> Result<(), Self::DestroyError> {
-        let _ = context.destroy_resource(self.command_pool);
         let _ = context.destroy_resource(self.descriptor_pool);
         Ok(())
     }

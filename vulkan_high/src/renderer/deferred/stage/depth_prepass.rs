@@ -7,7 +7,7 @@ use type_kit::{
 use vulkan_low::{
     index_list,
     resources::{
-        command::NextRenderPass,
+        command::{Graphics, NextRenderPass, PersistentCommandPool, Secondary},
         error::ResourceError,
         layout::presets::ModelMatrix,
         pipeline::{GraphicsPipeline, ModuleLoader, ShaderDirectory},
@@ -24,11 +24,10 @@ use crate::renderer::{
             AttachmentsGBuffer, DeferedRenderPass, GBufferDepthPrepas, GBufferDepthPrepasPipeline,
         },
         stage::load_resources::LoadResources,
-        DeferredSharedResources,
     },
     frame::FrameCell,
     storage::DrawStorage,
-    DestroyTerminator, ExternalResources,
+    DestroyTerminator, ExternalResources, ResourceCell,
 };
 
 const DEPTH_PREPASS_SHADER: &str = "_resources/shaders/spv/deferred/depth_prepass";
@@ -68,7 +67,7 @@ unsafe impl Task for DepthPrepass {
     type Dependencies = dependency_list![LoadResources];
     type ResourceSet = list_type![
         ExternalResources,
-        DeferredSharedResources,
+        ResourceCell<PersistentCommandPool<Secondary, Graphics>>,
         FrameCell<DeferedRenderPass<AttachmentsGBuffer>>,
         DrawStorage,
         TypedNil<DestroyTerminator>
@@ -80,12 +79,15 @@ unsafe impl Task for DepthPrepass {
     #[inline]
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, shared, frame, draw_storage]: ListMutType<'a, Self::ResourceSet>,
+        unpack_list![context, command_pool, frame, draw_storage]: ListMutType<
+            'a,
+            Self::ResourceSet,
+        >,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let render_pass = context
             .get_unique_resource::<RenderPass<DeferedRenderPass<AttachmentsGBuffer>>, _>()?;
         let command = context.operate_mut(
-            index_list![shared.command_pool, self.depth_prepass],
+            index_list![command_pool.index(), self.depth_prepass],
             |unpack_list![depth_prepass, command_pool]| {
                 let command = context
                     .begin_secondary_command::<_, _, _, GBufferDepthPrepas<AttachmentsGBuffer>>(

@@ -8,7 +8,9 @@ use vulkan_low::{
     index_list,
     memory::allocator::AllocatorIndex,
     resources::{
-        command::NextRenderPass, error::ResourceError, render_pass::RenderPass,
+        command::{Graphics, NextRenderPass, PersistentCommandPool, Secondary},
+        error::ResourceError,
+        render_pass::RenderPass,
         storage::ResourceIndexListBuilder,
     },
     Context,
@@ -21,10 +23,9 @@ use crate::{
                 AttachmentsGBuffer, DeferedRenderPass, GBufferSkyboxPass, GBufferSkyboxPipeline,
             },
             stage::depth_prepass::DepthPrepass,
-            DeferredSharedResources,
         },
         frame::FrameCell,
-        DestroyTerminator, ExternalResources,
+        DestroyTerminator, ExternalResources, ResourceCell,
     },
     resources::{Skybox, SkyboxPartial},
 };
@@ -62,7 +63,7 @@ unsafe impl Task for DrawSkybox {
     type Dependencies = dependency_list![DepthPrepass];
     type ResourceSet = list_type![
         ExternalResources,
-        DeferredSharedResources,
+        ResourceCell<PersistentCommandPool<Secondary, Graphics>>,
         FrameCell<DeferedRenderPass<AttachmentsGBuffer>>,
         TypedNil<DestroyTerminator>
     ];
@@ -72,13 +73,13 @@ unsafe impl Task for DrawSkybox {
 
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, shared, frame]: ListMutType<'a, Self::ResourceSet>,
+        unpack_list![context, command_pool, frame]: ListMutType<'a, Self::ResourceSet>,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let common_resources = &context.common_resources();
         let render_pass = context
             .get_unique_resource::<RenderPass<DeferedRenderPass<AttachmentsGBuffer>>, _>()?;
         let command = context.operate_mut(
-            index_list![shared.command_pool],
+            index_list![command_pool.index()],
             |unpack_list![command_pool]| {
                 let command = context.begin_secondary_command::<_, _, _, GBufferSkyboxPass<_>>(
                     command_pool.next_command().1,

@@ -2,19 +2,14 @@ pub mod context;
 pub mod renderer;
 pub mod resources;
 
-use graphics::renderer::camera::CameraMatrices;
 use std::error::Error;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use vulkan_low::memory::allocator::StaticConfig;
 use vulkan_low::memory::allocator::{AllocatorIndexTyped, Static};
-use vulkan_low::resources::descriptor::Descriptor;
-use vulkan_low::resources::error::ResourceResult;
-use vulkan_low::resources::layout::presets::CameraDescriptorSet;
 use winit::window::Window;
 
 use crate::context::{VulkanContext, VulkanContextBuilder};
-use crate::renderer::storage::DrawStorage;
 use crate::renderer::{Renderer, RendererBuilder};
 
 #[derive(Debug, Clone, Copy)]
@@ -97,17 +92,8 @@ impl<R: Renderer> VulkanRenderer<R> {
         &self.context
     }
 
-    #[inline]
-    fn begin_frame(
-        &mut self,
-        camera: CameraMatrices,
-    ) -> ResourceResult<Descriptor<CameraDescriptorSet>> {
-        self.renderer.begin_frame(&self.context, camera)
-    }
-
-    #[inline]
-    fn end_frame(&mut self, draw_storage: DrawStorage) -> ResourceResult<()> {
-        self.renderer.render(&self.context, draw_storage)
+    pub fn shared_context(&self) -> Rc<VulkanContext> {
+        self.context.clone()
     }
 }
 

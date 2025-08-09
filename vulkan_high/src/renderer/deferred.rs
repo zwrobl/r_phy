@@ -4,25 +4,27 @@ mod stage;
 
 use std::{
     convert::Infallible,
+    marker::PhantomData,
     path::{Path, PathBuf},
     rc::Rc,
 };
 
 use graphics::{renderer::camera::CameraMatrices, shader::ShaderType};
 use type_kit::{
-    list_value, unpack_list, Cons, Create, Destroy, DropGuard, Executor, SynchronousExecutor,
-    TypedNil,
+    list_type, list_value, unpack_list, Cons, Create, Destroy, DropGuard, Executor,
+    SynchronousExecutor, TypedNil,
 };
 use vulkan_low::{
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
+        command::{Graphics, PersistentCommandPool, Secondary},
         descriptor::{Descriptor, DescriptorSetMapper},
         error::{ResourceError, ResourceResult, ShaderResult},
         layout::presets::CameraDescriptorSet,
         pipeline::{GraphicsPipelineConfig, ModuleLoader, Modules, ShaderDirectory},
         storage::ResourceIndexListBuilder,
-        Partial,
+        Partial, ResourceIndex,
     },
     Context,
 };
@@ -43,14 +45,19 @@ use crate::{
         },
         frame::{Frame, FrameCell, FramePool, FramePoolPartial},
         storage::DrawStorage,
-        DestroyTerminator, ExternalResources, FrameData, Renderer, RendererBuilder,
-        ShaderDescriptor,
+        DestroyTerminator, ExternalResources, Renderer, RendererBuilder, RendererContext,
+        ResourceCell, ShaderDescriptor,
     },
-    resources::SkyboxPartial,
+    resources::{GraphicsPipelinePackList, SkyboxPartial},
     VulkanContext,
 };
 
-pub type DeferredFrameData = FrameData<DeferedRenderPass<AttachmentsGBuffer>>;
+pub type DeferredFrameData = list_type![
+    ResourceCell<PersistentCommandPool<Secondary, Graphics>>,
+    FrameCell<DeferedRenderPass<AttachmentsGBuffer>>,
+    DrawStorage,
+    TypedNil<DestroyTerminator>
+];
 
 pub struct DeferredRenderer<
     E: Executor<InitializerList = DeferredFrameData, TaskError = ResourceError>,
@@ -70,7 +77,6 @@ pub struct DeferredRendererPartial {
     g_buffer_partial: GBufferPartial,
     skybox_partial: SkyboxPartial,
     frame_pool_partial: DropGuard<FramePoolPartial<DeferedRenderPass<AttachmentsGBuffer>>>,
-    num_shaders: usize,
 }
 
 impl Partial for DeferredRendererPartial {
@@ -98,7 +104,6 @@ impl Create for DeferredRendererPartial {
             g_buffer_partial,
             skybox_partial,
             frame_pool_partial,
-            num_shaders: 1,
         })
     }
 }
@@ -138,12 +143,97 @@ where
     }
 }
 
-impl<
-        E: Executor<
+pub struct DeferredRendererContext<
+    'b,
+    E: Executor<
             InitializerList = DeferredFrameData,
             TaskError = ResourceError,
             TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
-        >,
+        > + 'static,
+    P: GraphicsPipelinePackList,
+> where
+    for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
+    <E::Resources as Destroy>::DestroyError: Into<Infallible>,
+    for<'a> E::TaskList: Destroy<Context<'a> = &'a Context>,
+    <E::TaskList as Destroy>::DestroyError: Into<Infallible>,
+{
+    renderer: &'b mut DeferredRenderer<E>,
+    command_pool: ResourceIndex<PersistentCommandPool<Secondary, Graphics>>,
+    _pipelines: PhantomData<P>,
+}
+
+impl<
+        'b,
+        E: Executor<
+                InitializerList = DeferredFrameData,
+                TaskError = ResourceError,
+                TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
+            > + 'static,
+        P: GraphicsPipelinePackList,
+    > Destroy for DeferredRendererContext<'b, E, P>
+where
+    for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
+    <E::Resources as Destroy>::DestroyError: Into<Infallible>,
+    for<'a> E::TaskList: Destroy<Context<'a> = &'a Context>,
+    <E::TaskList as Destroy>::DestroyError: Into<Infallible>,
+{
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy(&mut self, context: &Context) -> Result<(), Self::DestroyError> {
+        let _ = context.destroy_resource(self.command_pool);
+        Ok(())
+    }
+}
+
+impl<
+        'b,
+        E: Executor<
+                InitializerList = DeferredFrameData,
+                TaskError = ResourceError,
+                TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
+            > + 'static,
+        P: GraphicsPipelinePackList,
+    > RendererContext for DeferredRendererContext<'b, E, P>
+where
+    for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
+    <E::Resources as Destroy>::DestroyError: Into<Infallible>,
+    for<'a> E::TaskList: Destroy<Context<'a> = &'a Context>,
+    <E::TaskList as Destroy>::DestroyError: Into<Infallible>,
+{
+    fn begin_frame(
+        &mut self,
+        context: &Context,
+        camera: CameraMatrices,
+    ) -> ResourceResult<Descriptor<CameraDescriptorSet>> {
+        self.renderer.frame = self.renderer.frame_pool.acquire(context, &camera)?;
+        Ok(self.renderer.frame.camera_descriptor)
+    }
+
+    fn render(&mut self, context: &Context, draw_calls: DrawStorage) -> ResourceResult<()> {
+        let frame = self
+            .renderer
+            .executor
+            .as_mut()
+            .unwrap()
+            .execute(list_value![
+                ResourceCell::new(self.command_pool),
+                self.renderer.frame.take(),
+                draw_calls,
+                TypedNil::<DestroyTerminator>::new()
+            ])?;
+        let _ = self.renderer.frame_pool.present(context, frame)?;
+        Ok(())
+    }
+}
+
+impl<
+        E: Executor<
+                InitializerList = DeferredFrameData,
+                TaskError = ResourceError,
+                TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
+            > + 'static,
     > Renderer for DeferredRenderer<E>
 where
     for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
@@ -152,25 +242,22 @@ where
     <E::TaskList as Destroy>::DestroyError: Into<Infallible>,
 {
     type ShaderType<T: ShaderType> = DeferredShader<T>;
+    type RendererContext<'b, P: GraphicsPipelinePackList> = DeferredRendererContext<'b, E, P>;
 
-    fn begin_frame(
-        &mut self,
+    fn load_context<'a, P: GraphicsPipelinePackList>(
+        &'a mut self,
         context: &Context,
-        camera: CameraMatrices,
-    ) -> ResourceResult<Descriptor<CameraDescriptorSet>> {
-        self.frame = self.frame_pool.acquire(context, &camera)?;
-        Ok(self.frame.camera_descriptor)
-    }
-
-    #[inline]
-    fn render(&mut self, context: &Context, draw_calls: DrawStorage) -> ResourceResult<()> {
-        let frame = self.executor.as_mut().unwrap().execute(list_value![
-            self.frame.take(),
-            draw_calls,
-            TypedNil::<DestroyTerminator>::new()
-        ])?;
-        let _ = self.frame_pool.present(context, frame)?;
-        Ok(())
+    ) -> ResourceResult<Self::RendererContext<'a, P>> {
+        let command_pool = context
+            .create_resource::<PersistentCommandPool<Secondary, Graphics>, _>(
+                self.frame_pool.num_images() * (P::LEN + 4),
+            )?;
+        let renderer_context = DeferredRendererContext {
+            renderer: self,
+            command_pool,
+            _pipelines: PhantomData::<P>,
+        };
+        Ok(renderer_context)
     }
 }
 
@@ -240,7 +327,6 @@ impl RendererBuilder for DeferredRendererBuilder {
                     g_buffer_partial,
                     skybox_partial,
                     frame_pool_partial,
-                    num_shaders,
                 },
         } = self;
         let g_buffer = GBuffer::create((g_buffer_partial, allocator), &context)?;
@@ -255,10 +341,8 @@ impl RendererBuilder for DeferredRendererBuilder {
             .register_resource(ExternalResources::new(&context))
             .register_resource(FrameCell::<DeferedRenderPass<AttachmentsGBuffer>>::empty())
             .register_resource(DrawStorage::new())
-            .register_resource(DeferredSharedResources::create(
-                (framebuffer, frame_pool.num_images() * (num_shaders + 4)),
-                &context,
-            )?)
+            .register_resource(DeferredSharedResources::create(framebuffer, &context)?)
+            .register_resource(ResourceCell::empty())
             .push_task(LoadResources)
             .push_task(DepthPrepass::create((), &context)?)
             .push_task(DrawSkybox::create((skybox_partial, allocator), &context)?)

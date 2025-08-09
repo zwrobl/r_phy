@@ -1,7 +1,7 @@
 use std::{convert::Infallible, ops::Deref, rc::Rc};
 
 use graphics::{renderer::camera::CameraMatrices, shader::ShaderType};
-use type_kit::{list_type, Cons, Destroy, TypedNil};
+use type_kit::Destroy;
 use vulkan_low::{
     memory::allocator::AllocatorIndex,
     resources::{
@@ -9,21 +9,16 @@ use vulkan_low::{
         error::ResourceResult,
         layout::{presets::CameraDescriptorSet, DescriptorLayout},
         pipeline::{GraphicsPipelineConfig, ModuleLoader},
-        Partial,
+        Partial, Resource, ResourceIndex,
     },
     Context,
 };
 
-use crate::{
-    renderer::{frame::FrameCell, storage::DrawStorage},
-    VulkanContext,
-};
+use crate::{renderer::storage::DrawStorage, resources::GraphicsPipelinePackList, VulkanContext};
 
 pub mod deferred;
 pub mod frame;
 pub mod storage;
-
-pub type FrameData<C> = list_type![FrameCell<C>, DrawStorage, TypedNil<DestroyTerminator>];
 
 pub struct ExternalResources {
     context: Rc<VulkanContext>,
@@ -59,12 +54,25 @@ pub trait ShaderDescriptor<T: DescriptorLayout>: GraphicsPipelineConfig {
     fn get_mapper() -> DescriptorSetMapper<T, Self::Layout>;
 }
 
-pub trait Renderer: for<'a> Destroy<Context<'a> = &'a Context, DestroyError = Infallible> {
+pub trait Renderer:
+    for<'a> Destroy<Context<'a> = &'a Context, DestroyError = Infallible> + 'static
+{
     type ShaderType<T: ShaderType>: ShaderDescriptor<CameraDescriptorSet>
         + ShaderType<Vertex = T::Vertex, Material = T::Material>
         + ModuleLoader
         + From<T>;
 
+    type RendererContext<'b, P: GraphicsPipelinePackList>: RendererContext;
+
+    fn load_context<'a, P: GraphicsPipelinePackList>(
+        &'a mut self,
+        context: &Context,
+    ) -> ResourceResult<Self::RendererContext<'a, P>>;
+}
+
+pub trait RendererContext:
+    for<'a> Destroy<Context<'a> = &'a Context, DestroyError = Infallible>
+{
     fn begin_frame(
         &mut self,
         context: &Context,
@@ -94,6 +102,42 @@ impl Destroy for DestroyTerminator {
 
     #[inline]
     fn destroy(&mut self, _context: &Context) -> Result<(), Self::DestroyError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ResourceCell<T: Resource> {
+    resource: Option<ResourceIndex<T>>,
+}
+
+impl<T: Resource> ResourceCell<T> {
+    #[inline]
+    pub fn empty() -> Self {
+        Self { resource: None }
+    }
+
+    #[inline]
+    pub fn new(resource: ResourceIndex<T>) -> Self {
+        Self {
+            resource: Some(resource),
+        }
+    }
+
+    #[inline]
+    pub fn index(&self) -> ResourceIndex<T> {
+        self.resource.expect("ResourceCell is empty")
+    }
+}
+
+impl<T: Resource> Destroy for ResourceCell<T> {
+    type Context<'a> = &'a Context;
+    type DestroyError = Infallible;
+
+    #[inline]
+    fn destroy(&mut self, _context: &Context) -> Result<(), Self::DestroyError> {
+        // ResourceCell<T> does not own the resource
+        let _ = self.resource.take();
         Ok(())
     }
 }

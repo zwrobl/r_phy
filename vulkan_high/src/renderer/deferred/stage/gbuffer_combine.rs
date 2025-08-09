@@ -7,7 +7,7 @@ use type_kit::{
 use vulkan_low::{
     index_list,
     resources::{
-        command::EndRenderPass,
+        command::{EndRenderPass, Graphics, PersistentCommandPool, Secondary},
         error::ResourceError,
         pipeline::{GraphicsPipeline, ModuleLoader, ShaderDirectory},
         render_pass::RenderPass,
@@ -28,7 +28,7 @@ use crate::{
             DeferredSharedResources,
         },
         frame::{Frame, FrameCell},
-        DestroyTerminator, ExternalResources,
+        DestroyTerminator, ExternalResources, ResourceCell,
     },
     resources::CommonMesh,
 };
@@ -70,6 +70,7 @@ unsafe impl Task for GBufferCombine {
     type ResourceSet = list_type![
         ExternalResources,
         FrameCell<DeferedRenderPass<AttachmentsGBuffer>>,
+        ResourceCell<PersistentCommandPool<Secondary, Graphics>>,
         DeferredSharedResources,
         TypedNil<DestroyTerminator>
     ];
@@ -79,14 +80,14 @@ unsafe impl Task for GBufferCombine {
 
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, frame, shared]: ListMutType<'a, Self::ResourceSet>,
+        unpack_list![context, frame, command_pool, shared]: ListMutType<'a, Self::ResourceSet>,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let common_resources = &context.common_resources();
         let render_pass = context
             .get_unique_resource::<RenderPass<DeferedRenderPass<AttachmentsGBuffer>>, _>()?;
         let command = context.operate_mut(
             index_list![
-                shared.command_pool,
+                command_pool.index(),
                 shared.descriptor_pool,
                 self.shading_pass
             ],
