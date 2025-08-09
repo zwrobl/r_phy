@@ -1,7 +1,6 @@
 use graphics::shader::Shader;
 use math::types::Matrix4;
-use type_kit::{Cons, Contains, Create, Destroy, Marker, Nil};
-use vulkan_low::Context;
+use type_kit::{Cons, Contains, Destroy, Marker, Nil};
 
 use graphics::renderer::{camera::Camera, ContextBuilder};
 use graphics::{
@@ -10,9 +9,7 @@ use graphics::{
 };
 use std::error::Error;
 use std::marker::PhantomData;
-use std::ops::Deref;
 use std::rc::Rc;
-use winit::window::Window;
 
 use vulkan_low::memory::allocator::{AllocatorIndexTyped, Static, StaticConfig};
 use vulkan_low::resources::Partial;
@@ -20,41 +17,10 @@ use vulkan_low::resources::Partial;
 use crate::renderer::storage::DrawCallRecorder;
 use crate::renderer::{Renderer, RendererContext};
 use crate::resources::{
-    CommonResources, CommonResourcesPartial, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
-    MaterialPackList, MaterialPackListBuilder, MeshPackList, MeshPackListBuilder, ResourcePack,
+    GraphicsPipelineListBuilder, GraphicsPipelinePackList, MaterialPackList,
+    MaterialPackListBuilder, MeshPackList, MeshPackListBuilder, ResourcePack,
 };
-use crate::{VulkanRenderer, VulkanRendererConfig};
-
-pub struct VulkanContext {
-    context: Context,
-    common_resources: CommonResources,
-    allocator: AllocatorIndexTyped<Static>,
-    _config: VulkanRendererConfig,
-}
-
-impl VulkanContext {
-    #[inline]
-    pub fn common_resources(&self) -> &CommonResources {
-        &self.common_resources
-    }
-}
-
-impl Deref for VulkanContext {
-    type Target = Context;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.context
-    }
-}
-
-impl Drop for VulkanContext {
-    fn drop(&mut self) {
-        let _ = self.context.wait_idle();
-        let _ = self.common_resources.destroy(&self.context);
-        let _ = self.context.destroy_allocator(self.allocator);
-    }
-}
+use crate::{VulkanContext, VulkanRenderer};
 
 pub struct VulkanRendererContext<
     'a,
@@ -68,25 +34,6 @@ pub struct VulkanRendererContext<
     resources: ResourcePack<R, M, V, P>,
     draw_recorder: DrawCallRecorder<R, M, V, P>,
     allocator: AllocatorIndexTyped<Static>,
-}
-
-impl VulkanContext {
-    pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Rc<Self>, Box<dyn Error>> {
-        let context = Context::build(window)?;
-        let common_resources = CommonResourcesPartial::create((), &context)?;
-        let mut allocator_config = StaticConfig::new();
-        common_resources.register_memory_requirements(&mut allocator_config);
-        let allocator = context.create_allocator::<Static, _>(allocator_config)?;
-        let common_resources =
-            CommonResources::create((common_resources, allocator.into()), &context)?;
-        let context = VulkanContext {
-            context,
-            common_resources,
-            allocator,
-            _config: config,
-        };
-        Ok(Rc::new(context))
-    }
 }
 
 impl<'a, M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList, R: Renderer> Drop

@@ -5,12 +5,16 @@ pub mod resources;
 use std::error::Error;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
+use type_kit::{Create, Destroy};
 use vulkan_low::memory::allocator::StaticConfig;
 use vulkan_low::memory::allocator::{AllocatorIndexTyped, Static};
+use vulkan_low::resources::Partial;
+use vulkan_low::Context;
 use winit::window::Window;
 
-use crate::context::{VulkanContext, VulkanContextBuilder};
+use crate::context::VulkanContextBuilder;
 use crate::renderer::{Renderer, RendererBuilder};
+use crate::resources::{CommonResources, CommonResourcesPartial};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VulkanRendererConfig {}
@@ -48,6 +52,56 @@ impl<R: RendererBuilder> VulkanRendererBuilder<R> {
     pub fn with_config(mut self, config: VulkanRendererConfig) -> Self {
         self.config = Some(config);
         self
+    }
+}
+
+pub struct VulkanContext {
+    context: Context,
+    common_resources: CommonResources,
+    allocator: AllocatorIndexTyped<Static>,
+    _config: VulkanRendererConfig,
+}
+
+impl VulkanContext {
+    #[inline]
+    pub fn common_resources(&self) -> &CommonResources {
+        &self.common_resources
+    }
+}
+
+impl VulkanContext {
+    pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Rc<Self>, Box<dyn Error>> {
+        let context = Context::build(window)?;
+        let common_resources = CommonResourcesPartial::create((), &context)?;
+        let mut allocator_config = StaticConfig::new();
+        common_resources.register_memory_requirements(&mut allocator_config);
+        let allocator = context.create_allocator::<Static, _>(allocator_config)?;
+        let common_resources =
+            CommonResources::create((common_resources, allocator.into()), &context)?;
+        let context = VulkanContext {
+            context,
+            common_resources,
+            allocator,
+            _config: config,
+        };
+        Ok(Rc::new(context))
+    }
+}
+
+impl Deref for VulkanContext {
+    type Target = Context;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.context
+    }
+}
+
+impl Drop for VulkanContext {
+    fn drop(&mut self) {
+        let _ = self.context.wait_idle();
+        let _ = self.common_resources.destroy(&self.context);
+        let _ = self.context.destroy_allocator(self.allocator);
     }
 }
 
