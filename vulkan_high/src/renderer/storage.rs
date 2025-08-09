@@ -3,6 +3,7 @@ use std::{
     collections::{hash_map::Values, HashMap},
     convert::Infallible,
     hash::Hash,
+    marker::PhantomData,
 };
 
 use graphics::{
@@ -323,7 +324,7 @@ impl Destroy for DrawStorage {
     }
 }
 
-pub struct DrawStorageTyped<
+pub struct DrawCallRecorder<
     R: Renderer,
     M: MaterialPackList,
     V: MeshPackList,
@@ -331,18 +332,18 @@ pub struct DrawStorageTyped<
 > {
     camera: Option<Descriptor<CameraDescriptorSet>>,
     storage: Option<DrawStorage>,
-    resources: ResourcePack<R, M, V, P>,
+    _resources: PhantomData<ResourcePack<R, M, V, P>>,
 }
 
 impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
-    DrawStorageTyped<R, M, V, P>
+    DrawCallRecorder<R, M, V, P>
 {
     #[inline]
-    pub fn new(resources: ResourcePack<R, M, V, P>) -> Self {
+    pub fn new() -> Self {
         Self {
             camera: None,
             storage: None,
-            resources,
+            _resources: PhantomData,
         }
     }
 
@@ -360,6 +361,7 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
     >(
         &mut self,
         context: &Context,
+        resources: &ResourcePack<R, M, V, P>,
         shader: ShaderHandle<S>,
         drawable: &D,
         transform: &Matrix4,
@@ -368,19 +370,18 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
         let pipeline_state = self.storage.as_mut().unwrap().get_pipeline_state(
             context,
             shader,
-            &self.resources.pipelines,
+            &resources.pipelines,
         );
         let descriptor_state = pipeline_state.get_descriptor_state(
             context,
             camera,
             shader,
             drawable.material(),
-            &self.resources.materials,
-            &self.resources.pipelines,
+            &resources.materials,
+            &resources.pipelines,
         );
-        let buffer_state =
-            descriptor_state.get_buffer_state::<D::Vertex, _>(&self.resources.meshes);
-        buffer_state.push_model_state(drawable.mesh(), transform, &self.resources.meshes);
+        let buffer_state = descriptor_state.get_buffer_state::<D::Vertex, _>(&resources.meshes);
+        buffer_state.push_model_state(drawable.mesh(), transform, &resources.meshes);
     }
 
     #[inline]
@@ -388,20 +389,5 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
         let storage = self.storage.take().unwrap();
         self.camera = None;
         storage
-    }
-}
-
-impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
-    for DrawStorageTyped<R, M, V, P>
-{
-    type Context<'a> = &'a Context;
-    type DestroyError = Infallible;
-
-    #[inline]
-    fn destroy(&mut self, context: &Context) -> Result<(), Self::DestroyError> {
-        self.resources.destroy(context)?;
-        self.storage = None;
-        self.camera = None;
-        Ok(())
     }
 }

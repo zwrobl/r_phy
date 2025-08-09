@@ -17,7 +17,7 @@ use winit::window::Window;
 use vulkan_low::memory::allocator::{AllocatorIndexTyped, Static, StaticConfig};
 use vulkan_low::resources::Partial;
 
-use crate::renderer::storage::DrawStorageTyped;
+use crate::renderer::storage::DrawCallRecorder;
 use crate::renderer::{Renderer, RendererContext};
 use crate::resources::{
     CommonResources, CommonResourcesPartial, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
@@ -65,7 +65,8 @@ pub struct VulkanRendererContext<
 > {
     context: Rc<VulkanContext>,
     renderer: R::RendererContext<'a, P>,
-    draw_storage: DrawStorageTyped<R, M, V, P>,
+    resources: ResourcePack<R, M, V, P>,
+    draw_recorder: DrawCallRecorder<R, M, V, P>,
     allocator: AllocatorIndexTyped<Static>,
 }
 
@@ -94,7 +95,7 @@ impl<'a, M: MaterialPackList, V: MeshPackList, S: GraphicsPipelinePackList, R: R
     fn drop(&mut self) {
         let _ = self.context.wait_idle();
         let _ = self.renderer.destroy(&self.context);
-        let _ = self.draw_storage.destroy(&self.context);
+        let _ = self.resources.destroy(&self.context);
         let _ = self.context.destroy_allocator(self.allocator);
     }
 }
@@ -139,12 +140,13 @@ impl<
         resources.register_memory_requirements(&mut config);
         let allocator = context.create_allocator(config)?;
         let resources = resources.with_allocator(allocator).build(&context)?;
-        let draw_storage = DrawStorageTyped::new(resources);
         let renderer = renderer.load_context::<P::Pack<R>>(&context)?;
+        let draw_storage = DrawCallRecorder::new();
         Ok(VulkanRendererContext {
             context,
             renderer,
-            draw_storage,
+            resources,
+            draw_recorder: draw_storage,
             allocator,
         })
     }
@@ -269,12 +271,12 @@ impl<
     fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
         let camera_matrices = camera.get_matrices();
         let camera_descriptor = self.renderer.begin_frame(&self.context, camera_matrices)?;
-        self.draw_storage.begin_frame(camera_descriptor);
+        self.draw_recorder.begin_frame(camera_descriptor);
         Ok(())
     }
 
     fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
-        let draw_storage = self.draw_storage.end_frame();
+        let draw_storage = self.draw_recorder.end_frame();
         self.renderer.render(&self.context, draw_storage)?;
         Ok(())
     }
@@ -286,8 +288,13 @@ impl<
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
         let shader = shader.map::<R::ShaderType<T>>();
-        self.draw_storage
-            .append_draw_call(&self.context, shader, drawable, transform);
+        self.draw_recorder.append_draw_call(
+            &self.context,
+            &self.resources,
+            shader,
+            drawable,
+            transform,
+        );
         Ok(())
     }
 }
