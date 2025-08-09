@@ -1,6 +1,6 @@
 use graphics::shader::Shader;
 use math::types::Matrix4;
-use type_kit::{Cons, Contains, Create, Destroy, DestroyResult, Marker, Nil};
+use type_kit::{Cons, Contains, Create, Destroy, Marker, Nil};
 use vulkan_low::Context;
 
 use graphics::renderer::{camera::Camera, ContextBuilder, RendererContext};
@@ -8,14 +8,13 @@ use graphics::{
     model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
     shader::{ShaderHandle, ShaderType},
 };
-use std::convert::Infallible;
+use std::error::Error;
 use std::ops::Deref;
 use std::path::Path;
 use std::rc::Rc;
-use std::{error::Error, marker::PhantomData};
 use winit::window::Window;
 
-use vulkan_low::memory::allocator::{AllocatorBuilder, AllocatorIndexTyped, Static, StaticConfig};
+use vulkan_low::memory::allocator::{AllocatorIndexTyped, Static, StaticConfig};
 use vulkan_low::resources::Partial;
 
 use crate::renderer::deferred::DeferredRendererBuilder;
@@ -23,8 +22,7 @@ use crate::renderer::storage::DrawStorageTyped;
 use crate::renderer::{Renderer, RendererBuilder};
 use crate::resources::{
     CommonResources, CommonResourcesPartial, GraphicsPipelineListBuilder, GraphicsPipelinePackList,
-    MaterialPackList, MaterialPackListBuilder, MaterialPackListPartial, MeshPackList,
-    MeshPackListBuilder, MeshPackListPartial,
+    MaterialPackList, MaterialPackListBuilder, MeshPackList, MeshPackListBuilder, ResourcePack,
 };
 use crate::{VulkanRenderer, VulkanRendererConfig};
 
@@ -59,168 +57,12 @@ impl Drop for VulkanContext {
     }
 }
 
-pub struct VulkanResourcePack<
-    R: Renderer,
-    M: MaterialPackList,
-    V: MeshPackList,
-    P: GraphicsPipelinePackList,
-> {
-    pub materials: M,
-    pub meshes: V,
-    pub pipelines: P,
-    _phantom: PhantomData<R>,
-}
-
-struct VulkanResourcePackPartial<
-    'a,
-    R: Renderer,
-    M: MaterialPackList,
-    V: MeshPackList,
-    P: GraphicsPipelineListBuilder,
-    PM: MaterialPackListPartial<Pack = M>,
-    PV: MeshPackListPartial<Pack = V>,
-> where
-    for<'b> PM: Destroy<Context<'b> = &'b Context>,
-    for<'b> PV: Destroy<Context<'b> = &'b Context>,
-{
-    materials: PM,
-    meshes: PV,
-    pipelines: P,
-    _phantom: PhantomData<&'a R>,
-}
-
-impl<
-        'a,
-        R: Renderer,
-        M: MaterialPackList,
-        V: MeshPackList,
-        P: GraphicsPipelineListBuilder,
-        PM: MaterialPackListPartial<Pack = M>,
-        PV: MeshPackListPartial<Pack = V>,
-    > VulkanResourcePackPartial<'a, R, M, V, P, PM, PV>
-where
-    for<'b> PM: Destroy<Context<'b> = &'b Context>,
-    for<'b> PV: Destroy<Context<'b> = &'b Context>,
-{
-    fn load(
-        self,
-        context: &Context,
-        allocator: AllocatorIndexTyped<Static>,
-    ) -> Result<VulkanResourcePack<R, M, V, P::Pack<R>>, Box<dyn Error>> {
-        let Self {
-            materials,
-            meshes,
-            pipelines,
-            ..
-        } = self;
-        let meshes = meshes.allocate(context, allocator.into())?;
-        let materials = materials.allocate(context, allocator.into())?;
-        let pipelines = pipelines.build(context)?;
-        Ok(VulkanResourcePack {
-            materials,
-            meshes,
-            pipelines,
-            _phantom: PhantomData,
-        })
-    }
-}
-
-impl<
-        'a,
-        R: Renderer,
-        M: MaterialPackList,
-        V: MeshPackList,
-        P: GraphicsPipelineListBuilder,
-        PM: MaterialPackListPartial<Pack = M>,
-        PV: MeshPackListPartial<Pack = V>,
-    > Destroy for VulkanResourcePackPartial<'a, R, M, V, P, PM, PV>
-where
-    for<'b> PM: Destroy<Context<'b> = &'b Context>,
-    for<'b> PV: Destroy<Context<'b> = &'b Context>,
-{
-    type Context<'b> = &'b Context;
-    type DestroyError = Infallible;
-    fn destroy<'b>(&mut self, context: Self::Context<'b>) -> DestroyResult<Self> {
-        let _ = self.materials.destroy(context);
-        let _ = self.meshes.destroy(context);
-        Ok(())
-    }
-}
-impl<
-        'a,
-        R: Renderer,
-        M: MaterialPackList,
-        V: MeshPackList,
-        P: GraphicsPipelineListBuilder,
-        PM: MaterialPackListPartial<Pack = M>,
-        PV: MeshPackListPartial<Pack = V>,
-    > Partial for VulkanResourcePackPartial<'a, R, M, V, P, PM, PV>
-where
-    for<'b> PM: Destroy<Context<'b> = &'b Context>,
-    for<'b> PV: Destroy<Context<'b> = &'b Context>,
-{
-    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
-        self.materials.register_memory_requirements(builder);
-        self.meshes.register_memory_requirements(builder);
-    }
-}
-
-type PackPartial<'a, R, M, V, P, MB, MV> = VulkanResourcePackPartial<
-    'a,
-    R,
-    M,
-    V,
-    P,
-    <MB as MaterialPackListBuilder>::Partial<'a>,
-    <MV as MeshPackListBuilder>::Partial<'a>,
->;
-
-impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
-    VulkanResourcePack<R, M, V, P>
-{
-    fn prepare<
-        'a,
-        MB: MaterialPackListBuilder<Pack = M>,
-        MV: MeshPackListBuilder<Pack = V>,
-        MP: GraphicsPipelineListBuilder<Pack<R> = P>,
-    >(
-        context: &Context,
-        materials: &'a MB,
-        meshes: &'a MV,
-        pipelines: MP,
-    ) -> Result<PackPartial<'a, R, M, V, MP, MB, MV>, Box<dyn Error>> {
-        let materials = materials.prepare(context)?;
-        let meshes = meshes.prepare(context)?;
-        Ok(VulkanResourcePackPartial {
-            materials,
-            meshes,
-            pipelines,
-            _phantom: PhantomData,
-        })
-    }
-}
-
-impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Destroy
-    for VulkanResourcePack<R, M, V, P>
-{
-    type Context<'a> = &'a Context;
-    type DestroyError = Infallible;
-
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        let _ = self.materials.destroy(context);
-        let _ = self.meshes.destroy(context);
-        let _ = self.pipelines.destroy(context);
-        Ok(())
-    }
-}
-
 pub struct VulkanRendererContext<
     M: MaterialPackList,
     V: MeshPackList,
     P: GraphicsPipelinePackList,
     R: Renderer,
 > {
-    // TODO: Remove dynamic dispatch here
     renderer: R,
     draw_storage: DrawStorageTyped<R, M, V, P>,
     context: Rc<VulkanContext>,
@@ -282,7 +124,7 @@ impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
             context.clone(),
             (Path::new("_resources/assets/skybox/skybox"), P::LEN),
         )?;
-        let resources = VulkanResourcePack::prepare(
+        let resources = ResourcePack::prepare(
             &context.context,
             &self.materials,
             &self.meshes,
@@ -292,7 +134,7 @@ impl<P: GraphicsPipelineListBuilder, M: MaterialPackListBuilder, V: MeshPackList
         resources.register_memory_requirements(&mut config);
         let allocator = context.create_allocator::<Static, _>(config)?;
         let renderer = renderer.with_allocator(allocator).build()?;
-        let resources = resources.load(&context, allocator)?;
+        let resources = resources.with_allocator(allocator).build(&context)?;
         let draw_storage = DrawStorageTyped::new(resources);
         Ok(VulkanRendererContext {
             context,

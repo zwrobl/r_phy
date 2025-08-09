@@ -25,9 +25,10 @@ use vulkan_low::{
 };
 
 use crate::{
-    context::VulkanResourcePack,
     renderer::{Renderer, ShaderDescriptor},
-    resources::{GraphicsPipelinePackList, MaterialPackList, MeshPackList, PackBufferBindings},
+    resources::{
+        GraphicsPipelinePackList, MaterialPackList, MeshPackList, PackBufferBindings, ResourcePack,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -330,14 +331,14 @@ pub struct DrawStorageTyped<
 > {
     camera: Option<Descriptor<CameraDescriptorSet>>,
     storage: Option<DrawStorage>,
-    resources: VulkanResourcePack<R, M, V, P>,
+    resources: ResourcePack<R, M, V, P>,
 }
 
 impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>
     DrawStorageTyped<R, M, V, P>
 {
     #[inline]
-    pub fn new(resources: VulkanResourcePack<R, M, V, P>) -> Self {
+    pub fn new(resources: ResourcePack<R, M, V, P>) -> Self {
         Self {
             camera: None,
             storage: None,
