@@ -45,7 +45,7 @@ mod tests {
     }
 }
 
-pub trait Marker: 'static {}
+pub trait Marker: 'static + Clone + Copy {}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Here {}
@@ -440,6 +440,22 @@ macro_rules! unpack_list {
 }
 
 #[macro_export]
+macro_rules! unpack_list_mut {
+    [$tail:ident] => {
+        Cons {
+            head: mut $tail,
+            ..
+        }
+    };
+    [$head:ident $(, $tail:ident)*] => {
+        Cons {
+            head: mut $head,
+            tail: unpack_list_mut![$($tail),*]
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! unpack_any {
     [$tail:ident] => {
         $tail
@@ -652,9 +668,6 @@ impl<T> Contains<TypedNil<T>, Here> for TypedNil<T> {
 }
 
 pub trait Subset<L: TypeList, T: Marker>: TypeList {
-    // type SubsetRef<'a>;
-    // type SubsetMut<'a>;
-
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a>;
 
     /// # Safety
@@ -667,6 +680,10 @@ pub trait Subset<L: TypeList, T: Marker>: TypeList {
     unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a>;
 
     fn sub_write(self, superset: &mut L);
+}
+
+pub trait SubsetCopy<L: TypeList, T: Marker>: TypeList + Clone + Copy {
+    fn sub_copy<'a>(superset: &'a L) -> Self;
 }
 
 impl<T: 'static, L: TypeList, M: Marker> Subset<L, M> for TypedNil<T>
@@ -685,6 +702,15 @@ where
     fn sub_write(self, _superset: &mut L) {}
 }
 
+impl<T: 'static, L: TypeList, M: Marker> SubsetCopy<L, M> for TypedNil<T>
+where
+    L: Contains<TypedNil<T>, M>,
+{
+    fn sub_copy<'a>(superset: &'a L) -> Self {
+        *superset.get()
+    }
+}
+
 /// Implements `Subset` for a type-level list, where `Cons<T, N>` is a subset of superset `L`
 /// using marker types `M1` and `M2`. This allows extracting references to the subset elements
 /// from the superset, ensuring that each subset element corresponds to a unique marker in the superset.
@@ -693,9 +719,6 @@ impl<T: 'static, L: TypeList, M1: Marker, M2: Marker, N: Subset<L, M2>> Subset<L
 where
     L: Contains<T, M1>,
 {
-    // type SubsetRef<'a> = Cons<&'a T, N::SubsetRef<'a>>;
-    // type SubsetMut<'a> = Cons<&'a mut T, N::SubsetMut<'a>>;
-
     #[inline]
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         Cons::new(superset.get(), N::sub_get(superset))
@@ -712,6 +735,16 @@ where
         let Cons { head, tail } = self;
         *superset.get_mut() = head;
         tail.sub_write(superset);
+    }
+}
+
+impl<T: 'static + Clone + Copy, L: TypeList, M1: Marker, M2: Marker, N: SubsetCopy<L, M2>>
+    SubsetCopy<L, Cons<M1, M2>> for Cons<T, N>
+where
+    L: Contains<T, M1>,
+{
+    fn sub_copy<'a>(superset: &'a L) -> Self {
+        Cons::new(*superset.get(), N::sub_copy(superset))
     }
 }
 

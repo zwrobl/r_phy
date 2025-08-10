@@ -586,7 +586,7 @@ use std::{
 
 use crate::{
     Cons, Contains, Destroy, DestroyResult, DropGuard, FromGuard, Guard, IntoOuter, Marked, Marker,
-    Nil, TypeGuard, TypeGuardError, TypeList, ValidMut, ValidRef,
+    Nil, TypeGuard, TypeGuardError, TypeList, TypedNil, ValidMut, ValidRef,
 };
 
 pub struct GenIndex<T, C> {
@@ -1264,11 +1264,12 @@ where
     }
 }
 
-pub trait IndexList<C: 'static> {
+pub trait IndexList<C: 'static>: Sized {
     type Owned;
     type Borrowed: BorrowList<C>;
     type Ref<'a>;
 
+    fn insert(value: Self::Owned, collection: &mut C) -> GenCollectionResult<Self>;
     fn get_ref(self, collection: &C) -> GenCollectionResult<Self::Ref<'_>>;
     fn get_owned(self, collection: &mut C) -> GenCollectionResult<Self::Owned>;
     fn get_borrowed(self, collection: &mut C) -> GenCollectionResult<Self::Borrowed>;
@@ -1278,6 +1279,11 @@ impl<C: 'static> IndexList<C> for Nil {
     type Owned = Nil;
     type Borrowed = Nil;
     type Ref<'a> = Nil;
+
+    #[inline]
+    fn insert(_: Self::Owned, _: &mut C) -> GenCollectionResult<Self> {
+        Ok(Nil::new())
+    }
 
     #[inline]
     fn get_ref(self, _: &C) -> GenCollectionResult<Self::Ref<'_>> {
@@ -1302,6 +1308,14 @@ where
     type Owned = Cons<H, T::Owned>;
     type Borrowed = Cons<Marked<Borrowed<H, C>, M>, T::Borrowed>;
     type Ref<'a> = Cons<&'a H, T::Ref<'a>>;
+
+    #[inline]
+    fn insert(value: Self::Owned, collection: &mut L) -> GenCollectionResult<Self> {
+        let Cons { head, tail } = value;
+        let head = Marked::new(collection.get_mut().push(head)?);
+        let tail = T::insert(tail, collection)?;
+        Ok(Cons::new(head, tail))
+    }
 
     #[inline]
     fn get_ref(self, collection: &L) -> GenCollectionResult<Self::Ref<'_>> {
@@ -1339,6 +1353,72 @@ where
                 Err(err)
             }
         }
+    }
+}
+
+impl<L: 'static, H: 'static, M: Marker, C: GenCollection<H>, T: IndexList<L>> IndexList<L>
+    for Cons<Option<Marked<GenIndex<H, C>, M>>, T>
+where
+    L: Contains<C, M>,
+{
+    type Owned = Cons<Option<H>, T::Owned>;
+    type Borrowed = Cons<Option<Marked<Borrowed<H, C>, M>>, T::Borrowed>;
+    type Ref<'a> = Cons<Option<&'a H>, T::Ref<'a>>;
+
+    #[inline]
+    fn insert(value: Self::Owned, collection: &mut L) -> GenCollectionResult<Self> {
+        let Cons { head, tail } = value;
+        let head = match head {
+            Some(head) => Some(Marked::new(collection.get_mut().push(head)?)),
+            None => None,
+        };
+        let tail = T::insert(tail, collection)?;
+        Ok(Cons::new(head, tail))
+    }
+
+    #[inline]
+    fn get_ref(self, collection: &L) -> GenCollectionResult<Self::Ref<'_>> {
+        let Cons { head, tail } = self;
+        let item = match head {
+            Some(Marked { value: index, .. }) => {
+                let item = collection.get().get(index)?;
+                Some(item)
+            }
+            None => None,
+        };
+        let tail = tail.get_ref(collection)?;
+        Ok(Cons::new(item, tail))
+    }
+
+    #[inline]
+    fn get_owned(self, collection: &mut L) -> GenCollectionResult<Self::Owned> {
+        let Cons { head, tail } = self;
+        let head = match head {
+            Some(Marked { value: index, .. }) => {
+                let item = collection.get_mut().pop(index)?;
+                Some(item)
+            }
+            None => None,
+        };
+        let tail = tail.get_owned(collection)?;
+        Ok(Cons::new(head, tail))
+    }
+
+    #[inline]
+    fn get_borrowed(self, collection: &mut L) -> GenCollectionResult<Self::Borrowed> {
+        let Cons { head, tail } = self;
+        let tail = tail.get_borrowed(collection)?;
+        let item = match head {
+            Some(Marked { value: index, .. }) => match collection.get_mut().borrow(index) {
+                Ok(item) => Some(Marked::new(item)),
+                Err(err) => {
+                    tail.put_back(collection).unwrap();
+                    return Err(err);
+                }
+            },
+            None => None,
+        };
+        Ok(Cons::new(item, tail))
     }
 }
 
@@ -1405,6 +1485,41 @@ where
             tail,
         } = self;
         collection.get_mut().put_back(borrow)?;
+        tail.put_back(collection)
+    }
+}
+
+impl<L: 'static, H: 'static, C: GenCollection<H>, M: Marker, T: BorrowList<L>> BorrowList<L>
+    for Cons<Option<Marked<Borrowed<H, C>, M>>, T>
+where
+    L: Contains<C, M>,
+{
+    type InnerRef<'a> = Cons<Option<&'a H>, T::InnerRef<'a>>;
+
+    type InnerMut<'a> = Cons<Option<&'a mut H>, T::InnerMut<'a>>;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a> {
+        Cons::new(
+            self.head.as_ref().map(|head| &head.value.item),
+            self.tail.inner_ref(),
+        )
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a> {
+        Cons::new(
+            self.head.as_mut().map(|head| &mut head.value.item),
+            self.tail.inner_mut(),
+        )
+    }
+
+    #[inline]
+    fn put_back(self, collection: &mut L) -> GenCollectionResult<()> {
+        let Cons { head, tail } = self;
+        if let Some(Marked { value: borrow, .. }) = head {
+            collection.get_mut().put_back(borrow)?;
+        }
         tail.put_back(collection)
     }
 }
@@ -1523,6 +1638,11 @@ impl<T: TypeList> GenCollectionList<T> {
         T: Contains<C, M>,
     {
         self.collection.get_mut().pop(index)
+    }
+
+    #[inline]
+    pub fn insert<'a, I: IndexList<T>>(&'a mut self, value: I::Owned) -> GenCollectionResult<I> {
+        I::insert(value, &mut self.collection)
     }
 
     #[inline]
@@ -1847,6 +1967,16 @@ where
     type Borrowed = Cons<Marked<BorrowedGuard<H, C>, M>, T::Borrowed>;
     type Owned = Cons<H, T::Owned>;
     type Ref<'a> = Cons<&'a TypeGuard<H::Inner>, T::Ref<'a>>;
+
+    #[inline]
+    fn insert(value: Self::Owned, collection: &mut L) -> GenCollectionResult<Self> {
+        let Cons { head, tail } = value;
+        let head = Marked::new(TypedIndex::new(
+            collection.get_mut().push(head.into_guard())?,
+        ));
+        let tail = T::insert(tail, collection)?;
+        Ok(Cons::new(head, tail))
+    }
 
     #[inline]
     fn get_ref(self, collection: &L) -> GenCollectionResult<Self::Ref<'_>> {
@@ -2242,5 +2372,402 @@ mod test_mixed_collection_types {
             });
             assert!(context.destroy(&mut collection).is_ok());
         }
+    }
+}
+
+pub struct CollectionType<T: 'static, C: GenCollection<T>> {
+    value: T,
+    _collection: PhantomData<C>,
+}
+
+impl<T: 'static, C: GenCollection<T>> CollectionType<T, C> {
+    #[inline]
+    pub fn new(value: T) -> Self {
+        Self {
+            value,
+            _collection: PhantomData,
+        }
+    }
+}
+
+pub trait MarkedItemList<C: 'static, M: Marker>: 'static {
+    type IndexList: MarkedIndexList<C, M>;
+
+    fn insert(self, collection: &mut C) -> GenCollectionResult<Self::IndexList>;
+}
+
+impl<T: 'static, L: 'static, M: Marker> MarkedItemList<L, M> for TypedNil<T>
+where
+    L: Contains<TypedNil<T>, M>,
+{
+    type IndexList = TypedNil<T>;
+
+    #[inline]
+    fn insert(self, _collection: &mut L) -> GenCollectionResult<Self::IndexList> {
+        Ok(TypedNil::new())
+    }
+}
+
+impl<
+        T: 'static,
+        C: GenCollection<T>,
+        L: 'static,
+        M1: Marker,
+        M2: Marker,
+        N: MarkedItemList<L, M2>,
+    > MarkedItemList<L, Cons<M1, M2>> for Cons<CollectionType<T, C>, N>
+where
+    L: Contains<C, M1>,
+{
+    type IndexList = Cons<GenIndex<T, C>, N::IndexList>;
+
+    #[inline]
+    fn insert(self, collection: &mut L) -> GenCollectionResult<Self::IndexList> {
+        let Cons { head, tail } = self;
+        let head = collection.get_mut().push(head.value)?;
+        let tail = tail.insert(collection)?;
+        Ok(Cons::new(head, tail))
+    }
+}
+
+pub trait MarkedBorrowList<C: 'static, M: Marker>: 'static {
+    type InnerRef<'a>;
+    type InnerMut<'a>;
+
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a>;
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a>;
+    fn put_back(self, collection: &mut C) -> GenCollectionResult<()>;
+}
+
+impl<L: 'static, T: 'static, M: Marker> MarkedBorrowList<L, M> for TypedNil<T>
+where
+    L: Contains<TypedNil<T>, M>,
+{
+    type InnerRef<'a> = &'a Self;
+    type InnerMut<'a> = &'a mut Self;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a> {
+        self
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a> {
+        self
+    }
+
+    #[inline]
+    fn put_back(self, _collection: &mut L) -> GenCollectionResult<()> {
+        Ok(())
+    }
+}
+
+impl<
+        T: 'static,
+        C: GenCollection<T>,
+        L: 'static,
+        M1: Marker,
+        M2: Marker,
+        N: MarkedBorrowList<L, M2>,
+    > MarkedBorrowList<L, Cons<M1, M2>> for Cons<Borrowed<T, C>, N>
+where
+    L: Contains<C, M1>,
+{
+    type InnerRef<'a> = Cons<&'a T, N::InnerRef<'a>>;
+    type InnerMut<'a> = Cons<&'a mut T, N::InnerMut<'a>>;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a> {
+        Cons::new(&self.head.item, self.tail.inner_ref())
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a> {
+        Cons::new(&mut self.head.item, self.tail.inner_mut())
+    }
+
+    #[inline]
+    fn put_back(self, collection: &mut L) -> GenCollectionResult<()> {
+        collection.get_mut().put_back(self.head)?;
+        self.tail.put_back(collection)
+    }
+}
+
+impl<
+        T: 'static,
+        C: GenCollection<T>,
+        L: 'static,
+        M1: Marker,
+        M2: Marker,
+        N: MarkedBorrowList<L, M2>,
+    > MarkedBorrowList<L, Cons<M1, M2>> for Cons<Option<Borrowed<T, C>>, N>
+where
+    L: Contains<C, M1>,
+{
+    type InnerRef<'a> = Cons<Option<&'a T>, N::InnerRef<'a>>;
+    type InnerMut<'a> = Cons<Option<&'a mut T>, N::InnerMut<'a>>;
+
+    #[inline]
+    fn inner_ref<'a>(&'a self) -> Self::InnerRef<'a> {
+        Cons::new(
+            self.head.as_ref().map(|item| item as &T),
+            self.tail.inner_ref(),
+        )
+    }
+
+    #[inline]
+    fn inner_mut<'a>(&'a mut self) -> Self::InnerMut<'a> {
+        Cons::new(
+            self.head.as_mut().map(|item| item as &mut T),
+            self.tail.inner_mut(),
+        )
+    }
+
+    #[inline]
+    fn put_back(self, collection: &mut L) -> GenCollectionResult<()> {
+        let Cons { head, tail } = self;
+        if let Some(borrow) = head {
+            collection.get_mut().put_back(borrow)?;
+        }
+        tail.put_back(collection)
+    }
+}
+
+pub trait MarkedIndexList<C: 'static, M: Marker>: Sized {
+    type Owned;
+    type Borrowed: MarkedBorrowList<C, M>;
+    type Ref<'a>;
+
+    fn get_ref(self, collection: &C) -> GenCollectionResult<Self::Ref<'_>>;
+    fn get_owned(self, collection: &mut C) -> GenCollectionResult<Self::Owned>;
+    fn get_borrowed(self, collection: &mut C) -> GenCollectionResult<Self::Borrowed>;
+}
+
+impl<L: 'static, T: 'static, M: Marker> MarkedIndexList<L, M> for TypedNil<T>
+where
+    L: Contains<TypedNil<T>, M>,
+{
+    type Owned = Self;
+    type Borrowed = Self;
+    type Ref<'a> = Self;
+
+    #[inline]
+    fn get_ref(self, _: &L) -> GenCollectionResult<Self::Ref<'_>> {
+        Ok(TypedNil::new())
+    }
+
+    #[inline]
+    fn get_owned(self, _: &mut L) -> GenCollectionResult<Self::Owned> {
+        Ok(TypedNil::new())
+    }
+
+    #[inline]
+    fn get_borrowed(self, _: &mut L) -> GenCollectionResult<Self::Borrowed> {
+        Ok(TypedNil::new())
+    }
+}
+
+impl<
+        T: 'static,
+        C: GenCollection<T>,
+        L: 'static,
+        M1: Marker,
+        M2: Marker,
+        N: MarkedIndexList<L, M2>,
+    > MarkedIndexList<L, Cons<M1, M2>> for Cons<GenIndex<T, C>, N>
+where
+    L: Contains<C, M1>,
+{
+    type Owned = Cons<T, N::Owned>;
+    type Borrowed = Cons<Borrowed<T, C>, N::Borrowed>;
+    type Ref<'a> = Cons<&'a T, N::Ref<'a>>;
+
+    #[inline]
+    fn get_ref(self, collection: &L) -> GenCollectionResult<Self::Ref<'_>> {
+        let Cons { head, tail } = self;
+        let head = collection.get().get(head)?;
+        let tail = tail.get_ref(collection)?;
+        Ok(Cons { head, tail })
+    }
+
+    #[inline]
+    fn get_owned(self, collection: &mut L) -> GenCollectionResult<Self::Owned> {
+        let Cons { head, tail } = self;
+        let head = collection.get_mut().pop(head)?;
+        let tail = tail.get_owned(collection)?;
+        Ok(Cons { head, tail })
+    }
+
+    #[inline]
+    fn get_borrowed(self, collection: &mut L) -> GenCollectionResult<Self::Borrowed> {
+        let Cons { head, tail } = self;
+        let head = collection.get_mut().borrow(head)?;
+        let tail = tail.get_borrowed(collection)?;
+        Ok(Cons { head, tail })
+    }
+}
+
+impl<
+        T: 'static,
+        C: GenCollection<T>,
+        L: 'static,
+        M1: Marker,
+        M2: Marker,
+        N: MarkedIndexList<L, M2>,
+    > MarkedIndexList<L, Cons<M1, M2>> for Cons<Option<GenIndex<T, C>>, N>
+where
+    L: Contains<C, M1>,
+{
+    type Owned = Cons<Option<T>, N::Owned>;
+    type Borrowed = Cons<Option<Borrowed<T, C>>, N::Borrowed>;
+    type Ref<'a> = Cons<Option<&'a T>, N::Ref<'a>>;
+
+    #[inline]
+    fn get_ref(self, collection: &L) -> GenCollectionResult<Self::Ref<'_>> {
+        let Cons { head, tail } = self;
+        let head = match head {
+            Some(index) => Some(collection.get().get(index)?),
+            None => None,
+        };
+        let tail = tail.get_ref(collection)?;
+        Ok(Cons { head, tail })
+    }
+
+    #[inline]
+    fn get_owned(self, collection: &mut L) -> GenCollectionResult<Self::Owned> {
+        let Cons { head, tail } = self;
+        let head = match head {
+            Some(index) => Some(collection.get_mut().pop(index)?),
+            None => None,
+        };
+        let tail = tail.get_owned(collection)?;
+        Ok(Cons { head, tail })
+    }
+
+    #[inline]
+    fn get_borrowed(self, collection: &mut L) -> GenCollectionResult<Self::Borrowed> {
+        let Cons { head, tail } = self;
+        let head = match head {
+            Some(index) => Some(collection.get_mut().borrow(index)?),
+            None => None,
+        };
+        let tail = tail.get_borrowed(collection)?;
+        Ok(Cons { head, tail })
+    }
+}
+
+#[cfg(test)]
+mod test_marked_borrow {
+    use crate::{
+        list_type, list_value, unpack_list, unpack_list_mut, CollectionType, Cons, GenCollection,
+        GenIndex, GenVec, MarkedBorrowList, MarkedIndexList, MarkedItemList, Nil,
+    };
+
+    type StorageList = list_type![GenVec<u32>, GenVec<u16>, GenVec<String>, Nil];
+
+    #[test]
+    fn test_get_ref() {
+        let mut collection = StorageList::default();
+
+        let index_u32: GenIndex<u32, _> = collection.get_mut::<GenVec<u32>, _>().push(42).unwrap();
+        let index_u16: GenIndex<u16, _> = collection.get_mut::<GenVec<u16>, _>().push(7).unwrap();
+        let index_string: GenIndex<String, _> = collection
+            .get_mut::<GenVec<String>, _>()
+            .push("Hello".to_string())
+            .unwrap();
+
+        let index_list = list_value![index_u32, index_u16, index_string, Nil::new()];
+
+        let index_ref = index_list.get_ref(&collection);
+
+        assert!(index_ref.is_ok());
+        let unpack_list![index_ref_u32, index_ref_u16, index_ref_string] = index_ref.unwrap();
+        assert_eq!(index_ref_u32, &42);
+        assert_eq!(index_ref_u16, &7);
+        assert_eq!(index_ref_string, "Hello");
+    }
+
+    #[test]
+    fn test_get_ref_optional() {
+        let mut collection = StorageList::default();
+
+        let index_u32: GenIndex<u32, _> = collection.get_mut::<GenVec<u32>, _>().push(42).unwrap();
+        let _index_u16: GenIndex<u16, _> = collection.get_mut::<GenVec<u16>, _>().push(7).unwrap();
+        let index_string: GenIndex<String, _> = collection
+            .get_mut::<GenVec<String>, _>()
+            .push("Hello".to_string())
+            .unwrap();
+
+        let index_list = list_value![
+            index_u32,
+            Option::<GenIndex<_, GenVec<u16>>>::None,
+            index_string,
+            Nil::new()
+        ];
+
+        let index_ref = index_list.get_ref(&collection);
+
+        assert!(index_ref.is_ok());
+        let unpack_list![index_ref_u32, index_ref_u16, index_ref_string] = index_ref.unwrap();
+        assert_eq!(index_ref_u32, &42);
+        assert!(index_ref_u16.is_none());
+        assert_eq!(index_ref_string, "Hello");
+    }
+
+    #[test]
+    fn test_get_borrow() {
+        let mut collection = StorageList::default();
+
+        let index_u32: GenIndex<u32, _> = collection.get_mut::<GenVec<u32>, _>().push(42).unwrap();
+        let index_u16: GenIndex<u16, _> = collection.get_mut::<GenVec<u16>, _>().push(7).unwrap();
+        let index_string: GenIndex<String, _> = collection
+            .get_mut::<GenVec<String>, _>()
+            .push("Hello".to_string())
+            .unwrap();
+
+        let index_list = list_value![index_u32, index_u16, index_string, Nil::new()];
+
+        let borrow_list = index_list.get_borrowed(&mut collection);
+
+        assert!(borrow_list.is_ok());
+        let unpack_list_mut![borrow_u32, borrow_u16, borrow_string] = borrow_list.unwrap();
+
+        *borrow_u32 = 21;
+        *borrow_u16 = 13;
+        *borrow_string = "World".to_string();
+
+        let borrow_list = list_value![borrow_u32, borrow_u16, borrow_string, Nil::new()];
+        borrow_list.put_back(&mut collection).unwrap();
+
+        let index_ref = index_list.get_ref(&collection);
+
+        assert!(index_ref.is_ok());
+        let unpack_list![index_ref_u32, index_ref_u16, index_ref_string] = index_ref.unwrap();
+        assert_eq!(index_ref_u32, &21);
+        assert_eq!(index_ref_u16, &13);
+        assert_eq!(index_ref_string, "World");
+    }
+
+    #[test]
+    fn test_insert() {
+        let mut collection = StorageList::default();
+
+        let index_list = list_value![
+            CollectionType::<_, GenVec<_>>::new(42u32),
+            CollectionType::<_, GenVec<_>>::new(7u16),
+            CollectionType::<_, GenVec<_>>::new("Hello".to_string()),
+            Nil::new()
+        ]
+        .insert(&mut collection);
+
+        assert!(index_list.is_ok());
+        let index_list = index_list.unwrap();
+        let index_ref = index_list.get_ref(&mut collection);
+
+        assert!(index_ref.is_ok());
+        let unpack_list![index_ref_u32, index_ref_u16, index_ref_string] = index_ref.unwrap();
+        assert_eq!(index_ref_u32, &42);
+        assert_eq!(index_ref_u16, &7);
+        assert_eq!(index_ref_string, "Hello");
     }
 }
