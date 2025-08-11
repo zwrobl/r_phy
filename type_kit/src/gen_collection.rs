@@ -522,6 +522,7 @@ mod cell {
         }
     }
 
+    // TODO: Consider simpler tracking of cell state - is borrow information here useful if we also have ItemState?
     #[allow(private_interfaces)]
     #[derive(Debug, Clone, Copy)]
     pub(super) enum IndexCell {
@@ -687,11 +688,51 @@ impl<T, C> GenIndex<T, C> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ItemState {
+    Occupied(usize),
+    Borrowed(usize),
+}
+
+impl ItemState {
+    #[inline]
+    fn item_index(&self) -> usize {
+        match self {
+            ItemState::Occupied(index) | ItemState::Borrowed(index) => *index,
+        }
+    }
+
+    #[inline]
+    fn is_occupied(&self) -> bool {
+        matches!(self, ItemState::Occupied(_))
+    }
+
+    #[inline]
+    fn borrow(&mut self) -> GenCollectionResult<()> {
+        if let ItemState::Occupied(index) = self {
+            *self = ItemState::Borrowed(*index);
+            Ok(())
+        } else {
+            Err(GenCollectionError::CellBorrowed)
+        }
+    }
+
+    #[inline]
+    fn put_back(&mut self) -> GenCollectionResult<()> {
+        if let ItemState::Borrowed(index) = self {
+            *self = ItemState::Occupied(*index);
+            Ok(())
+        } else {
+            Err(GenCollectionError::CellOccupied)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct GenVec<T> {
     items: Vec<MaybeUninit<T>>,
     indices: Vec<LockedCell>,
-    mapping: Vec<usize>,
+    mapping: Vec<ItemState>,
     next_free: Option<usize>,
 }
 
@@ -714,7 +755,7 @@ impl<T> Drop for GenVec<T> {
             .iter_mut()
             .zip(self.mapping.iter())
             .for_each(|(item, &cell_index)| {
-                if self.indices[cell_index].is_occupied() {
+                if cell_index.is_occupied() {
                     unsafe {
                         item.assume_init_drop();
                     }
@@ -742,13 +783,17 @@ impl<T> GenVec<T> {
         let mut removed = Vec::new();
         let mut i = 0;
         while i < self.items.len() {
-            let cell_index = self.mapping[i];
-            let cell = &mut self.indices[cell_index];
-            if cell.is_occupied() && predicate(unsafe { self.items[i].assume_init_ref() }) {
-                let next_free = self.next_free.replace(cell_index);
-                let _ = cell.unlock_unchecked().pop(next_free);
-                removed.push(unsafe { self.swap_remove(i) });
-            } else {
+            let mut item_removed = false;
+            if self.mapping[i].is_occupied() {
+                if predicate(unsafe { self.items[i].assume_init_ref() }) {
+                    let cell_index = self.mapping[i].item_index();
+                    let next_free = self.next_free.replace(cell_index);
+                    let _ = self.indices[cell_index].unlock_unchecked().pop(next_free);
+                    removed.push(unsafe { self.swap_remove(i) });
+                    item_removed = true;
+                }
+            }
+            if !item_removed {
                 i += 1;
             }
         }
@@ -788,7 +833,7 @@ impl<T> GenVec<T> {
     unsafe fn swap_remove(&mut self, item_index: usize) -> T {
         let last_index = self.items.len() - 1;
         if item_index < last_index {
-            let cell_index = self.mapping[last_index];
+            let cell_index = self.mapping[last_index].item_index();
             self.indices[cell_index]
                 .update_item_index(item_index)
                 .unwrap();
@@ -890,7 +935,7 @@ impl<T: 'static> GenCollection<T> for GenVec<T> {
             (0, index)
         };
 
-        self.mapping.push(cell_index);
+        self.mapping.push(ItemState::Occupied(cell_index));
         Ok(GenIndex::wrap(generation, cell_index))
     }
 
@@ -917,6 +962,7 @@ impl<T: 'static> GenCollection<T> for GenVec<T> {
     #[inline]
     fn borrow(&mut self, index: GenIndex<T, Self>) -> GenCollectionResult<Borrowed<T, Self>> {
         let item_index = self.get_cell_mut_unlocked(index)?.borrow()?;
+        self.mapping[item_index].borrow()?;
         let item = unsafe { self.items[item_index].assume_init_read() };
         Ok(Borrowed { item, index })
     }
@@ -925,6 +971,7 @@ impl<T: 'static> GenCollection<T> for GenVec<T> {
     fn put_back(&mut self, borrow: Borrowed<T, Self>) -> GenCollectionResult<()> {
         let Borrowed { item, index } = borrow;
         let item_index = self.get_cell_mut_unlocked(index)?.put_back()?;
+        self.mapping[item_index].put_back()?;
         self.items[item_index] = MaybeUninit::new(item);
         Ok(())
     }
@@ -957,14 +1004,13 @@ impl<'a, T> Iterator for GenCollectionRefIter<'a, T> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let indices = &self.collection.indices;
         let mapping = &self.collection.mapping;
         let items = &self.collection.items;
 
         while self.next < items.len() {
             let item_index = self.next;
             self.next += 1;
-            if indices[mapping[item_index]].is_occupied() {
+            if mapping[item_index].is_occupied() {
                 return Some(unsafe { items[item_index].assume_init_ref() });
             }
         }
@@ -996,14 +1042,13 @@ impl<'a, T> Iterator for GenCollectionMutIter<'a, T> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let indices = &self.collection.indices;
         let mapping = &self.collection.mapping;
         let items = &mut self.collection.items;
 
         while self.next < items.len() {
             let item_index = self.next;
             self.next += 1;
-            if indices[mapping[item_index]].is_occupied() {
+            if mapping[item_index].is_occupied() {
                 return Some(unsafe { &mut *items[item_index].as_mut_ptr() });
             }
         }
@@ -1027,8 +1072,7 @@ impl<'a, T> IntoIterator for &'a mut GenVec<T> {
 #[derive(Debug)]
 pub struct GenCollectionIntoIter<T> {
     items: Vec<MaybeUninit<T>>,
-    indices: Vec<LockedCell>,
-    mapping: Vec<usize>,
+    mapping: Vec<ItemState>,
     next: usize,
 }
 
@@ -1040,7 +1084,7 @@ impl<T> Iterator for GenCollectionIntoIter<T> {
         while self.next < self.items.len() {
             let item_indx = self.next;
             self.next += 1;
-            if self.indices[self.mapping[item_indx]].is_occupied() {
+            if self.mapping[item_indx].is_occupied() {
                 return Some(unsafe { self.items[item_indx].assume_init_read() });
             }
         }
@@ -1056,7 +1100,6 @@ impl<T: 'static> IntoIterator for GenVec<T> {
     fn into_iter(mut self) -> Self::IntoIter {
         GenCollectionIntoIter {
             items: std::mem::take(&mut self.items),
-            indices: std::mem::take(&mut self.indices),
             mapping: std::mem::take(&mut self.mapping),
             next: 0,
         }
