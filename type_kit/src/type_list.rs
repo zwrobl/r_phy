@@ -307,12 +307,16 @@ impl<H: PartialEq, T: PartialEq> PartialEq for Cons<H, T> {
 
 impl<H: Eq, T: Eq> Eq for Cons<H, T> {}
 
-pub trait TypeList: Sized + 'static {
+pub trait TypeList: Sized {
     const LEN: usize;
     type Item;
     type Next: TypeList;
-    type RefList<'a>;
-    type MutList<'a>;
+    type RefList<'a>
+    where
+        Self: 'a;
+    type MutList<'a>
+    where
+        Self: 'a;
 
     #[inline]
     fn len(&self) -> usize {
@@ -323,6 +327,10 @@ pub trait TypeList: Sized + 'static {
     fn is_empty(&self) -> bool {
         Self::LEN == 0
     }
+
+    fn as_ref(&self) -> Self::RefList<'_>;
+
+    fn as_mut(&mut self) -> Self::MutList<'_>;
 
     #[inline]
     fn append<N>(self, item: N) -> Cons<N, Self> {
@@ -346,6 +354,14 @@ impl<N: 'static> TypeList for TypedNil<N> {
     type Next = Self;
     type RefList<'a> = &'a Self;
     type MutList<'a> = &'a mut Self;
+
+    fn as_ref(&self) -> Self::RefList<'_> {
+        self
+    }
+
+    fn as_mut(&mut self) -> Self::MutList<'_> {
+        self
+    }
 }
 
 impl<T: 'static> TypeList for Fin<T> {
@@ -354,14 +370,38 @@ impl<T: 'static> TypeList for Fin<T> {
     type Next = Nil;
     type RefList<'a> = &'a Self;
     type MutList<'a> = &'a mut Self;
+
+    fn as_ref(&self) -> Self::RefList<'_> {
+        self
+    }
+
+    fn as_mut(&mut self) -> Self::MutList<'_> {
+        self
+    }
 }
 
-impl<T: 'static, N: TypeList> TypeList for Cons<T, N> {
+impl<T, N: TypeList> TypeList for Cons<T, N> {
     const LEN: usize = N::LEN + 1;
     type Item = T;
     type Next = N;
-    type RefList<'a> = Cons<&'a Self::Item, N::RefList<'a>>;
-    type MutList<'a> = Cons<&'a mut Self::Item, N::MutList<'a>>;
+    type RefList<'a>
+        = Cons<&'a Self::Item, N::RefList<'a>>
+    where
+        T: 'a,
+        N: 'a;
+    type MutList<'a>
+        = Cons<&'a mut Self::Item, N::MutList<'a>>
+    where
+        T: 'a,
+        N: 'a;
+
+    fn as_ref(&self) -> Self::RefList<'_> {
+        Cons::new(&self.head, self.tail.as_ref())
+    }
+
+    fn as_mut(&mut self) -> Self::MutList<'_> {
+        Cons::new(&mut self.head, self.tail.as_mut())
+    }
 }
 
 pub type ListRefType<'a, T> = <T as TypeList>::RefList<'a>;
@@ -667,7 +707,9 @@ impl<T> Contains<TypedNil<T>, Here> for TypedNil<T> {
     }
 }
 
-pub trait Subset<L: TypeList, T: Marker>: TypeList {
+pub trait Subset<L, T: Marker>: TypeList {
+    fn sub_get_owned<'a>(superset: L) -> Self;
+
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a>;
 
     /// # Safety
@@ -682,14 +724,18 @@ pub trait Subset<L: TypeList, T: Marker>: TypeList {
     fn sub_write(self, superset: &mut L);
 }
 
-pub trait SubsetCopy<L: TypeList, T: Marker>: TypeList + Clone + Copy {
+pub trait SubsetCopy<L, T: Marker>: TypeList + Clone + Copy {
     fn sub_copy<'a>(superset: &'a L) -> Self;
 }
 
-impl<T: 'static, L: TypeList, M: Marker> Subset<L, M> for TypedNil<T>
+impl<T: 'static, L, M: Marker> Subset<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
+    fn sub_get_owned<'a>(superset: L) -> Self {
+        *superset.get()
+    }
+
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         superset.get()
     }
@@ -702,7 +748,7 @@ where
     fn sub_write(self, _superset: &mut L) {}
 }
 
-impl<T: 'static, L: TypeList, M: Marker> SubsetCopy<L, M> for TypedNil<T>
+impl<T: 'static, L, M: Marker> SubsetCopy<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
@@ -714,11 +760,16 @@ where
 /// Implements `Subset` for a type-level list, where `Cons<T, N>` is a subset of superset `L`
 /// using marker types `M1` and `M2`. This allows extracting references to the subset elements
 /// from the superset, ensuring that each subset element corresponds to a unique marker in the superset.
-impl<T: 'static, L: TypeList, M1: Marker, M2: Marker, N: Subset<L, M2>> Subset<L, Cons<M1, M2>>
+impl<T: 'static, L, M1: Marker, M2: Marker, N: Subset<L, M2>> Subset<L, Cons<M1, M2>>
     for Cons<T, N>
 where
     L: Contains<T, M1>,
 {
+    fn sub_get_owned<'a>(superset: L) -> Self {
+        // superset.
+        todo!()
+    }
+
     #[inline]
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         Cons::new(superset.get(), N::sub_get(superset))
@@ -736,9 +787,10 @@ where
         *superset.get_mut() = head;
         tail.sub_write(superset);
     }
+    
 }
 
-impl<T: 'static + Clone + Copy, L: TypeList, M1: Marker, M2: Marker, N: SubsetCopy<L, M2>>
+impl<T: 'static + Clone + Copy, L, M1: Marker, M2: Marker, N: SubsetCopy<L, M2>>
     SubsetCopy<L, Cons<M1, M2>> for Cons<T, N>
 where
     L: Contains<T, M1>,
@@ -754,12 +806,12 @@ where
 // Its use requires to explicity state te superet type in the method invocation,
 // making the syntax more complex and less ergonomic than directly using Subset methods
 // Temporary left here for future reference and potential improvements.
-pub trait Superset<L: TypeList, T: Marker>: TypeList {
+pub trait Superset<L: TypeList, T: Marker> {
     fn super_get<'a>(&'a self) -> L::RefList<'a>;
     unsafe fn super_get_mut<'a>(&'a mut self) -> L::MutList<'a>;
 }
 
-impl<T: TypeList, L: TypeList, M: Marker> Superset<L, M> for T
+impl<T, L: TypeList, M: Marker> Superset<L, M> for T
 where
     L: Subset<T, M>,
 {

@@ -595,6 +595,17 @@ pub struct GenIndex<T, C> {
     _phantom: PhantomData<(T, C)>,
 }
 
+impl<T, C> GenIndex<T, C> {
+    #[inline]
+    pub fn invalid() -> Self {
+        Self {
+            index: usize::MAX,
+            generation: usize::MAX,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<T, C> Clone for GenIndex<T, C> {
     #[inline]
     fn clone(&self) -> Self {
@@ -2430,6 +2441,31 @@ where
     }
 }
 
+impl<
+        T: 'static,
+        C: GenCollection<T>,
+        L: 'static,
+        M1: Marker,
+        M2: Marker,
+        N: MarkedItemList<L, M2>,
+    > MarkedItemList<L, Cons<M1, M2>> for Cons<Option<CollectionType<T, C>>, N>
+where
+    L: Contains<C, M1>,
+{
+    type IndexList = Cons<Option<GenIndex<T, C>>, N::IndexList>;
+
+    #[inline]
+    fn insert(self, collection: &mut L) -> GenCollectionResult<Self::IndexList> {
+        let Cons { head, tail } = self;
+        let head = match head {
+            Some(item) => Some(collection.get_mut().push(item.value)?),
+            None => None,
+        };
+        let tail = tail.insert(collection)?;
+        Ok(Cons::new(head, tail))
+    }
+}
+
 pub trait MarkedBorrowList<C: 'static, M: Marker>: 'static {
     type InnerRef<'a>;
     type InnerMut<'a>;
@@ -2534,7 +2570,7 @@ where
 }
 
 pub trait MarkedIndexList<C: 'static, M: Marker>: Sized {
-    type Owned;
+    type Owned: TypeList;
     type Borrowed: MarkedBorrowList<C, M>;
     type Ref<'a>;
 

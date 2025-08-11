@@ -1,3 +1,5 @@
+mod ecs;
+
 use type_kit::{Cons, Nil};
 use winit::{
     dpi::PhysicalPosition,
