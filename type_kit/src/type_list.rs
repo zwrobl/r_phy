@@ -708,8 +708,6 @@ impl<T> Contains<TypedNil<T>, Here> for TypedNil<T> {
 }
 
 pub trait Subset<L, T: Marker>: TypeList {
-    fn sub_get_owned<'a>(superset: L) -> Self;
-
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a>;
 
     /// # Safety
@@ -732,10 +730,6 @@ impl<T: 'static, L, M: Marker> Subset<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
-    fn sub_get_owned<'a>(superset: L) -> Self {
-        *superset.get()
-    }
-
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         superset.get()
     }
@@ -764,11 +758,6 @@ impl<T: 'static, L, M1: Marker, M2: Marker, N: Subset<L, M2>> Subset<L, Cons<M1,
 where
     L: Contains<T, M1>,
 {
-    fn sub_get_owned<'a>(superset: L) -> Self {
-        // superset.
-        todo!()
-    }
-
     #[inline]
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
         Cons::new(superset.get(), N::sub_get(superset))
