@@ -1,15 +1,19 @@
 use std::{marker::PhantomData, ops::Deref};
 
 use type_kit::{
-    CollectionType, Cons, Contains, GenIndex, GenVec, Here, MarkedBorrowList, MarkedIndexList,
+    CollectionType, Cons, Contains, GenIndex, GenVec, MarkedBorrowList, MarkedIndexList,
     MarkedItemList, Marker, Nil, Subset, TypeList,
 };
 
-pub trait System: 'static {
+pub trait System<T: EntityComponentConfiguration>: 'static {
     type Query: TypeList;
     type Components: TypeList;
 
-    fn execute<'a>(&'a mut self, components: <Self::Components as TypeList>::RefList<'a>);
+    fn execute<'a>(
+        &'a mut self,
+        components: <Self::Components as TypeList>::RefList<'a>,
+        queue: &mut ContextQueue<T>,
+    );
 }
 
 pub trait ComponentList: TypeList + Default + 'static {}
@@ -25,7 +29,7 @@ pub struct SystemExecutor<
     M3: Marker,
     E: Entity<L, M1>,
     C: Subset<E::Borrowed, M2>,
-    S: System<Components = C>,
+    S: System<EntityComponentContext<L, M1, E>, Components = C>,
 > where
     S::Query: QueryWrite<E::Query, M3>,
 {
@@ -41,7 +45,7 @@ impl<
         M3: Marker,
         E: Entity<L, M1>,
         C: Subset<E::Borrowed, M2>,
-        S: System<Components = C>,
+        S: System<EntityComponentContext<L, M1, E>, Components = C>,
     > SystemExecutor<L, M1, M2, M3, E, C, S>
 where
     S::Query: QueryWrite<E::Query, M3>,
@@ -56,9 +60,13 @@ where
     }
 
     #[inline]
-    pub fn execute<'a>(&'a mut self, archetype: &mut Archetype<L, M1, E>) {
+    pub fn execute<'a>(
+        &'a mut self,
+        archetype: &mut Archetype<L, M1, E>,
+        operation_queue: &mut OperationQueue<L, M1, E>,
+    ) {
         if self.query.is_subset(&archetype.query) {
-            archetype.execute_system(&mut self.system);
+            archetype.execute_system(&mut self.system, operation_queue);
         }
     }
 
@@ -69,11 +77,20 @@ where
 }
 
 pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
-    fn execute<'a>(&'a mut self, archetype: &mut Archetype<T, M, E>);
+    fn execute<'a>(
+        &'a mut self,
+        archetype: &mut Archetype<T, M, E>,
+        operation_queue: &mut OperationQueue<T, M, E>,
+    );
 }
 
 impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemList<T, M, E> for Nil {
-    fn execute<'a>(&'a mut self, _archetype: &mut Archetype<T, M, E>) {}
+    fn execute<'a>(
+        &'a mut self,
+        _archetype: &mut Archetype<T, M, E>,
+        _operation_queue: &mut OperationQueue<T, M, E>,
+    ) {
+    }
 }
 
 impl<
@@ -83,15 +100,19 @@ impl<
         M3: Marker,
         E: Entity<L, M1>,
         C: Subset<E::Borrowed, M2>,
-        S: System<Components = C>,
+        S: System<EntityComponentContext<L, M1, E>, Components = C>,
         N: SystemList<L, M1, E>,
     > SystemList<L, M1, E> for Cons<SystemExecutor<L, M1, M2, M3, E, C, S>, N>
 where
     S::Query: QueryWrite<E::Query, M3>,
 {
-    fn execute<'a>(&'a mut self, archetype: &mut Archetype<L, M1, E>) {
-        self.head.execute(archetype);
-        self.tail.execute(archetype);
+    fn execute<'a>(
+        &'a mut self,
+        archetype: &mut Archetype<L, M1, E>,
+        operation_queue: &mut OperationQueue<L, M1, E>,
+    ) {
+        self.head.execute(archetype, operation_queue);
+        self.tail.execute(archetype, operation_queue);
     }
 }
 
@@ -278,44 +299,18 @@ where
     }
 }
 
-pub struct ComponentListBuilder<T: ComponentList, M: Marker, E: Entity<T, M>> {
+pub struct SystemListBuilder<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>> {
+    systems: S,
     _marker: PhantomData<(T, M, E)>,
 }
 
-impl ComponentListBuilder<Nil, Here, Nil> {
-    #[inline]
+impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemListBuilder<T, M, E, Nil> {
     pub fn new() -> Self {
         Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> ComponentListBuilder<T, M, E> {
-    #[inline]
-    pub fn with_component<C: 'static, N: Marker>(
-        self,
-    ) -> ComponentListBuilder<Cons<GenVec<C>, T>, N, Cons<Option<GenIndex<C, GenVec<C>>>, E>>
-    where
-        Cons<Option<GenIndex<C, GenVec<C>>>, E>: Entity<Cons<GenVec<C>, T>, N>,
-    {
-        ComponentListBuilder {
-            _marker: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub fn build(self) -> SystemListBuilder<T, M, E, Nil> {
-        SystemListBuilder {
             systems: Nil::new(),
             _marker: PhantomData,
         }
     }
-}
-
-pub struct SystemListBuilder<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>> {
-    systems: S,
-    _marker: PhantomData<(T, M, E)>,
 }
 
 impl<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>>
@@ -325,7 +320,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>>
         M2: Marker,
         M3: Marker,
         C: Subset<E::Borrowed, M2>,
-        N: System<Components = C>,
+        N: System<EntityComponentContext<T, M, E>, Components = C>,
     >(
         self,
         system: N,
@@ -341,7 +336,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>>
 
     pub fn build(self) -> EntityComponentSystem<T, M, E, S> {
         EntityComponentSystem {
-            archetypes: Vec::new(),
+            storage: EntityComponentContext::default(),
             systems: self.systems,
             _marker: PhantomData,
         }
@@ -405,13 +400,18 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
         self.entities.push(entity);
     }
 
-    pub fn execute_system<M2: Marker, C: Subset<E::Borrowed, M2>, S: System<Components = C>>(
+    pub fn execute_system<
+        M2: Marker,
+        C: Subset<E::Borrowed, M2>,
+        S: System<EntityComponentContext<T, M, E>, Components = C>,
+    >(
         &mut self,
         system: &mut S,
+        operation_queue: &mut OperationQueue<T, M, E>,
     ) {
         self.entities.iter().for_each(|&entity| {
             let components = entity.get_borrowed(&mut self.components).unwrap();
-            system.execute(C::sub_get(&components));
+            system.execute(C::sub_get(&components), operation_queue);
             components.put_back(&mut self.components).unwrap();
         });
     }
@@ -465,31 +465,93 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
     }
 }
 
-pub struct EntityComponentSystem<
-    C: ComponentList,
-    M: Marker,
-    E: Entity<C, M>,
-    S: SystemList<C, M, E>,
-> {
-    // TODO: This should be changed to GenVec when its support iteration
-    // to allow for safe inter-archetype entity references
-    archetypes: Vec<Archetype<C, M, E>>,
-    systems: S,
-    _marker: PhantomData<(C, M)>,
+pub enum Operation<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    Push(EntityBuilder<C, M, E>),
 }
 
-impl EntityComponentSystem<Nil, Here, Nil, Nil> {
-    pub fn builder() -> ComponentListBuilder<Nil, Here, Nil> {
-        ComponentListBuilder::new()
+pub struct OperationQueue<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    operations: Vec<Operation<C, M, E>>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for OperationQueue<C, M, E> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
-    EntityComponentSystem<C, M, E, S>
-{
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub fn process(self, world: &mut EntityComponentContext<C, M, E>) {
+        self.operations
+            .into_iter()
+            .for_each(|operation| match operation {
+                Operation::Push(entity) => world.push_entity(entity),
+            });
+    }
+
     #[inline]
     pub fn get_entity_builder(&self) -> EntityBuilder<C, M, E> {
         EntityBuilder::new()
+    }
+
+    #[inline]
+    pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
+        self.operations.push(Operation::Push(entity));
+    }
+}
+
+pub trait EntityComponentConfiguration {
+    type Components: ComponentList;
+    type Marker: Marker;
+    type Entity: Entity<Self::Components, Self::Marker>;
+
+    #[inline]
+    fn builder() -> SystemListBuilder<Self::Components, Self::Marker, Self::Entity, Nil> {
+        SystemListBuilder::new()
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentConfiguration
+    for EntityComponentContext<C, M, E>
+{
+    type Components = C;
+    type Marker = M;
+    type Entity = E;
+}
+
+pub type ContextQueue<C> = OperationQueue<
+    <C as EntityComponentConfiguration>::Components,
+    <C as EntityComponentConfiguration>::Marker,
+    <C as EntityComponentConfiguration>::Entity,
+>;
+
+pub struct EntityComponentContext<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    // TODO: This should be changed to GenVec when its support iteration
+    // to allow for safe inter-archetype entity references
+    archetypes: Vec<Archetype<C, M, E>>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for EntityComponentContext<C, M, E> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, E> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            archetypes: Vec::new(),
+        }
     }
 
     pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
@@ -505,12 +567,69 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
             }
         }
     }
+}
+
+#[macro_export]
+macro_rules! component_list_type {
+    [$component:ty, $last:ty] => { Cons<GenVec<$component>, $last>   };
+    [$component:ty $(, $components:ty)*] => {
+        Cons<GenVec<$component>, component_list_type![$($components),*]>
+    };
+}
+
+#[macro_export]
+macro_rules! marker_type {
+    [$current_marker:ty, $component:ty, $($rest:ty),*] => {
+        Cons<$current_marker, marker_type!( There<$current_marker>, $($rest),* )>
+    };
+    [$current_marker:ty, $component:ty] => {
+        $current_marker
+    };
+}
+
+#[macro_export]
+macro_rules! entity_type {
+    [$component:ty, $last:ty] => { Cons<Option<GenIndex<$component, GenVec<$component>>>, $last> };
+    [$component:ty $(, $components:ty)*] => {
+        Cons<Option<GenIndex<$component, GenVec<$component>>>, entity_type![$($components),*]>
+    };
+}
+
+#[macro_export]
+macro_rules! ecs_context_type {
+    [$($components:ty),*] => { EntityComponentContext<component_list_type![$($components),*], marker_type![Here, $($components),*], entity_type![$($components),*]> };
+}
+
+pub struct EntityComponentSystem<
+    C: ComponentList,
+    M: Marker,
+    E: Entity<C, M>,
+    S: SystemList<C, M, E>,
+> {
+    storage: EntityComponentContext<C, M, E>,
+    systems: S,
+    _marker: PhantomData<(C, M)>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
+    EntityComponentSystem<C, M, E, S>
+{
+    #[inline]
+    pub fn get_entity_builder(&self) -> EntityBuilder<C, M, E> {
+        EntityBuilder::new()
+    }
+
+    pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
+        self.storage.push_entity(entity);
+    }
 
     #[inline]
     pub fn execute_systems(&mut self) {
-        self.archetypes.iter_mut().for_each(|archetype| {
-            self.systems.execute(archetype);
+        let mut operation_queue = OperationQueue::new();
+        self.storage.archetypes.iter_mut().for_each(|archetype| {
+            self.systems.execute(archetype, &mut operation_queue);
         });
+        operation_queue.process(&mut self.storage);
     }
 }
 
@@ -518,9 +637,13 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
 mod test_ecs {
     use std::{fmt::Debug, marker::PhantomData};
 
-    use type_kit::{list_type, unpack_list, Borrowed, Cons, GenVec, Nil, TypeList};
+    use type_kit::{
+        list_type, unpack_list, Borrowed, Cons, GenIndex, GenVec, Here, Nil, There, TypeList,
+    };
 
-    use crate::ecs::{EntityComponentSystem, System};
+    use crate::ecs::{ContextQueue, EntityComponentConfiguration, EntityComponentContext, System};
+
+    type EscContextType = ecs_context_type![String, u32, u16, Nil];
 
     struct TestSystem<T: 'static + Debug> {
         _marker: PhantomData<T>,
@@ -534,18 +657,24 @@ mod test_ecs {
         }
     }
 
-    impl<T: 'static + Debug> System for TestSystem<T> {
+    impl<T: 'static + Debug> System<EscContextType> for TestSystem<T> {
         type Query = list_type![T, Nil];
         type Components = list_type![Option<Borrowed<T, GenVec<T>>>, Nil];
 
         fn execute<'a>(
             &'a mut self,
             unpack_list![borrowed_value]: <Self::Components as TypeList>::RefList<'a>,
+            queue: &mut ContextQueue<EscContextType>,
         ) {
             println!(
                 "Executing TestSystem<{}> with components: {:?}",
                 std::any::type_name::<T>(),
                 borrowed_value
+            );
+            queue.push_entity(
+                queue
+                    .get_entity_builder()
+                    .with_component("GeneratedComponent".to_string()),
             );
         }
     }
@@ -562,13 +691,20 @@ mod test_ecs {
         }
     }
 
-    impl<T: 'static + Debug, N: 'static + Debug> System for TestSystemMulti<T, N> {
+    impl<T: 'static + Debug, N: 'static + Debug> System<EscContextType> for TestSystemMulti<T, N> {
         type Query = list_type![T, N, Nil];
-        type Components = list_type![Option<Borrowed<T, GenVec<T>>>, Option<Borrowed<N, GenVec<N>>>, Nil];
+        type Components = list_type![
+            Option<Borrowed<T, GenVec<T>>>,
+            Option<Borrowed<N, GenVec<N>>>,
+            Nil
+        ];
 
         fn execute<'a>(
             &'a mut self,
-            unpack_list![borrowed_first, borrowed_second]: <Self::Components as TypeList>::RefList<'a>,
+            unpack_list![borrowed_first, borrowed_second]: <Self::Components as TypeList>::RefList<
+                'a,
+            >,
+            _queue: &mut ContextQueue<EscContextType>,
         ) {
             println!(
                 "Executing TestSystem<{}, {}> with components: {:?}, {:?}",
@@ -582,11 +718,7 @@ mod test_ecs {
 
     #[test]
     fn test_ecs() {
-        let mut ecs = EntityComponentSystem::builder()
-            .with_component::<u32, _>()
-            .with_component::<u16, _>()
-            .with_component::<String, _>()
-            .build()
+        let mut ecs = EscContextType::builder()
             .with_system(TestSystem::<String>::new())
             .with_system(TestSystem::<u32>::new())
             .with_system(TestSystem::<u16>::new())
@@ -605,6 +737,10 @@ mod test_ecs {
         ecs.push_entity(entity);
         let entity = ecs.get_entity_builder().with_component(1u16);
         ecs.push_entity(entity);
+        ecs.execute_systems();
+
+        println!("ECS executed successfully first!");
+
         ecs.execute_systems();
     }
 }

@@ -760,8 +760,7 @@ where
 /// Implements `Subset` for a type-level list, where `Cons<T, N>` is a subset of superset `L`
 /// using marker types `M1` and `M2`. This allows extracting references to the subset elements
 /// from the superset, ensuring that each subset element corresponds to a unique marker in the superset.
-impl<T: 'static, L, M1: Marker, M2: Marker, N: Subset<L, M2>> Subset<L, Cons<M1, M2>>
-    for Cons<T, N>
+impl<T: 'static, L, M1: Marker, M2: Marker, N: Subset<L, M2>> Subset<L, Cons<M1, M2>> for Cons<T, N>
 where
     L: Contains<T, M1>,
 {
@@ -787,7 +786,6 @@ where
         *superset.get_mut() = head;
         tail.sub_write(superset);
     }
-    
 }
 
 impl<T: 'static + Clone + Copy, L, M1: Marker, M2: Marker, N: SubsetCopy<L, M2>>
