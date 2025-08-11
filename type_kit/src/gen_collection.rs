@@ -1586,13 +1586,13 @@ macro_rules! mark {
     };
 }
 
-pub trait ListIterator<'a> {
+pub trait ListIterator {
     type IteratorItem: BoolList;
 
     fn next(&mut self) -> Self::IteratorItem;
 }
 
-impl<'a> ListIterator<'a> for Nil {
+impl ListIterator for Nil {
     type IteratorItem = Nil;
 
     #[inline]
@@ -1601,9 +1601,7 @@ impl<'a> ListIterator<'a> for Nil {
     }
 }
 
-impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a>
-    for Cons<GenCollectionRefIter<'a, T>, N>
-{
+impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionRefIter<'a, T>, N> {
     type IteratorItem = Cons<Option<&'a T>, N::IteratorItem>;
 
     #[inline]
@@ -1613,9 +1611,7 @@ impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a>
     }
 }
 
-impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a>
-    for Cons<GenCollectionMutIter<'a, T>, N>
-{
+impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionMutIter<'a, T>, N> {
     type IteratorItem = Cons<Option<&'a mut T>, N::IteratorItem>;
 
     #[inline]
@@ -1625,7 +1621,7 @@ impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a>
     }
 }
 
-impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a> for Cons<GenCollectionIntoIter<T>, N> {
+impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionIntoIter<T>, N> {
     type IteratorItem = Cons<Option<T>, N::IteratorItem>;
 
     #[inline]
@@ -1635,42 +1631,36 @@ impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a> for Cons<GenCollectio
     }
 }
 
-pub struct ListIter<'a, T: ListIterator<'a>> {
+pub struct ListIter<T: ListIterator> {
     iter: T,
-    _marker: PhantomData<&'a ()>,
 }
 
-impl<'a, T: ListIterator<'a>> ListIter<'a, T> {
+impl<T: ListIterator> ListIter<T> {
     #[inline]
-    pub fn iter_ref<N: IntoCollectionIterator<RefIterator<'a> = T> + 'a>(
-        collection: &'a N,
-    ) -> Self {
+    pub fn iter_ref<'a, N: IntoCollectionIterator<RefIterator<'a> = T>>(collection: &'a N) -> Self {
         Self {
             iter: collection.iter_ref(),
-            _marker: PhantomData,
         }
     }
 
     #[inline]
-    pub fn iter_mut<N: IntoCollectionIterator<MutIterator<'a> = T> + 'a>(
+    pub fn iter_mut<'a, N: IntoCollectionIterator<MutIterator<'a> = T>>(
         collection: &'a mut N,
     ) -> Self {
         Self {
             iter: collection.iter_mut(),
-            _marker: PhantomData,
         }
     }
 
     #[inline]
-    pub fn into_iter<N: IntoCollectionIterator<IntoIterator<'a> = T> + 'a>(collection: N) -> Self {
+    pub fn into_iter<N: IntoCollectionIterator<IntoIterator = T>>(collection: N) -> Self {
         Self {
             iter: collection.into_iter(),
-            _marker: PhantomData,
         }
     }
 }
 
-impl<'a, T: ListIterator<'a>> Iterator for ListIter<'a, T> {
+impl<T: ListIterator> Iterator for ListIter<T> {
     type Item = T::IteratorItem;
 
     #[inline]
@@ -1686,33 +1676,24 @@ impl<'a, T: ListIterator<'a>> Iterator for ListIter<'a, T> {
 
 pub trait IntoCollectionIterator: TypeList + Default + 'static {
     type ItemList: TypeList;
-    type RefIterator<'a>: ListIterator<
-        'a,
-        IteratorItem = <Self::ItemList as TypeList>::RefListOpt<'a>,
-    >
+    type RefIterator<'a>: ListIterator<IteratorItem = <Self::ItemList as TypeList>::RefListOpt<'a>>
     where
         Self: 'a;
-    type MutIterator<'a>: ListIterator<
-        'a,
-        IteratorItem = <Self::ItemList as TypeList>::MutListOpt<'a>,
-    >
+    type MutIterator<'a>: ListIterator<IteratorItem = <Self::ItemList as TypeList>::MutListOpt<'a>>
     where
         Self: 'a;
-    type IntoIterator<'a>: ListIterator<
-        'a,
-        IteratorItem = <Self::ItemList as TypeList>::OptionalList,
-    >;
+    type IntoIterator: ListIterator<IteratorItem = <Self::ItemList as TypeList>::OptionalList>;
 
     fn iter_ref<'a>(&'a self) -> Self::RefIterator<'a>;
     fn iter_mut<'a>(&'a mut self) -> Self::MutIterator<'a>;
-    fn into_iter<'a>(self) -> Self::IntoIterator<'a>;
+    fn into_iter<'a>(self) -> Self::IntoIterator;
 }
 
 impl IntoCollectionIterator for Nil {
     type ItemList = Nil;
     type RefIterator<'a> = Nil;
     type MutIterator<'a> = Nil;
-    type IntoIterator<'a> = Nil;
+    type IntoIterator = Nil;
 
     fn iter_ref<'a>(&'a self) -> Self::RefIterator<'a> {
         *self
@@ -1722,7 +1703,7 @@ impl IntoCollectionIterator for Nil {
         *self
     }
 
-    fn into_iter<'a>(self) -> Self::IntoIterator<'a> {
+    fn into_iter(self) -> Self::IntoIterator {
         self
     }
 }
@@ -1737,10 +1718,7 @@ impl<C: 'static, N: IntoCollectionIterator> IntoCollectionIterator for Cons<GenV
         = Cons<GenCollectionMutIter<'a, C>, N::MutIterator<'a>>
     where
         Self: 'a;
-    type IntoIterator<'a>
-        = Cons<GenCollectionIntoIter<C>, N::IntoIterator<'a>>
-    where
-        Self: 'a;
+    type IntoIterator = Cons<GenCollectionIntoIter<C>, N::IntoIterator>;
 
     fn iter_mut<'a>(&'a mut self) -> Self::MutIterator<'a> {
         Cons::new((&mut self.head).into_iter(), self.tail.iter_mut())
@@ -1750,7 +1728,7 @@ impl<C: 'static, N: IntoCollectionIterator> IntoCollectionIterator for Cons<GenV
         Cons::new((&self.head).into_iter(), self.tail.iter_ref())
     }
 
-    fn into_iter<'a>(self) -> Self::IntoIterator<'a> {
+    fn into_iter(self) -> Self::IntoIterator {
         Cons::new(self.head.into_iter(), self.tail.into_iter())
     }
 }
