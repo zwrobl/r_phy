@@ -10,7 +10,7 @@ pub trait System<T: EntityComponentConfiguration>: 'static {
     type Components: TypeList;
 
     fn execute<'a>(
-        &'a mut self,
+        &self,
         components: <Self::Components as TypeList>::RefList<'a>,
         queue: &mut ContextQueue<T>,
     );
@@ -61,12 +61,12 @@ where
 
     #[inline]
     pub fn execute<'a>(
-        &'a mut self,
+        &self,
         archetype: &mut Archetype<L, M1, E>,
         operation_queue: &mut OperationQueue<L, M1, E>,
     ) {
         if self.query.is_subset(&archetype.query) {
-            archetype.execute_system(&mut self.system, operation_queue);
+            archetype.execute_system(&self.system, operation_queue);
         }
     }
 
@@ -406,7 +406,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
         S: System<EntityComponentContext<T, M, E>, Components = C>,
     >(
         &mut self,
-        system: &mut S,
+        system: &S,
         operation_queue: &mut OperationQueue<T, M, E>,
     ) {
         self.entities.iter().for_each(|&entity| {
@@ -662,7 +662,7 @@ mod test_ecs {
         type Components = list_type![Option<Borrowed<T, GenVec<T>>>, Nil];
 
         fn execute<'a>(
-            &'a mut self,
+            &self,
             unpack_list![borrowed_value]: <Self::Components as TypeList>::RefList<'a>,
             queue: &mut ContextQueue<EscContextType>,
         ) {
@@ -700,7 +700,7 @@ mod test_ecs {
         ];
 
         fn execute<'a>(
-            &'a mut self,
+            &self,
             unpack_list![borrowed_first, borrowed_second]: <Self::Components as TypeList>::RefList<
                 'a,
             >,
