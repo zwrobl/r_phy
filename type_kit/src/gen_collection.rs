@@ -586,8 +586,8 @@ use std::{
 };
 
 use crate::{
-    Cons, Contains, Destroy, DestroyResult, DropGuard, FromGuard, Guard, IntoOuter, Marked, Marker,
-    Nil, TypeGuard, TypeGuardError, TypeList, TypedNil, ValidMut, ValidRef,
+    BoolList, Cons, Contains, Destroy, DestroyResult, DropGuard, FromGuard, Guard, IntoOuter,
+    Marked, Marker, Nil, TypeGuard, TypeGuardError, TypeList, TypedNil, ValidMut, ValidRef,
 };
 
 pub struct GenIndex<T, C> {
@@ -1584,6 +1584,363 @@ macro_rules! mark {
     [$collection:ty, $index:expr $(, $indices:expr)*] => {
         Cons::new($index.mark::<$collection, _>(), mark![$collection $(, $indices)*])
     };
+}
+
+pub trait ListIterator<'a> {
+    type IteratorItem: BoolList;
+
+    fn next(&mut self) -> Self::IteratorItem;
+}
+
+impl<'a> ListIterator<'a> for Nil {
+    type IteratorItem = Nil;
+
+    #[inline]
+    fn next(&mut self) -> Self::IteratorItem {
+        *self
+    }
+}
+
+impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a>
+    for Cons<GenCollectionRefIter<'a, T>, N>
+{
+    type IteratorItem = Cons<Option<&'a T>, N::IteratorItem>;
+
+    #[inline]
+    fn next(&mut self) -> Self::IteratorItem {
+        let item = self.head.next();
+        Cons::new(item, self.tail.next())
+    }
+}
+
+impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a>
+    for Cons<GenCollectionMutIter<'a, T>, N>
+{
+    type IteratorItem = Cons<Option<&'a mut T>, N::IteratorItem>;
+
+    #[inline]
+    fn next(&mut self) -> Self::IteratorItem {
+        let item = self.head.next();
+        Cons::new(item, self.tail.next())
+    }
+}
+
+impl<'a, T: 'static, N: ListIterator<'a>> ListIterator<'a> for Cons<GenCollectionIntoIter<T>, N> {
+    type IteratorItem = Cons<Option<T>, N::IteratorItem>;
+
+    #[inline]
+    fn next(&mut self) -> Self::IteratorItem {
+        let item = self.head.next();
+        Cons::new(item, self.tail.next())
+    }
+}
+
+pub struct ListIter<'a, T: ListIterator<'a>> {
+    iter: T,
+    _marker: PhantomData<&'a ()>,
+}
+
+impl<'a, T: ListIterator<'a>> ListIter<'a, T> {
+    #[inline]
+    pub fn iter_ref<N: IntoCollectionIterator<RefIterator<'a> = T> + 'a>(
+        collection: &'a N,
+    ) -> Self {
+        Self {
+            iter: collection.iter_ref(),
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn iter_mut<N: IntoCollectionIterator<MutIterator<'a> = T> + 'a>(
+        collection: &'a mut N,
+    ) -> Self {
+        Self {
+            iter: collection.iter_mut(),
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn into_iter<N: IntoCollectionIterator<IntoIterator<'a> = T> + 'a>(collection: N) -> Self {
+        Self {
+            iter: collection.into_iter(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: ListIterator<'a>> Iterator for ListIter<'a, T> {
+    type Item = T::IteratorItem;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.iter.next();
+        if item.any() {
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+pub trait IntoCollectionIterator: TypeList + Default + 'static {
+    type ItemList: TypeList;
+    type RefIterator<'a>: ListIterator<
+        'a,
+        IteratorItem = <Self::ItemList as TypeList>::RefListOpt<'a>,
+    >
+    where
+        Self: 'a;
+    type MutIterator<'a>: ListIterator<
+        'a,
+        IteratorItem = <Self::ItemList as TypeList>::MutListOpt<'a>,
+    >
+    where
+        Self: 'a;
+    type IntoIterator<'a>: ListIterator<
+        'a,
+        IteratorItem = <Self::ItemList as TypeList>::OptionalList,
+    >;
+
+    fn iter_ref<'a>(&'a self) -> Self::RefIterator<'a>;
+    fn iter_mut<'a>(&'a mut self) -> Self::MutIterator<'a>;
+    fn into_iter<'a>(self) -> Self::IntoIterator<'a>;
+}
+
+impl IntoCollectionIterator for Nil {
+    type ItemList = Nil;
+    type RefIterator<'a> = Nil;
+    type MutIterator<'a> = Nil;
+    type IntoIterator<'a> = Nil;
+
+    fn iter_ref<'a>(&'a self) -> Self::RefIterator<'a> {
+        *self
+    }
+
+    fn iter_mut<'a>(&'a mut self) -> Self::MutIterator<'a> {
+        *self
+    }
+
+    fn into_iter<'a>(self) -> Self::IntoIterator<'a> {
+        self
+    }
+}
+
+impl<C: 'static, N: IntoCollectionIterator> IntoCollectionIterator for Cons<GenVec<C>, N> {
+    type ItemList = Cons<C, N::ItemList>;
+    type RefIterator<'a>
+        = Cons<GenCollectionRefIter<'a, C>, N::RefIterator<'a>>
+    where
+        Self: 'a;
+    type MutIterator<'a>
+        = Cons<GenCollectionMutIter<'a, C>, N::MutIterator<'a>>
+    where
+        Self: 'a;
+    type IntoIterator<'a>
+        = Cons<GenCollectionIntoIter<C>, N::IntoIterator<'a>>
+    where
+        Self: 'a;
+
+    fn iter_mut<'a>(&'a mut self) -> Self::MutIterator<'a> {
+        Cons::new((&mut self.head).into_iter(), self.tail.iter_mut())
+    }
+
+    fn iter_ref<'a>(&'a self) -> Self::RefIterator<'a> {
+        Cons::new((&self.head).into_iter(), self.tail.iter_ref())
+    }
+
+    fn into_iter<'a>(self) -> Self::IntoIterator<'a> {
+        Cons::new(self.head.into_iter(), self.tail.into_iter())
+    }
+}
+
+#[cfg(test)]
+mod test_list_iterator {
+    use crate::{list_type, unpack_list};
+
+    use super::*;
+
+    type GenVecCollection = list_type![GenVec<u8>, GenVec<u16>, GenVec<u32>, Nil];
+
+    #[test]
+    fn test_ref_list_iterator() {
+        let mut collection = GenVecCollection::default();
+
+        let gen_vec_u8 = collection.get_mut::<GenVec<u8>, _>();
+        let _ = gen_vec_u8.push(1);
+        let _ = gen_vec_u8.push(2);
+        let _ = gen_vec_u8.push(3);
+
+        let gen_vec_u16 = collection.get_mut::<GenVec<u16>, _>();
+        let _ = gen_vec_u16.push(1);
+        let _ = gen_vec_u16.push(2);
+
+        let gen_vec_u32 = collection.get_mut::<GenVec<u32>, _>();
+        let _ = gen_vec_u32.push(1);
+
+        let mut iter = ListIter::iter_ref(&collection);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_some());
+        assert!(*value_u8.unwrap() == 1);
+        assert!(*value_u16.unwrap() == 1);
+        assert!(*value_u32.unwrap() == 1);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_none());
+        assert!(*value_u8.unwrap() == 2);
+        assert!(*value_u16.unwrap() == 2);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_none());
+        assert!(value_u32.is_none());
+        assert!(*value_u8.unwrap() == 3);
+
+        let next = iter.next();
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn test_mut_list_iterator() {
+        let mut collection = GenVecCollection::default();
+
+        let gen_vec_u8 = collection.get_mut::<GenVec<u8>, _>();
+        let _ = gen_vec_u8.push(1);
+        let _ = gen_vec_u8.push(2);
+        let _ = gen_vec_u8.push(3);
+
+        let gen_vec_u16 = collection.get_mut::<GenVec<u16>, _>();
+        let _ = gen_vec_u16.push(1);
+        let _ = gen_vec_u16.push(2);
+
+        let gen_vec_u32 = collection.get_mut::<GenVec<u32>, _>();
+        let _ = gen_vec_u32.push(1);
+
+        let mut iter = ListIter::iter_mut(&mut collection);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_some());
+        *value_u8.unwrap() += 1;
+        *value_u16.unwrap() += 1;
+        *value_u32.unwrap() += 1;
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_none());
+        *value_u8.unwrap() += 1;
+        *value_u16.unwrap() += 1;
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_none());
+        assert!(value_u32.is_none());
+        *value_u8.unwrap() += 1;
+
+        let next = iter.next();
+        assert!(next.is_none());
+
+        let mut iter = ListIter::iter_ref(&collection);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_some());
+        assert!(*value_u8.unwrap() == 2);
+        assert!(*value_u16.unwrap() == 2);
+        assert!(*value_u32.unwrap() == 2);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_none());
+        assert!(*value_u8.unwrap() == 3);
+        assert!(*value_u16.unwrap() == 3);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_none());
+        assert!(value_u32.is_none());
+        assert!(*value_u8.unwrap() == 4);
+
+        let next = iter.next();
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn test_into_list_iterator() {
+        let mut collection = GenVecCollection::default();
+
+        let gen_vec_u8 = collection.get_mut::<GenVec<u8>, _>();
+        let _ = gen_vec_u8.push(1);
+        let _ = gen_vec_u8.push(2);
+        let _ = gen_vec_u8.push(3);
+
+        let gen_vec_u16 = collection.get_mut::<GenVec<u16>, _>();
+        let _ = gen_vec_u16.push(1);
+        let _ = gen_vec_u16.push(2);
+
+        let gen_vec_u32 = collection.get_mut::<GenVec<u32>, _>();
+        let _ = gen_vec_u32.push(1);
+
+        let mut iter = ListIter::into_iter(collection);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_some());
+        assert!(value_u8.unwrap() == 1);
+        assert!(value_u16.unwrap() == 1);
+        assert!(value_u32.unwrap() == 1);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_some());
+        assert!(value_u32.is_none());
+        assert!(value_u8.unwrap() == 2);
+        assert!(value_u16.unwrap() == 2);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16, value_u32] = next.unwrap();
+        assert!(value_u8.is_some());
+        assert!(value_u16.is_none());
+        assert!(value_u32.is_none());
+        assert!(value_u8.unwrap() == 3);
+
+        let next = iter.next();
+        assert!(next.is_none());
+    }
 }
 
 #[derive(Debug)]

@@ -314,9 +314,16 @@ pub trait TypeList: Sized {
     type RefList<'a>
     where
         Self: 'a;
+    type RefListOpt<'a>
+    where
+        Self: 'a;
     type MutList<'a>
     where
         Self: 'a;
+    type MutListOpt<'a>
+    where
+        Self: 'a;
+    type OptionalList: TypeList;
 
     #[inline]
     fn len(&self) -> usize {
@@ -352,15 +359,18 @@ impl<N: 'static> TypeList for TypedNil<N> {
     const LEN: usize = 0;
     type Item = N;
     type Next = Self;
-    type RefList<'a> = &'a Self;
-    type MutList<'a> = &'a mut Self;
+    type RefList<'a> = Self;
+    type RefListOpt<'a> = Self;
+    type MutList<'a> = Self;
+    type MutListOpt<'a> = Self;
+    type OptionalList = Self;
 
     fn as_ref(&self) -> Self::RefList<'_> {
-        self
+        *self
     }
 
     fn as_mut(&mut self) -> Self::MutList<'_> {
-        self
+        *self
     }
 }
 
@@ -369,7 +379,10 @@ impl<T: 'static> TypeList for Fin<T> {
     type Item = T;
     type Next = Nil;
     type RefList<'a> = &'a Self;
+    type RefListOpt<'a> = Option<&'a Self>;
     type MutList<'a> = &'a mut Self;
+    type MutListOpt<'a> = Option<&'a mut Self>;
+    type OptionalList = Self;
 
     fn as_ref(&self) -> Self::RefList<'_> {
         self
@@ -389,11 +402,22 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
     where
         T: 'a,
         N: 'a;
+    type RefListOpt<'a>
+        = Cons<Option<&'a Self::Item>, N::RefListOpt<'a>>
+    where
+        T: 'a,
+        N: 'a;
     type MutList<'a>
         = Cons<&'a mut Self::Item, N::MutList<'a>>
     where
         T: 'a,
         N: 'a;
+    type MutListOpt<'a>
+        = Cons<Option<&'a mut Self::Item>, N::MutListOpt<'a>>
+    where
+        T: 'a,
+        N: 'a;
+    type OptionalList = Cons<Option<T>, N::OptionalList>;
 
     fn as_ref(&self) -> Self::RefList<'_> {
         Cons::new(&self.head, self.tail.as_ref())
@@ -730,12 +754,12 @@ impl<T: 'static, L, M: Marker> Subset<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
-    fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
-        superset.get()
+    fn sub_get<'a>(_superset: &'a L) -> Self::RefList<'a> {
+        TypedNil::new()
     }
 
-    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a> {
-        superset.get_mut()
+    unsafe fn sub_get_mut<'a>(_superset: &'a mut L) -> Self::MutList<'a> {
+        TypedNil::new()
     }
 
     // No need to write anything to the superset for an empty subset
@@ -876,5 +900,62 @@ mod test_subset {
         assert_eq!(a, 100u16);
         assert_eq!(b, 42u32);
         assert_eq!(c, "World");
+    }
+}
+
+pub trait BoolList {
+    fn all(&self) -> bool;
+    fn any(&self) -> bool;
+    fn none(&self) -> bool;
+}
+
+impl BoolList for Nil {
+    #[inline]
+    fn all(&self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn any(&self) -> bool {
+        false
+    }
+
+    #[inline]
+    fn none(&self) -> bool {
+        true
+    }
+}
+
+impl<N: BoolList> BoolList for Cons<bool, N> {
+    #[inline]
+    fn all(&self) -> bool {
+        self.head && self.tail.all()
+    }
+
+    #[inline]
+    fn any(&self) -> bool {
+        self.head || self.tail.any()
+    }
+
+    #[inline]
+    fn none(&self) -> bool {
+        !self.head && self.tail.none()
+    }
+}
+
+impl<C, N: BoolList> BoolList for Cons<Option<C>, N> {
+    #[inline]
+    fn all(&self) -> bool {
+        self.head.is_some() && N::all(&self.tail)
+    }
+
+    #[inline]
+    fn any(&self) -> bool {
+        self.head.is_some() || N::any(&self.tail)
+    }
+
+    #[inline]
+    fn none(&self) -> bool {
+        self.head.is_none() && N::none(&self.tail)
     }
 }
