@@ -6,9 +6,7 @@ use type_kit::{
 };
 
 pub trait System<T: EntityComponentConfiguration>: 'static {
-    type Query: TypeList;
     type Components: TypeList;
-    // type ComponentsRef<'a>;
 
     fn execute<'a>(
         &self,
@@ -50,10 +48,10 @@ where
     #[inline]
     pub fn new<M3: Marker>(system: S) -> Self
     where
-        S::Query: QueryWrite<E::Query, M3>,
+        S::Components: QueryWrite<E::Query, M3>,
     {
         Self {
-            query: S::Query::write(E::Query::default()),
+            query: S::Components::write(E::Query::default()),
             system,
             _phantom: std::marker::PhantomData,
         }
@@ -324,8 +322,7 @@ impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, S: SystemList<T, M1, E>>
         system: N,
     ) -> SystemListBuilder<T, M1, E, Cons<SystemExecutor<T, M1, M2, E, N>, S>>
     where
-        N::Query: QueryWrite<E::Query, M3>,
-        N::Components: IntoSubsetIterator<T, M2>,
+        N::Components: IntoSubsetIterator<T, M2> + QueryWrite<E::Query, M3>,
     {
         SystemListBuilder {
             systems: Cons::new(SystemExecutor::new(system), self.systems),
@@ -620,9 +617,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
 mod test_ecs {
     use std::{fmt::Debug, marker::PhantomData};
 
-    use type_kit::{
-        list_type, unpack_list, Borrowed, Cons, GenIndex, GenVec, Here, Nil, There, TypeList,
-    };
+    use type_kit::{list_type, unpack_list, Cons, GenIndex, GenVec, Here, Nil, There, TypeList};
 
     use crate::ecs::{ContextQueue, EntityComponentConfiguration, EntityComponentContext, System};
 
@@ -641,7 +636,6 @@ mod test_ecs {
     }
 
     impl<T: 'static + Debug> System<EscContextType> for TestSystem<T> {
-        type Query = list_type![T, Nil];
         type Components = list_type![T, Nil];
 
         fn execute<'a>(
@@ -675,7 +669,6 @@ mod test_ecs {
     }
 
     impl<T: 'static + Debug, N: 'static + Debug> System<EscContextType> for TestSystemMulti<T, N> {
-        type Query = list_type![T, N, Nil];
         type Components = list_type![T, N, Nil];
 
         fn execute<'a>(
