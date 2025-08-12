@@ -967,10 +967,10 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> PersistentIndexMap<C, M, E> {
         entity: EntityIndexTyped<C, M, E>,
     ) {
         let PersistentIndexTyped { index } = index;
-        if let Ok(registered) = self.entities.get(index) {
-            if *registered != entity {
+        if let Ok(&registered) = self.entities.get(index) {
+            if registered != entity {
                 self.entities[index] = entity;
-                self.lookup.remove(&entity);
+                self.lookup.remove(&registered);
                 self.lookup.insert(entity, index);
             }
         }
