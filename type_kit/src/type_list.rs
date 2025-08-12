@@ -1001,3 +1001,22 @@ impl<C, N: BoolList> BoolList for Cons<Option<C>, N> {
         self.head.is_none() && N::none(&self.tail)
     }
 }
+
+pub trait OptionalList {
+    fn update(&mut self, value: Self);
+}
+
+impl OptionalList for TypedNil<()> {
+    #[inline]
+    fn update(&mut self, _value: Self) {}
+}
+
+impl<C: 'static, N: OptionalList> OptionalList for Cons<Option<C>, N> {
+    #[inline]
+    fn update(&mut self, value: Self) {
+        if let Some(value) = value.head {
+            self.head = Some(value);
+        }
+        self.tail.update(value.tail);
+    }
+}

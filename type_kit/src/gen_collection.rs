@@ -2841,6 +2841,7 @@ pub trait MarkedItemList<C: 'static, M: Marker>: 'static {
     type IndexList: MarkedIndexList<C, M>;
 
     fn insert(self, collection: &mut C) -> GenCollectionResult<Self::IndexList>;
+    fn write<'a>(self, value: <Self::IndexList as MarkedIndexList<C, M>>::Mut<'a>);
 }
 
 impl<T: 'static, L: 'static, M: Marker> MarkedItemList<L, M> for TypedNil<T>
@@ -2853,6 +2854,9 @@ where
     fn insert(self, _collection: &mut L) -> GenCollectionResult<Self::IndexList> {
         Ok(TypedNil::new())
     }
+
+    #[inline]
+    fn write<'a>(self, _value: <Self::IndexList as MarkedIndexList<L, M>>::Mut<'a>) {}
 }
 
 impl<
@@ -2874,6 +2878,13 @@ where
         let head = collection.get_mut().push(head.value)?;
         let tail = tail.insert(collection)?;
         Ok(Cons::new(head, tail))
+    }
+
+    #[inline]
+    fn write<'a>(self, value: <Self::IndexList as MarkedIndexList<L, Cons<M1, M2>>>::Mut<'a>) {
+        let Cons { head, tail } = self;
+        *value.head = head.value;
+        tail.write(value.tail);
     }
 }
 
@@ -2899,6 +2910,15 @@ where
         };
         let tail = tail.insert(collection)?;
         Ok(Cons::new(head, tail))
+    }
+
+    #[inline]
+    fn write<'a>(self, value: <Self::IndexList as MarkedIndexList<L, Cons<M1, M2>>>::Mut<'a>) {
+        let Cons { head, tail } = self;
+        if let (Some(head), Some(value_head)) = (head, value.head) {
+            *value_head = head.value;
+        }
+        tail.write(value.tail);
     }
 }
 
@@ -3009,8 +3029,13 @@ pub trait MarkedIndexList<C: 'static, M: Marker>: Sized {
     type Owned: TypeList;
     type Borrowed: MarkedBorrowList<C, M>;
     type Ref<'a>;
+    type Mut<'a>;
 
     fn get_ref(self, collection: &C) -> GenCollectionResult<Self::Ref<'_>>;
+    /// #Safety
+    /// The caller must ensure that the list index contains only unique elements
+    /// Otherwise mutable aliased references would be created
+    unsafe fn get_mut(self, collection: &mut C) -> GenCollectionResult<Self::Mut<'_>>;
     fn get_owned(self, collection: &mut C) -> GenCollectionResult<Self::Owned>;
     fn get_borrowed(self, collection: &mut C) -> GenCollectionResult<Self::Borrowed>;
 }
@@ -3022,9 +3047,15 @@ where
     type Owned = Self;
     type Borrowed = Self;
     type Ref<'a> = Self;
+    type Mut<'a> = Self;
 
     #[inline]
     fn get_ref(self, _: &L) -> GenCollectionResult<Self::Ref<'_>> {
+        Ok(TypedNil::new())
+    }
+
+    #[inline]
+    unsafe fn get_mut(self, _: &mut L) -> GenCollectionResult<Self::Mut<'_>> {
         Ok(TypedNil::new())
     }
 
@@ -3053,12 +3084,22 @@ where
     type Owned = Cons<T, N::Owned>;
     type Borrowed = Cons<Borrowed<T, C>, N::Borrowed>;
     type Ref<'a> = Cons<&'a T, N::Ref<'a>>;
+    type Mut<'a> = Cons<&'a mut T, N::Mut<'a>>;
 
     #[inline]
     fn get_ref(self, collection: &L) -> GenCollectionResult<Self::Ref<'_>> {
         let Cons { head, tail } = self;
         let head = collection.get().get(head)?;
         let tail = tail.get_ref(collection)?;
+        Ok(Cons { head, tail })
+    }
+
+    #[inline]
+    unsafe fn get_mut(self, collection: &mut L) -> GenCollectionResult<Self::Mut<'_>> {
+        let Cons { head, tail } = self;
+        let mut reborrow = NonNull::new_unchecked(collection);
+        let head = collection.get_mut().get_mut(head)?;
+        let tail = tail.get_mut(reborrow.as_mut())?;
         Ok(Cons { head, tail })
     }
 
@@ -3093,6 +3134,7 @@ where
     type Owned = Cons<Option<T>, N::Owned>;
     type Borrowed = Cons<Option<Borrowed<T, C>>, N::Borrowed>;
     type Ref<'a> = Cons<Option<&'a T>, N::Ref<'a>>;
+    type Mut<'a> = Cons<Option<&'a mut T>, N::Mut<'a>>;
 
     #[inline]
     fn get_ref(self, collection: &L) -> GenCollectionResult<Self::Ref<'_>> {
@@ -3102,6 +3144,18 @@ where
             None => None,
         };
         let tail = tail.get_ref(collection)?;
+        Ok(Cons { head, tail })
+    }
+
+    #[inline]
+    unsafe fn get_mut(self, collection: &mut L) -> GenCollectionResult<Self::Mut<'_>> {
+        let Cons { head, tail } = self;
+        let mut reborrow = NonNull::new_unchecked(collection);
+        let head = match head {
+            Some(index) => Some(collection.get_mut().get_mut(index)?),
+            None => None,
+        };
+        let tail = tail.get_mut(reborrow.as_mut())?;
         Ok(Cons { head, tail })
     }
 

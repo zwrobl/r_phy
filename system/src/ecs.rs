@@ -1,6 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt::{Debug, Formatter},
+    hash::Hash,
+    hash::Hasher,
     marker::PhantomData,
     ops::Deref,
 };
@@ -8,7 +10,7 @@ use std::{
 use type_kit::{
     CollectionType, Cons, Contains, FromGuard, GenCollection, GenIndexRaw, GenVec, GenVecIndex,
     IntoCollectionIterator, IntoSubsetIterator, ListIter, MarkedIndexList, MarkedItemList, Marker,
-    Nil, TypeGuard, TypeList,
+    Nil, OptionalList, TypeGuard, TypeList,
 };
 
 pub trait System<T: EntityComponentConfiguration>: 'static {
@@ -16,6 +18,7 @@ pub trait System<T: EntityComponentConfiguration>: 'static {
 
     fn execute<'a>(
         &self,
+        entity: EntityIndex,
         components: <Self::Components as TypeList>::RefList<'a>,
         context: &T::Context,
         queue: &mut ContextQueue<T>,
@@ -58,7 +61,7 @@ where
         S::Components: QueryWrite<E::Query, M3>,
     {
         Self {
-            query: S::Components::write(E::Query::default()),
+            query: <S::Components as QueryWrite<E::Query, M3>>::write(E::Query::default()),
             system,
             _phantom: std::marker::PhantomData,
         }
@@ -67,14 +70,22 @@ where
     #[inline]
     pub fn execute<'a, 'b>(
         &'a self,
+        index: GenVecIndex<Archetype<L, M1, E>>,
         archetype: &'b Archetype<L, M1, E>,
         context: &EntityComponentContext<L, M1, E>,
         operation_queue: &mut OperationQueue<L, M1, E>,
     ) {
         if self.is_matching(archetype) {
-            archetype.sub_iter::<_, S::Components>().for_each(|entity| {
-                self.system.execute(entity, context, operation_queue);
-            });
+            archetype
+                .sub_iter_entity::<_, S::Components>(index)
+                .for_each(|entity| {
+                    self.system.execute(
+                        entity.index.into(),
+                        entity.components,
+                        context,
+                        operation_queue,
+                    );
+                });
         }
     }
 
@@ -87,6 +98,7 @@ where
 pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
     fn execute<'a>(
         &'a self,
+        index: GenVecIndex<Archetype<T, M, E>>,
         archetype: &Archetype<T, M, E>,
         context: &EntityComponentContext<T, M, E>,
         operation_queue: &mut OperationQueue<T, M, E>,
@@ -96,6 +108,7 @@ pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
 impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemList<T, M, E> for Nil {
     fn execute<'a>(
         &'a self,
+        _index: GenVecIndex<Archetype<T, M, E>>,
         _archetype: &Archetype<T, M, E>,
         _context: &EntityComponentContext<T, M, E>,
         _operation_queue: &mut OperationQueue<T, M, E>,
@@ -116,12 +129,15 @@ where
 {
     fn execute(
         &self,
+        index: GenVecIndex<Archetype<L, M1, E>>,
         archetype: &Archetype<L, M1, E>,
         context: &EntityComponentContext<L, M1, E>,
         operation_queue: &mut OperationQueue<L, M1, E>,
     ) {
-        self.head.execute(archetype, context, operation_queue);
-        self.tail.execute(archetype, context, operation_queue);
+        self.head
+            .execute(index, archetype, context, operation_queue);
+        self.tail
+            .execute(index, archetype, context, operation_queue);
     }
 }
 
@@ -195,50 +211,58 @@ where
     }
 }
 
-pub struct QueryBuilder<T: ComponentList, M: Marker, E: Entity<T, M>> {
-    query: E::Query,
-    _marker: PhantomData<(T, M, E)>,
-}
+// pub struct QueryBuilder<T: ComponentList, M: Marker, E: Entity<T, M>> {
+//     query: E::Query,
+//     _marker: PhantomData<(T, M, E)>,
+// }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> Deref for QueryBuilder<T, M, E> {
-    type Target = E::Query;
+// impl<T: ComponentList, M: Marker, E: Entity<T, M>> Deref for QueryBuilder<T, M, E> {
+//     type Target = E::Query;
 
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.query
-    }
-}
+//     #[inline]
+//     fn deref(&self) -> &Self::Target {
+//         &self.query
+//     }
+// }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> Default for QueryBuilder<T, M, E> {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl<T: ComponentList, M: Marker, E: Entity<T, M>> Default for QueryBuilder<T, M, E> {
+//     #[inline]
+//     fn default() -> Self {
+//         Self::empty()
+//     }
+// }
 
-impl<T: ComponentList, M1: Marker, E: Entity<T, M1>> QueryBuilder<T, M1, E> {
-    #[inline]
-    pub fn new() -> Self {
-        Self {
-            query: E::Query::default(),
-            _marker: PhantomData,
-        }
-    }
+// impl<T: ComponentList, M1: Marker, E: Entity<T, M1>> QueryBuilder<T, M1, E> {
+//     #[inline]
+//     pub fn empty() -> Self {
+//         Self {
+//             query: E::Query::default(),
+//             _marker: PhantomData,
+//         }
+//     }
 
-    #[inline]
-    pub fn build(self) -> E::Query {
-        self.query
-    }
+//     #[inline]
+//     pub fn from_query(query: E::Query) -> Self {
+//         Self {
+//             query,
+//             _marker: PhantomData,
+//         }
+//     }
 
-    #[inline]
-    pub fn with_expected<C: 'static, M2: Marker>(mut self) -> QueryBuilder<T, M1, E>
-    where
-        E::Query: Contains<Expected<C>, M2>,
-    {
-        *self.query.get_mut() = Expected::<C>::new(true);
-        self
-    }
-}
+//     #[inline]
+//     pub fn build(self) -> E::Query {
+//         self.query
+//     }
+
+//     #[inline]
+//     pub fn with_expected<C: 'static, M2: Marker>(mut self) -> QueryBuilder<T, M1, E>
+//     where
+//         E::Query: Contains<Expected<C>, M2>,
+//     {
+//         *self.query.get_mut() = Expected::<C>::new(true);
+//         self
+//     }
+// }
 
 pub trait Query: PartialEq + Eq {
     fn is_subset(self, other: &Self) -> bool;
@@ -263,18 +287,51 @@ impl<C: 'static, N: Query> Query for Cons<Expected<C>, N> {
     }
 }
 
+pub enum ComponentUpdate<C: 'static> {
+    Update(C),
+    Remove,
+    Keep,
+}
+
+impl<C: 'static> Default for ComponentUpdate<C> {
+    #[inline]
+    fn default() -> Self {
+        Self::Keep
+    }
+}
+
+impl<'a, C: 'static> From<&'a ComponentUpdate<C>> for Expected<C> {
+    #[inline]
+    fn from(value: &'a ComponentUpdate<C>) -> Self {
+        match value {
+            ComponentUpdate::Remove => Expected::new(false),
+            _ => Expected::new(true),
+        }
+    }
+}
+
 pub trait Entity<C: ComponentList, M: Marker>:
-    MarkedIndexList<C, M> + Clone + Copy + 'static
+    MarkedIndexList<C, M> + OptionalList + Clone + Copy + 'static
 {
     type Query: Default + Clone + Copy + 'static + Query;
-    type Builder: MarkedItemList<C, M, IndexList = Self> + Default;
+    type Builder: MarkedItemList<C, M, IndexList = Self> + OptionalList + Default;
+    type Update: Default + 'static;
 
     fn is_matching(&self, query: &Self::Query) -> bool;
 
-    #[inline]
-    fn query() -> QueryBuilder<C, M, Self> {
-        QueryBuilder::new()
-    }
+    fn into_builder(value: Self::Owned) -> Self::Builder;
+
+    fn query_from_owned(value: &Self::Owned) -> Self::Query;
+
+    fn query_from_builder(value: &Self::Builder) -> Self::Query;
+
+    fn query_from_update(value: &Self::Update) -> Self::Query;
+
+    fn update_owned(value: &mut Self::Owned, update: Self::Update);
+
+    fn update_builder(value: &mut Self::Builder, update: Self::Update);
+
+    fn update_in_place<'a>(value: Self::Mut<'a>, update: Self::Update);
 }
 
 impl<T: ComponentList, M: Marker> Entity<T, M> for Nil
@@ -283,11 +340,41 @@ where
 {
     type Query = Nil;
     type Builder = Nil;
+    type Update = Nil;
 
     #[inline]
     fn is_matching(&self, _query: &Self::Query) -> bool {
         true
     }
+
+    #[inline]
+    fn into_builder(value: Self::Owned) -> Self::Builder {
+        value
+    }
+
+    #[inline]
+    fn query_from_owned(value: &Self::Owned) -> Self::Query {
+        *value
+    }
+
+    #[inline]
+    fn query_from_builder(value: &Self::Builder) -> Self::Query {
+        *value
+    }
+
+    #[inline]
+    fn query_from_update(value: &Self::Update) -> Self::Query {
+        *value
+    }
+
+    #[inline]
+    fn update_owned(_value: &mut Self::Owned, _update: Self::Update) {}
+
+    #[inline]
+    fn update_builder(_value: &mut Self::Builder, _update: Self::Update) {}
+
+    #[inline]
+    fn update_in_place<'a>(_value: Self::Mut<'a>, _update: Self::Update) {}
 }
 
 impl<C: 'static, T: ComponentList, M1: Marker, M2: Marker, N: Entity<T, M2>> Entity<T, Cons<M1, M2>>
@@ -297,6 +384,7 @@ where
 {
     type Query = Cons<Expected<C>, N::Query>;
     type Builder = Cons<Option<CollectionType<C, GenVec<C>>>, N::Builder>;
+    type Update = Cons<ComponentUpdate<C>, N::Update>;
 
     #[inline]
     fn is_matching(&self, query: &Self::Query) -> bool {
@@ -305,6 +393,61 @@ where
         } else {
             false
         }
+    }
+
+    #[inline]
+    fn into_builder(value: Self::Owned) -> Self::Builder {
+        let Cons { head, tail } = value;
+        Cons::new(
+            head.map(|value| CollectionType::new(value)),
+            N::into_builder(tail),
+        )
+    }
+
+    #[inline]
+    fn query_from_owned(value: &Self::Owned) -> Self::Query {
+        let Cons { head, tail } = value;
+        Cons::new(Expected::new(head.is_some()), N::query_from_owned(tail))
+    }
+
+    #[inline]
+    fn query_from_builder(value: &Self::Builder) -> Self::Query {
+        let Cons { head, tail } = value;
+        Cons::new(Expected::new(head.is_some()), N::query_from_builder(tail))
+    }
+
+    #[inline]
+    fn query_from_update(value: &Self::Update) -> Self::Query {
+        let Cons { head, tail } = value;
+        Cons::new(head.into(), N::query_from_update(tail))
+    }
+
+    #[inline]
+    fn update_owned(value: &mut Self::Owned, update: Self::Update) {
+        match update.head {
+            ComponentUpdate::Update(component) => value.head = Some(component),
+            ComponentUpdate::Remove => value.head = None,
+            ComponentUpdate::Keep => (),
+        }
+        N::update_owned(&mut value.tail, update.tail);
+    }
+
+    #[inline]
+    fn update_builder(value: &mut Self::Builder, update: Self::Update) {
+        match update.head {
+            ComponentUpdate::Update(component) => value.head = Some(CollectionType::new(component)),
+            ComponentUpdate::Remove => value.head = None,
+            ComponentUpdate::Keep => (),
+        }
+        N::update_builder(&mut value.tail, update.tail);
+    }
+
+    #[inline]
+    fn update_in_place<'a>(value: Self::Mut<'a>, update: Self::Update) {
+        if let (ComponentUpdate::Update(component), Some(value)) = (update.head, value.head) {
+            *value = component;
+        }
+        N::update_in_place(value.tail, update.tail);
     }
 }
 
@@ -349,9 +492,8 @@ impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, S: SystemList<T, M1, E>>
 
 #[derive(Debug)]
 pub struct Archetype<T: ComponentList, M: Marker, E: Entity<T, M>> {
-    index: GenVecIndex<Self>,
     query: E::Query,
-    lookup: HashSet<GenVecIndex<E>>,
+    lookup: HashMap<GenVecIndex<E>, GenVecIndex<GenVecIndex<E>>>,
     indices: GenVec<GenVecIndex<E>>,
     entities: GenVec<E>,
     components: T,
@@ -369,18 +511,13 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            index: GenVecIndex::invalid(),
             query: E::Query::default(),
             entities: GenVec::new(),
             indices: GenVec::new(),
-            lookup: HashSet::new(),
+            lookup: HashMap::new(),
             components: T::default(),
             _marker: PhantomData,
         }
-    }
-
-    fn set_index(&mut self, index: GenVecIndex<Self>) {
-        self.index = index;
     }
 
     #[inline]
@@ -395,11 +532,10 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
         let mut entities = GenVec::new();
         let index = entities.push(entity).unwrap();
         let mut indices = GenVec::new();
-        indices.push(index).unwrap();
-        let lookup = HashSet::from([index]);
+        let index_mapping = indices.push(index).unwrap();
+        let lookup = HashMap::from([(index, index_mapping)]);
         Self {
-            index: GenVecIndex::invalid(),
-            query: query_builder.build(),
+            query: query_builder,
             entities,
             components,
             indices,
@@ -414,12 +550,17 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     }
 
     #[inline]
-    pub fn push_entity(&mut self, entity: EntityBuilder<T, M, E>) {
+    pub fn push_entity(
+        &mut self,
+        archetype_index: GenVecIndex<Archetype<T, M, E>>,
+        entity: EntityBuilder<T, M, E>,
+    ) -> EntityIndexTyped<T, M, E> {
         let entity = entity.build();
         let entity = entity.insert(&mut self.components).unwrap();
         let index = self.entities.push(entity).unwrap();
-        self.indices.push(index).unwrap();
-        self.lookup.insert(index);
+        let mapping = self.indices.push(index).unwrap();
+        self.lookup.insert(index, mapping);
+        EntityIndexTyped::new(archetype_index, index)
     }
 
     #[inline]
@@ -434,19 +575,45 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     #[inline]
     pub fn sub_iter_entity<'a, M2: Marker, N: IntoSubsetIterator<T, M2> + 'a>(
         &'a self,
+        index: GenVecIndex<Self>,
     ) -> impl Iterator<Item = EntityRef<'a, T, M, M2, E, N>> {
         // Entity components and its corresponding entity index are pushed/removed into the collections
         // in the same order, this should result in them being stored at the same index in GenVec internal storage
         // thus is safe to assume that zip will yield the correct pairs
         self.sub_iter::<_, N>()
             .zip((&self.indices).into_iter())
-            .map(|(components, &entity)| EntityRef::new(self, entity, components))
+            .map(move |(components, &entity)| EntityRef::new(index, entity, components))
+    }
+
+    pub fn try_pop_entity<'a>(&'a mut self, index: EntityIndexTyped<T, M, E>) -> Option<E::Owned> {
+        if self.lookup.contains_key(&index.entity) {
+            let entity = self.entities.pop(index.entity).ok()?;
+            let components = entity.get_owned(&mut self.components).ok()?;
+            self.indices.pop(self.lookup[&index.entity]).ok()?;
+            self.lookup.remove(&index.entity);
+            Some(components)
+        } else {
+            None
+        }
     }
 
     pub fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<T, M, E>) -> Option<E::Ref<'a>> {
-        if self.index == index.archetype && self.lookup.contains(&index.entity) {
+        if self.lookup.contains_key(&index.entity) {
             let entity = self.entities.get(index.entity).ok()?;
             let components = entity.get_ref(&self.components).ok()?;
+            Some(components)
+        } else {
+            None
+        }
+    }
+
+    pub fn try_get_entity_mut<'a>(
+        &'a mut self,
+        index: EntityIndexTyped<T, M, E>,
+    ) -> Option<E::Mut<'a>> {
+        if self.lookup.contains_key(&index.entity) {
+            let entity = self.entities.get(index.entity).ok()?;
+            let components = unsafe { entity.get_mut(&mut self.components).ok()? };
             Some(components)
         } else {
             None
@@ -455,7 +622,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
 }
 
 pub struct EntityBuilder<T: ComponentList, M: Marker, E: Entity<T, M>> {
-    query_builder: QueryBuilder<T, M, E>,
+    query_builder: E::Query,
     entity_builder: E::Builder,
 }
 
@@ -471,8 +638,16 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            query_builder: QueryBuilder::default(),
+            query_builder: E::Query::default(),
             entity_builder: E::Builder::default(),
+        }
+    }
+
+    #[inline]
+    pub fn from_owned(entity: E::Owned) -> Self {
+        Self {
+            query_builder: E::query_from_owned(&entity),
+            entity_builder: E::into_builder(entity),
         }
     }
 
@@ -486,14 +661,18 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
             mut entity_builder,
             mut query_builder,
         } = self;
-        let _ = entity_builder
-            .get_mut()
-            .insert(CollectionType::new(component));
-        query_builder = query_builder.with_expected();
+        *entity_builder.get_mut() = Some(CollectionType::new(component));
+        *query_builder.get_mut() = Expected::new(true);
         Self {
             query_builder,
             entity_builder,
         }
+    }
+
+    #[inline]
+    pub fn update_components(&mut self, components: E::Update) {
+        E::update_builder(&mut self.entity_builder, components);
+        self.query_builder = E::query_from_builder(&self.entity_builder);
     }
 
     #[inline]
@@ -502,8 +681,49 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
     }
 }
 
+pub struct EntityUpdate<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    index: EntityIndexTyped<C, M, E>,
+    components: E::Update,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityUpdate<C, M, E> {
+    #[inline]
+    pub fn new(index: EntityIndexTyped<C, M, E>) -> Self {
+        Self {
+            index,
+            components: E::Update::default(),
+        }
+    }
+
+    #[inline]
+    pub fn update<C2: 'static, M2: Marker>(mut self, component: C2) -> Self
+    where
+        E::Update: Contains<ComponentUpdate<C2>, M2>,
+    {
+        *self.components.get_mut() = ComponentUpdate::Update(component);
+        self
+    }
+
+    #[inline]
+    pub fn remove<C2: 'static, M2: Marker>(mut self) -> Self
+    where
+        E::Update: Contains<ComponentUpdate<C2>, M2>,
+    {
+        *self.components.get_mut() = ComponentUpdate::Remove;
+        self
+    }
+}
+
+pub enum UpdateResult<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    ArchetypeChanged(EntityBuilder<C, M, E>),
+    NotFound(EntityUpdate<C, M, E>),
+    InPlace,
+}
+
 pub enum Operation<C: ComponentList, M: Marker, E: Entity<C, M>> {
     Push(EntityBuilder<C, M, E>),
+    Pop(EntityIndexTyped<C, M, E>),
+    Update(EntityUpdate<C, M, E>),
 }
 
 pub struct OperationQueue<C: ComponentList, M: Marker, E: Entity<C, M>> {
@@ -527,21 +747,56 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
 
     #[inline]
     pub fn process(self, world: &mut EntityComponentContext<C, M, E>) {
+        let mut updated = HashMap::new();
+        let mut removed = HashSet::new();
         self.operations
             .into_iter()
             .for_each(|operation| match operation {
                 Operation::Push(entity) => world.push_entity(entity),
-            });
-    }
 
-    #[inline]
-    pub fn get_entity_builder(&self) -> EntityBuilder<C, M, E> {
-        EntityBuilder::new()
+                Operation::Pop(index) => {
+                    if world.pop_entity(index).is_some() {
+                        removed.insert(index);
+                    } else if updated.contains_key(&index) {
+                        updated.remove(&index);
+                        removed.insert(index);
+                    }
+                }
+                Operation::Update(update) => {
+                    let index = update.index;
+                    if !removed.contains(&index) {
+                        match world.update_entity(update) {
+                            UpdateResult::ArchetypeChanged(builder) => {
+                                updated.insert(index, builder);
+                            }
+                            UpdateResult::NotFound(update) => {
+                                if let Some(builder) = updated.get_mut(&index) {
+                                    builder.update_components(update.components);
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+            });
+        updated.into_iter().for_each(|(_, builder)| {
+            world.push_entity(builder);
+        });
     }
 
     #[inline]
     pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
         self.operations.push(Operation::Push(entity));
+    }
+
+    #[inline]
+    pub fn pop_entity(&mut self, entity: EntityIndexTyped<C, M, E>) {
+        self.operations.push(Operation::Pop(entity));
+    }
+
+    #[inline]
+    pub fn update_entity(&mut self, entity: EntityUpdate<C, M, E>) {
+        self.operations.push(Operation::Update(entity));
     }
 }
 
@@ -577,6 +832,21 @@ pub struct EntityIndexTyped<C: ComponentList, M: Marker, E: Entity<C, M>> {
     entity: GenVecIndex<E>,
 }
 
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Hash for EntityIndexTyped<C, M, E> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.archetype.hash(state);
+        self.entity.hash(state);
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> PartialEq for EntityIndexTyped<C, M, E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.archetype == other.archetype && self.entity == other.entity
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Eq for EntityIndexTyped<C, M, E> {}
+
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> Clone for EntityIndexTyped<C, M, E> {
     fn clone(&self) -> Self {
         *self
@@ -596,11 +866,8 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> Debug for EntityIndexTyped<C,
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityIndexTyped<C, M, E> {
-    pub fn new(archetype: &Archetype<C, M, E>, entity: GenVecIndex<E>) -> Self {
-        Self {
-            archetype: archetype.index,
-            entity,
-        }
+    pub fn new(archetype: GenVecIndex<Archetype<C, M, E>>, entity: GenVecIndex<E>) -> Self {
+        Self { archetype, entity }
     }
 }
 
@@ -652,7 +919,7 @@ impl<
     > EntityRef<'a, C, M1, M2, E, N>
 {
     pub fn new(
-        archetype: &Archetype<C, M1, E>,
+        archetype: GenVecIndex<Archetype<C, M1, E>>,
         entity: GenVecIndex<E>,
         components: N::RefList<'a>,
     ) -> Self {
@@ -666,7 +933,8 @@ impl<
 
 pub struct EntityComponentContext<C: ComponentList, M: Marker, E: Entity<C, M>> {
     archetypes: GenVec<Archetype<C, M, E>>,
-    lookup: HashSet<GenVecIndex<Archetype<C, M, E>>>,
+    indices: GenVec<GenVecIndex<Archetype<C, M, E>>>,
+    lookup: HashMap<GenVecIndex<Archetype<C, M, E>>, GenVecIndex<GenVecIndex<Archetype<C, M, E>>>>,
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for EntityComponentContext<C, M, E> {
@@ -681,49 +949,101 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
     pub fn new() -> Self {
         Self {
             archetypes: GenVec::new(),
-            lookup: HashSet::new(),
+            indices: GenVec::new(),
+            lookup: HashMap::new(),
         }
     }
 
     pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
         let archetype = self
             .iter_mut()
-            .find(|archetype| archetype.is_matching(&entity));
+            .find(|(archetype, _)| archetype.is_matching(&entity));
         match archetype {
-            Some(archetype) => archetype.push_entity(entity),
+            Some((archetype, index)) => {
+                let _ = archetype.push_entity(*index, entity);
+            }
             None => {
                 let archetype = self
                     .archetypes
                     .push(Archetype::from_entity(entity))
                     .unwrap();
-                self.archetypes[archetype].set_index(archetype);
-                self.lookup.insert(archetype);
+                let index_mapping = self.indices.push(archetype).unwrap();
+                self.lookup.insert(archetype, index_mapping);
             }
         }
     }
 
-    pub fn iter_ref<'a>(&'a self) -> impl Iterator<Item = &'a Archetype<C, M, E>> {
-        (&self.archetypes).into_iter()
+    pub fn pop_entity(&mut self, index: EntityIndexTyped<C, M, E>) -> Option<E::Owned> {
+        self.lookup
+            .contains_key(&index.archetype)
+            .then_some(self.archetypes[index.archetype].try_pop_entity(index))
+            .flatten()
     }
 
-    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &'a mut Archetype<C, M, E>> {
-        (&mut self.archetypes).into_iter()
+    pub fn update_entity(&mut self, update: EntityUpdate<C, M, E>) -> UpdateResult<C, M, E> {
+        if self.lookup.contains_key(&update.index.archetype) {
+            let archetype = &mut self.archetypes[update.index.archetype];
+            if archetype.is_matching(&E::query_from_update(&update.components)) {
+                if let Some(entity) = archetype.try_get_entity_mut(update.index) {
+                    E::update_in_place(entity, update.components);
+                    return UpdateResult::InPlace;
+                }
+            } else {
+                if let Some(mut entity) = archetype.try_pop_entity(update.index) {
+                    E::update_owned(&mut entity, update.components);
+                    return UpdateResult::ArchetypeChanged(EntityBuilder::from_owned(entity));
+                }
+            }
+        }
+        UpdateResult::NotFound(update)
     }
 
-    fn query<'a, M2: Marker, N: IntoSubsetIterator<C, M2> + QueryWrite<E::Query, M2> + 'a>(
+    pub fn iter_ref<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (&'a Archetype<C, M, E>, &'a GenVecIndex<Archetype<C, M, E>>)> {
+        (&self.archetypes)
+            .into_iter()
+            .zip((&self.indices).into_iter())
+    }
+
+    fn iter_mut<'a>(
+        &'a mut self,
+    ) -> impl Iterator<
+        Item = (
+            &'a mut Archetype<C, M, E>,
+            &'a GenVecIndex<Archetype<C, M, E>>,
+        ),
+    > {
+        (&mut self.archetypes)
+            .into_iter()
+            .zip((&self.indices).into_iter())
+    }
+
+    pub fn query<'a, M2: Marker, N: IntoSubsetIterator<C, M2> + QueryWrite<E::Query, M2> + 'a>(
         &'a self,
     ) -> impl Iterator<Item = EntityRef<'a, C, M, M2, E, N>> {
         let query = N::write(E::Query::default());
         self.iter_ref()
-            .filter(move |archetype| query.is_subset(&archetype.query))
-            .flat_map(|archetype| archetype.sub_iter_entity())
+            .filter(move |(archetype, ..)| query.is_subset(&archetype.query))
+            .flat_map(|(archetype, &index)| archetype.sub_iter_entity(index))
     }
 
-    fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<C, M, E>) -> Option<E::Ref<'a>> {
+    pub fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<C, M, E>) -> Option<E::Ref<'a>> {
         self.lookup
-            .contains(&index.archetype)
+            .contains_key(&index.archetype)
             .then_some(self.archetypes[index.archetype].try_get_entity(index))
             .flatten()
+    }
+
+    pub fn get_entity_builder(&self) -> EntityBuilder<C, M, E> {
+        EntityBuilder::new()
+    }
+
+    pub fn get_entity_update_builder(
+        &self,
+        index: EntityIndexTyped<C, M, E>,
+    ) -> EntityUpdate<C, M, E> {
+        EntityUpdate::new(index)
     }
 }
 
@@ -784,9 +1104,9 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
     #[inline]
     pub fn execute_systems(&mut self) {
         let mut operation_queue = OperationQueue::new();
-        self.storage.iter_ref().for_each(|archetype| {
+        self.storage.iter_ref().for_each(|(archetype, &index)| {
             self.systems
-                .execute(archetype, &self.storage, &mut operation_queue);
+                .execute(index, archetype, &self.storage, &mut operation_queue);
         });
         operation_queue.process(&mut self.storage);
     }
@@ -799,8 +1119,7 @@ mod test_ecs {
     use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList};
 
     use crate::ecs::{
-        ContextQueue, Entity, EntityComponentConfiguration, EntityComponentContext, EntityIndex,
-        System,
+        ContextQueue, EntityComponentConfiguration, EntityComponentContext, EntityIndex, System,
     };
 
     type EscContextType = ecs_context_type![String, u32, u16, Option<EntityIndex>, Nil];
@@ -822,6 +1141,7 @@ mod test_ecs {
 
         fn execute<'a>(
             &self,
+            _entity: EntityIndex,
             unpack_list![borrowed_value]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
             queue: &mut ContextQueue<EscContextType>,
@@ -832,7 +1152,7 @@ mod test_ecs {
                 borrowed_value
             );
             queue.push_entity(
-                queue
+                context
                     .get_entity_builder()
                     .with_component("GeneratedComponent".to_string()),
             );
@@ -856,6 +1176,7 @@ mod test_ecs {
 
         fn execute<'a>(
             &self,
+            _entity: EntityIndex,
             unpack_list![borrowed_first, borrowed_second]: <Self::Components as TypeList>::RefList<
                 'a,
             >,
@@ -879,6 +1200,7 @@ mod test_ecs {
 
         fn execute<'a>(
             &self,
+            entity: EntityIndex,
             unpack_list![_borrow_u16]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
             queue: &mut ContextQueue<EscContextType>,
@@ -891,8 +1213,14 @@ mod test_ecs {
                         "Executing TestEntityQuery with entity components: {:?}",
                         entity_ref.components
                     );
-                    queue.push_entity(queue.get_entity_builder().with_component(Some(index)));
+                    queue.push_entity(context.get_entity_builder().with_component(Some(index)));
                 });
+            queue.update_entity(
+                context
+                    .get_entity_update_builder(entity.in_context::<EscContextType>())
+                    .update("UpdatedQueryEntity".to_string())
+                    .remove::<u16, _>(),
+            );
         }
     }
 
@@ -903,9 +1231,10 @@ mod test_ecs {
 
         fn execute<'a>(
             &self,
+            entity: EntityIndex,
             unpack_list![entity_index]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            _queue: &mut ContextQueue<EscContextType>,
+            queue: &mut ContextQueue<EscContextType>,
         ) {
             if let Some(index) = entity_index {
                 if let Some(components) =
@@ -920,6 +1249,7 @@ mod test_ecs {
                         );
                     }
                 }
+                queue.pop_entity(entity.in_context::<EscContextType>());
             }
         }
     }
