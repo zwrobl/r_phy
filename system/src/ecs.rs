@@ -1,13 +1,14 @@
 use std::{marker::PhantomData, ops::Deref};
 
 use type_kit::{
-    CollectionType, Cons, Contains, GenIndex, GenVec, MarkedBorrowList, MarkedIndexList,
-    MarkedItemList, Marker, Nil, Subset, TypeList,
+    CollectionType, Cons, Contains, GenIndex, GenVec, IntoCollectionIterator, IntoSubsetIterator,
+    ListIter, MarkedIndexList, MarkedItemList, Marker, Nil, TypeList,
 };
 
 pub trait System<T: EntityComponentConfiguration>: 'static {
     type Query: TypeList;
     type Components: TypeList;
+    // type ComponentsRef<'a>;
 
     fn execute<'a>(
         &self,
@@ -16,7 +17,7 @@ pub trait System<T: EntityComponentConfiguration>: 'static {
     );
 }
 
-pub trait ComponentList: TypeList + Default + 'static {}
+pub trait ComponentList: IntoCollectionIterator {}
 
 impl ComponentList for Nil {}
 
@@ -26,32 +27,31 @@ pub struct SystemExecutor<
     L: ComponentList,
     M1: Marker,
     M2: Marker,
-    M3: Marker,
     E: Entity<L, M1>,
-    C: Subset<E::Borrowed, M2>,
-    S: System<EntityComponentContext<L, M1, E>, Components = C>,
+    S: System<EntityComponentContext<L, M1, E>>,
 > where
-    S::Query: QueryWrite<E::Query, M3>,
+    S::Components: IntoSubsetIterator<L, M2>,
 {
     query: E::Query,
     system: S,
-    _phantom: std::marker::PhantomData<(L, M1, M2, M3, C)>,
+    _phantom: std::marker::PhantomData<(L, M1, M2)>,
 }
 
 impl<
         L: ComponentList,
         M1: Marker,
         M2: Marker,
-        M3: Marker,
         E: Entity<L, M1>,
-        C: Subset<E::Borrowed, M2>,
-        S: System<EntityComponentContext<L, M1, E>, Components = C>,
-    > SystemExecutor<L, M1, M2, M3, E, C, S>
+        S: System<EntityComponentContext<L, M1, E>>,
+    > SystemExecutor<L, M1, M2, E, S>
 where
-    S::Query: QueryWrite<E::Query, M3>,
+    S::Components: IntoSubsetIterator<L, M2>,
 {
     #[inline]
-    pub fn new(system: S) -> Self {
+    pub fn new<M3: Marker>(system: S) -> Self
+    where
+        S::Query: QueryWrite<E::Query, M3>,
+    {
         Self {
             query: S::Query::write(E::Query::default()),
             system,
@@ -60,34 +60,39 @@ where
     }
 
     #[inline]
-    pub fn execute<'a>(
-        &self,
-        archetype: &mut Archetype<L, M1, E>,
+    pub fn execute<'a, 'b>(
+        &'a self,
+        archetype: &'b Archetype<L, M1, E>,
         operation_queue: &mut OperationQueue<L, M1, E>,
     ) {
-        if self.query.is_subset(&archetype.query) {
-            archetype.execute_system(&self.system, operation_queue);
+        if self.is_matching(archetype) {
+            ListIter::iter_sub::<_, _, S::Components>(&archetype.components)
+                .all()
+                .for_each(|entity| {
+                    self.system
+                        .execute(S::Components::unwrap_ref(entity), operation_queue);
+                });
         }
     }
 
     #[inline]
-    pub fn is_matching(&self, archetype: &E::Query) -> bool {
-        self.query.is_subset(archetype)
+    pub fn is_matching(&self, archetype: &Archetype<L, M1, E>) -> bool {
+        self.query.is_subset(&archetype.query)
     }
 }
 
 pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
     fn execute<'a>(
-        &'a mut self,
-        archetype: &mut Archetype<T, M, E>,
+        &'a self,
+        archetype: &Archetype<T, M, E>,
         operation_queue: &mut OperationQueue<T, M, E>,
     );
 }
 
 impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemList<T, M, E> for Nil {
     fn execute<'a>(
-        &'a mut self,
-        _archetype: &mut Archetype<T, M, E>,
+        &'a self,
+        _archetype: &Archetype<T, M, E>,
         _operation_queue: &mut OperationQueue<T, M, E>,
     ) {
     }
@@ -97,18 +102,16 @@ impl<
         L: ComponentList,
         M1: Marker,
         M2: Marker,
-        M3: Marker,
         E: Entity<L, M1>,
-        C: Subset<E::Borrowed, M2>,
-        S: System<EntityComponentContext<L, M1, E>, Components = C>,
+        S: System<EntityComponentContext<L, M1, E>>,
         N: SystemList<L, M1, E>,
-    > SystemList<L, M1, E> for Cons<SystemExecutor<L, M1, M2, M3, E, C, S>, N>
+    > SystemList<L, M1, E> for Cons<SystemExecutor<L, M1, M2, E, S>, N>
 where
-    S::Query: QueryWrite<E::Query, M3>,
+    S::Components: IntoSubsetIterator<L, M2>,
 {
-    fn execute<'a>(
-        &'a mut self,
-        archetype: &mut Archetype<L, M1, E>,
+    fn execute(
+        &self,
+        archetype: &Archetype<L, M1, E>,
         operation_queue: &mut OperationQueue<L, M1, E>,
     ) {
         self.head.execute(archetype, operation_queue);
@@ -313,20 +316,16 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemListBuilder<T, M, E, Ni
     }
 }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>>
-    SystemListBuilder<T, M, E, S>
+impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, S: SystemList<T, M1, E>>
+    SystemListBuilder<T, M1, E, S>
 {
-    pub fn with_system<
-        M2: Marker,
-        M3: Marker,
-        C: Subset<E::Borrowed, M2>,
-        N: System<EntityComponentContext<T, M, E>, Components = C>,
-    >(
+    pub fn with_system<M2: Marker, M3: Marker, N: System<EntityComponentContext<T, M1, E>>>(
         self,
         system: N,
-    ) -> SystemListBuilder<T, M, E, Cons<SystemExecutor<T, M, M2, M3, E, C, N>, S>>
+    ) -> SystemListBuilder<T, M1, E, Cons<SystemExecutor<T, M1, M2, E, N>, S>>
     where
         N::Query: QueryWrite<E::Query, M3>,
+        N::Components: IntoSubsetIterator<T, M2>,
     {
         SystemListBuilder {
             systems: Cons::new(SystemExecutor::new(system), self.systems),
@@ -334,7 +333,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>>
         }
     }
 
-    pub fn build(self) -> EntityComponentSystem<T, M, E, S> {
+    pub fn build(self) -> EntityComponentSystem<T, M1, E, S> {
         EntityComponentSystem {
             storage: EntityComponentContext::default(),
             systems: self.systems,
@@ -398,22 +397,6 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
         let entity = entity.build();
         let entity = entity.insert(&mut self.components).unwrap();
         self.entities.push(entity);
-    }
-
-    pub fn execute_system<
-        M2: Marker,
-        C: Subset<E::Borrowed, M2>,
-        S: System<EntityComponentContext<T, M, E>, Components = C>,
-    >(
-        &mut self,
-        system: &S,
-        operation_queue: &mut OperationQueue<T, M, E>,
-    ) {
-        self.entities.iter().for_each(|&entity| {
-            let components = entity.get_borrowed(&mut self.components).unwrap();
-            system.execute(C::sub_get(&components), operation_queue);
-            components.put_back(&mut self.components).unwrap();
-        });
     }
 }
 
@@ -626,7 +609,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
     #[inline]
     pub fn execute_systems(&mut self) {
         let mut operation_queue = OperationQueue::new();
-        self.storage.archetypes.iter_mut().for_each(|archetype| {
+        self.storage.archetypes.iter().for_each(|archetype| {
             self.systems.execute(archetype, &mut operation_queue);
         });
         operation_queue.process(&mut self.storage);
@@ -659,7 +642,7 @@ mod test_ecs {
 
     impl<T: 'static + Debug> System<EscContextType> for TestSystem<T> {
         type Query = list_type![T, Nil];
-        type Components = list_type![Option<Borrowed<T, GenVec<T>>>, Nil];
+        type Components = list_type![T, Nil];
 
         fn execute<'a>(
             &self,
@@ -693,11 +676,7 @@ mod test_ecs {
 
     impl<T: 'static + Debug, N: 'static + Debug> System<EscContextType> for TestSystemMulti<T, N> {
         type Query = list_type![T, N, Nil];
-        type Components = list_type![
-            Option<Borrowed<T, GenVec<T>>>,
-            Option<Borrowed<N, GenVec<N>>>,
-            Nil
-        ];
+        type Components = list_type![T, N, Nil];
 
         fn execute<'a>(
             &self,
