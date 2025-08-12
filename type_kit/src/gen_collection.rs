@@ -597,6 +597,9 @@ pub struct GenIndex<T, C> {
     _phantom: PhantomData<(T, C)>,
 }
 
+pub type GenVecIndex<T> = GenIndex<T, GenVec<T>>;
+pub type GenCellIndex<T> = GenIndex<T, GenCell<T>>;
+
 impl<T, C> GenIndex<T, C> {
     #[inline]
     pub fn invalid() -> Self {
