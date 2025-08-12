@@ -211,59 +211,6 @@ where
     }
 }
 
-// pub struct QueryBuilder<T: ComponentList, M: Marker, E: Entity<T, M>> {
-//     query: E::Query,
-//     _marker: PhantomData<(T, M, E)>,
-// }
-
-// impl<T: ComponentList, M: Marker, E: Entity<T, M>> Deref for QueryBuilder<T, M, E> {
-//     type Target = E::Query;
-
-//     #[inline]
-//     fn deref(&self) -> &Self::Target {
-//         &self.query
-//     }
-// }
-
-// impl<T: ComponentList, M: Marker, E: Entity<T, M>> Default for QueryBuilder<T, M, E> {
-//     #[inline]
-//     fn default() -> Self {
-//         Self::empty()
-//     }
-// }
-
-// impl<T: ComponentList, M1: Marker, E: Entity<T, M1>> QueryBuilder<T, M1, E> {
-//     #[inline]
-//     pub fn empty() -> Self {
-//         Self {
-//             query: E::Query::default(),
-//             _marker: PhantomData,
-//         }
-//     }
-
-//     #[inline]
-//     pub fn from_query(query: E::Query) -> Self {
-//         Self {
-//             query,
-//             _marker: PhantomData,
-//         }
-//     }
-
-//     #[inline]
-//     pub fn build(self) -> E::Query {
-//         self.query
-//     }
-
-//     #[inline]
-//     pub fn with_expected<C: 'static, M2: Marker>(mut self) -> QueryBuilder<T, M1, E>
-//     where
-//         E::Query: Contains<Expected<C>, M2>,
-//     {
-//         *self.query.get_mut() = Expected::<C>::new(true);
-//         self
-//     }
-// }
-
 pub trait Query: PartialEq + Eq {
     fn is_subset(self, other: &Self) -> bool;
 }
