@@ -521,26 +521,16 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     }
 
     #[inline]
-    pub fn from_entity(entity: EntityBuilder<T, M, E>) -> Self {
-        let EntityBuilder {
-            query_builder,
-            entity_builder,
-            ..
-        } = entity;
-        let mut components = T::default();
-        let entity = entity_builder.insert(&mut components).unwrap();
-        let mut entities = GenVec::new();
-        let index = entities.push(entity).unwrap();
-        let mut indices = GenVec::new();
-        let index_mapping = indices.push(index).unwrap();
-        let lookup = HashMap::from([(index, index_mapping)]);
-        Self {
-            query: query_builder,
-            entities,
-            components,
-            indices,
-            lookup,
-            _marker: PhantomData,
+    pub fn try_set_archetype(
+        &mut self,
+        index: GenVecIndex<Self>,
+        entity: EntityBuilder<T, M, E>,
+    ) -> Option<EntityIndexTyped<T, M, E>> {
+        if self.entities.is_empty() {
+            self.query = entity.query_builder;
+            Some(self.push_entity(index, entity))
+        } else {
+            None
         }
     }
 
@@ -715,7 +705,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityUpdate<C, M, E> {
 }
 
 pub enum UpdateResult<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    ArchetypeChanged(EntityBuilder<C, M, E>),
+    ArchetypeChanged((EntityBuilder<C, M, E>, PersistentIndexTyped<C, M, E>)),
     NotFound(EntityUpdate<C, M, E>),
     InPlace,
 }
@@ -752,7 +742,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
         self.operations
             .into_iter()
             .for_each(|operation| match operation {
-                Operation::Push(entity) => world.push_entity(entity),
+                Operation::Push(entity) => world.push_entity(entity, None),
 
                 Operation::Pop(index) => {
                     if world.pop_entity(index).is_some() {
@@ -770,7 +760,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
                                 updated.insert(index, builder);
                             }
                             UpdateResult::NotFound(update) => {
-                                if let Some(builder) = updated.get_mut(&index) {
+                                if let Some((builder, ..)) = updated.get_mut(&index) {
                                     builder.update_components(update.components);
                                 }
                             }
@@ -779,9 +769,11 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
                     }
                 }
             });
-        updated.into_iter().for_each(|(_, builder)| {
-            world.push_entity(builder);
-        });
+        updated
+            .into_iter()
+            .for_each(|(_, (builder, persistent_index))| {
+                world.push_entity(builder, Some(persistent_index));
+            });
     }
 
     #[inline]
@@ -931,10 +923,133 @@ impl<
     }
 }
 
+pub struct PersistentIndexTyped<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    index: GenVecIndex<EntityIndexTyped<C, M, E>>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Hash for PersistentIndexTyped<C, M, E> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> PartialEq for PersistentIndexTyped<C, M, E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Eq for PersistentIndexTyped<C, M, E> {}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Clone for PersistentIndexTyped<C, M, E> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Copy for PersistentIndexTyped<C, M, E> {}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Debug for PersistentIndexTyped<C, M, E> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PersistentEntityIndexTyped")
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PersistentIndex {
+    index: TypeGuard<GenIndexRaw>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> From<PersistentIndexTyped<C, M, E>>
+    for PersistentIndex
+{
+    #[inline]
+    fn from(index: PersistentIndexTyped<C, M, E>) -> Self {
+        Self {
+            index: index.index.into_guard(),
+        }
+    }
+}
+
+impl PersistentIndex {
+    #[inline]
+    pub fn in_context<C: EntityComponentConfiguration>(
+        &self,
+    ) -> PersistentIndexTyped<C::Components, C::Marker, C::Entity> {
+        let index = GenVecIndex::try_from_guard(self.index).unwrap();
+        PersistentIndexTyped { index }
+    }
+}
+
+pub struct PersistentIndexMap<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    lookup: HashMap<EntityIndexTyped<C, M, E>, GenVecIndex<EntityIndexTyped<C, M, E>>>,
+    entities: GenVec<EntityIndexTyped<C, M, E>>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> PersistentIndexMap<C, M, E> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            lookup: HashMap::new(),
+            entities: GenVec::new(),
+        }
+    }
+
+    #[inline]
+    pub fn register(&mut self, entity: EntityIndexTyped<C, M, E>) {
+        if !self.lookup.contains_key(&entity) {
+            let index_mapping = self.entities.push(entity).unwrap();
+            self.lookup.insert(entity, index_mapping);
+        }
+    }
+
+    #[inline]
+    pub fn unregister(&mut self, entity: EntityIndexTyped<C, M, E>) {
+        if let Some(index_mapping) = self.lookup.remove(&entity) {
+            self.entities.pop(index_mapping).unwrap();
+        }
+    }
+
+    #[inline]
+    pub fn update(
+        &mut self,
+        index: PersistentIndexTyped<C, M, E>,
+        entity: EntityIndexTyped<C, M, E>,
+    ) {
+        let PersistentIndexTyped { index } = index;
+        if let Ok(registered) = self.entities.get(index) {
+            if *registered != entity {
+                self.entities[index] = entity;
+                self.lookup.remove(&entity);
+                self.lookup.insert(entity, index);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn get_index(&self, entity: EntityIndexTyped<C, M, E>) -> PersistentIndexTyped<C, M, E> {
+        let index = *self.lookup.get(&entity).unwrap();
+        PersistentIndexTyped { index }
+    }
+
+    #[inline]
+    pub fn try_get_entity(
+        &self,
+        index: PersistentIndexTyped<C, M, E>,
+    ) -> Option<EntityIndexTyped<C, M, E>> {
+        let PersistentIndexTyped { index } = index;
+        self.entities.get(index).ok().copied()
+    }
+}
+
 pub struct EntityComponentContext<C: ComponentList, M: Marker, E: Entity<C, M>> {
     archetypes: GenVec<Archetype<C, M, E>>,
     indices: GenVec<GenVecIndex<Archetype<C, M, E>>>,
     lookup: HashMap<GenVecIndex<Archetype<C, M, E>>, GenVecIndex<GenVecIndex<Archetype<C, M, E>>>>,
+    persistent_map: PersistentIndexMap<C, M, E>,
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for EntityComponentContext<C, M, E> {
@@ -951,33 +1066,46 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
             archetypes: GenVec::new(),
             indices: GenVec::new(),
             lookup: HashMap::new(),
+            persistent_map: PersistentIndexMap::new(),
         }
     }
 
-    pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
+    pub fn push_entity(
+        &mut self,
+        entity: EntityBuilder<C, M, E>,
+        persistent_index: Option<PersistentIndexTyped<C, M, E>>,
+    ) {
         let archetype = self
             .iter_mut()
             .find(|(archetype, _)| archetype.is_matching(&entity));
-        match archetype {
-            Some((archetype, index)) => {
-                let _ = archetype.push_entity(*index, entity);
-            }
+        let entity = match archetype {
+            Some((archetype, index)) => archetype.push_entity(*index, entity),
             None => {
-                let archetype = self
-                    .archetypes
-                    .push(Archetype::from_entity(entity))
-                    .unwrap();
+                let archetype = self.archetypes.push(Archetype::new()).unwrap();
                 let index_mapping = self.indices.push(archetype).unwrap();
                 self.lookup.insert(archetype, index_mapping);
+                self.archetypes[archetype]
+                    .try_set_archetype(archetype, entity)
+                    .unwrap()
             }
+        };
+        if let Some(persistent_index) = persistent_index {
+            self.persistent_map.update(persistent_index, entity);
+        } else {
+            self.persistent_map.register(entity);
         }
     }
 
     pub fn pop_entity(&mut self, index: EntityIndexTyped<C, M, E>) -> Option<E::Owned> {
-        self.lookup
+        let removed = self
+            .lookup
             .contains_key(&index.archetype)
             .then_some(self.archetypes[index.archetype].try_pop_entity(index))
-            .flatten()
+            .flatten();
+        if removed.is_some() {
+            self.persistent_map.unregister(index);
+        }
+        removed
     }
 
     pub fn update_entity(&mut self, update: EntityUpdate<C, M, E>) -> UpdateResult<C, M, E> {
@@ -991,7 +1119,9 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
             } else {
                 if let Some(mut entity) = archetype.try_pop_entity(update.index) {
                     E::update_owned(&mut entity, update.components);
-                    return UpdateResult::ArchetypeChanged(EntityBuilder::from_owned(entity));
+                    let builder = EntityBuilder::from_owned(entity);
+                    let persistent_index = self.persistent_map.get_index(update.index);
+                    return UpdateResult::ArchetypeChanged((builder, persistent_index));
                 }
             }
         }
@@ -1033,6 +1163,20 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
             .contains_key(&index.archetype)
             .then_some(self.archetypes[index.archetype].try_get_entity(index))
             .flatten()
+    }
+
+    pub fn get_persistent_index(
+        &self,
+        entity: EntityIndexTyped<C, M, E>,
+    ) -> PersistentIndexTyped<C, M, E> {
+        self.persistent_map.get_index(entity)
+    }
+
+    pub fn try_map_persistent(
+        &self,
+        index: PersistentIndexTyped<C, M, E>,
+    ) -> Option<EntityIndexTyped<C, M, E>> {
+        self.persistent_map.try_get_entity(index)
     }
 
     pub fn get_entity_builder(&self) -> EntityBuilder<C, M, E> {
@@ -1098,7 +1242,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
     }
 
     pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
-        self.storage.push_entity(entity);
+        self.storage.push_entity(entity, None);
     }
 
     #[inline]
@@ -1119,10 +1263,18 @@ mod test_ecs {
     use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList};
 
     use crate::ecs::{
-        ContextQueue, EntityComponentConfiguration, EntityComponentContext, EntityIndex, System,
+        ContextQueue, EntityComponentConfiguration, EntityComponentContext, EntityIndex,
+        PersistentIndex, System,
     };
 
-    type EscContextType = ecs_context_type![String, u32, u16, Option<EntityIndex>, Nil];
+    type EscContextType = ecs_context_type![
+        String,
+        u32,
+        u16,
+        Option<EntityIndex>,
+        Option<PersistentIndex>,
+        Nil
+    ];
 
     struct TestSystem<T: 'static + Debug> {
         _marker: PhantomData<T>,
@@ -1254,6 +1406,48 @@ mod test_ecs {
         }
     }
 
+    pub struct TestEntityPersistentIndex;
+
+    impl System<EscContextType> for TestEntityPersistentIndex {
+        type Components = list_type![Option<PersistentIndex>, Nil];
+
+        fn execute<'a>(
+            &self,
+            entity: EntityIndex,
+            unpack_list![persistent_index]: <Self::Components as TypeList>::RefList<'a>,
+            context: &EscContextType,
+            queue: &mut ContextQueue<EscContextType>,
+        ) {
+            if persistent_index.is_none() {
+                let persistent: Option<PersistentIndex> = context
+                    .query::<_, list_type![u16, Nil]>()
+                    .next()
+                    .map(|entity_ref| context.get_persistent_index(entity_ref.index).into());
+                queue.update_entity(
+                    context
+                        .get_entity_update_builder(entity.in_context::<EscContextType>())
+                        .update(persistent),
+                );
+                println!(
+                    "TestEntityPersistentIndex starts tracking new persistent index: {:?}",
+                    persistent
+                );
+            } else {
+                let index = context
+                    .try_map_persistent(persistent_index.unwrap().in_context::<EscContextType>());
+                if let Some(index) = index {
+                    let entity = context.try_get_entity(index).unwrap();
+                    println!(
+                        "TestEntityPersistentIndex tracks entity with persistent index: {:?}",
+                        entity
+                    );
+                } else {
+                    println!("TestEntityPersistentIndex could not find entity with given persistent index");
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_ecs() {
         let mut ecs = EscContextType::builder()
@@ -1263,10 +1457,14 @@ mod test_ecs {
             .with_system(TestSystemMulti::<String, u32>::new())
             .with_system(TestEntityQuery)
             .with_system(TestEntityTryGet)
+            .with_system(TestEntityPersistentIndex)
             .build();
         let entity = ecs.get_entity_builder().with_component("Hello".to_string());
         ecs.push_entity(entity);
-        let entity = ecs.get_entity_builder().with_component("World".to_string());
+        let entity = ecs
+            .get_entity_builder()
+            .with_component("World".to_string())
+            .with_component::<Option<PersistentIndex>, _>(None);
         ecs.push_entity(entity);
         let entity = ecs
             .get_entity_builder()
