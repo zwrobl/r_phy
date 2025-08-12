@@ -4,6 +4,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 
 #[cfg(test)]
 mod tests {
@@ -1592,8 +1593,8 @@ pub trait ListIterator {
     fn next(&mut self) -> Self::IteratorItem;
 }
 
-impl ListIterator for Nil {
-    type IteratorItem = Nil;
+impl<T: 'static> ListIterator for TypedNil<T> {
+    type IteratorItem = Self;
 
     #[inline]
     fn next(&mut self) -> Self::IteratorItem {
@@ -1635,6 +1636,20 @@ pub struct ListIter<T: ListIterator> {
     iter: T,
 }
 
+impl<T: ListIterator> Iterator for ListIter<T> {
+    type Item = T::IteratorItem;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.iter.next();
+        if item.any() {
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
 impl<T: ListIterator> ListIter<T> {
     #[inline]
     pub fn iter_ref<'a, N: IntoCollectionIterator<RefIterator<'a> = T>>(collection: &'a N) -> Self {
@@ -1658,15 +1673,55 @@ impl<T: ListIterator> ListIter<T> {
             iter: collection.into_iter(),
         }
     }
+
+    #[inline]
+    pub fn iter_sub<
+        'a,
+        M: Marker,
+        C: TypeList,
+        N: IntoSubsetIterator<C, M, RefIterator<'a> = T> + 'a,
+    >(
+        collection: &'a C,
+    ) -> Self {
+        Self {
+            iter: N::sub_iter(collection),
+        }
+    }
+
+    /// #Safety
+    ///
+    /// Subset must contain only unique types, as otherwise aliased mutable references to the collection may be created
+    #[inline]
+    pub unsafe fn iter_sub_mut<
+        'a,
+        M: Marker,
+        C: TypeList,
+        N: IntoSubsetIterator<C, M, MutIterator<'a> = T> + 'a,
+    >(
+        collection: &'a mut C,
+    ) -> Self {
+        Self {
+            iter: N::sub_iter_mut(collection),
+        }
+    }
+
+    #[inline]
+    pub fn all(self) -> ListIterAll<T> {
+        ListIterAll { iter: self.iter }
+    }
 }
 
-impl<T: ListIterator> Iterator for ListIter<T> {
+pub struct ListIterAll<T: ListIterator> {
+    iter: T,
+}
+
+impl<T: ListIterator> Iterator for ListIterAll<T> {
     type Item = T::IteratorItem;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.iter.next();
-        if item.any() {
+        if item.all() {
             Some(item)
         } else {
             None
@@ -3183,5 +3238,178 @@ mod test_marked_borrow {
         assert_eq!(index_ref_u32, &42);
         assert_eq!(index_ref_u16, &7);
         assert_eq!(index_ref_string, "Hello");
+    }
+}
+
+pub trait IntoSubsetIterator<T: TypeList, M: Marker>: TypeList {
+    type RefIterator<'a>: ListIterator<IteratorItem = Self::RefListOpt<'a>>
+    where
+        T: 'a,
+        Self: 'a;
+    type MutIterator<'a>: ListIterator<IteratorItem = Self::MutListOpt<'a>>
+    where
+        T: 'a,
+        Self: 'a;
+
+    fn sub_iter<'a>(collection: &'a T) -> Self::RefIterator<'a>;
+
+    /// # Safety
+    /// If subset lists each element uniquely, then
+    /// it is safe to obtain mutable references to the superset contained items by reborrowing
+    /// the superset mutable reference. Otherwise, multiple mutable references to the same
+    /// element may be obtained, which is not allowed and may cause undefined behavior due to aliasing mutable references.
+    ///
+    /// User must ensure that the subset list does not contain duplicate elements.
+    unsafe fn sub_iter_mut<'a>(collection: &'a mut T) -> Self::MutIterator<'a>;
+}
+
+impl<T: 'static, M: Marker, L: TypeList> IntoSubsetIterator<L, M> for TypedNil<T>
+where
+    L: Contains<TypedNil<T>, M>,
+{
+    type RefIterator<'a>
+        = TypedNil<T>
+    where
+        L: 'a,
+        Self: 'a;
+    type MutIterator<'a>
+        = TypedNil<T>
+    where
+        L: 'a,
+        Self: 'a;
+
+    #[inline]
+    fn sub_iter<'a>(_collection: &'a L) -> Self::RefIterator<'a> {
+        TypedNil::new()
+    }
+
+    #[inline]
+    unsafe fn sub_iter_mut<'a>(_collection: &'a mut L) -> Self::MutIterator<'a> {
+        TypedNil::new()
+    }
+}
+
+impl<C: 'static, T: TypeList, M1: Marker, M2: Marker, N: IntoSubsetIterator<T, M2>>
+    IntoSubsetIterator<T, Cons<M1, M2>> for Cons<C, N>
+where
+    T: Contains<GenVec<C>, M1>,
+{
+    type RefIterator<'a>
+        = Cons<GenCollectionRefIter<'a, C>, N::RefIterator<'a>>
+    where
+        T: 'a,
+        Self: 'a;
+
+    type MutIterator<'a>
+        = Cons<GenCollectionMutIter<'a, C>, N::MutIterator<'a>>
+    where
+        T: 'a,
+        Self: 'a;
+
+    fn sub_iter<'a>(collection: &'a T) -> Self::RefIterator<'a> {
+        Cons::new(collection.get().into_iter(), N::sub_iter(collection))
+    }
+
+    unsafe fn sub_iter_mut<'a>(collection: &'a mut T) -> Self::MutIterator<'a> {
+        let mut reborrow = NonNull::new_unchecked(collection);
+        Cons::new(
+            collection.get_mut().into_iter(),
+            N::sub_iter_mut(reborrow.as_mut()),
+        )
+    }
+}
+
+#[cfg(test)]
+mod test_subset_iterator {
+    use crate::{list_type, unpack_list};
+
+    use super::*;
+
+    type GenVecCollection = list_type![GenVec<u8>, GenVec<u16>, GenVec<u32>, Nil];
+    type Subset = list_type![u8, u16, Nil];
+
+    #[test]
+    fn test_subset_iterator() {
+        let mut collection = GenVecCollection::default();
+
+        let gen_vec_u8 = collection.get_mut::<GenVec<u8>, _>();
+        let _ = gen_vec_u8.push(1);
+        let _ = gen_vec_u8.push(2);
+        let _ = gen_vec_u8.push(3);
+
+        let gen_vec_u16 = collection.get_mut::<GenVec<u16>, _>();
+        let _ = gen_vec_u16.push(1);
+        let _ = gen_vec_u16.push(2);
+
+        let gen_vec_u32 = collection.get_mut::<GenVec<u32>, _>();
+        let _ = gen_vec_u32.push(1);
+
+        let mut iter = ListIter::iter_sub::<_, _, Subset>(&collection).all();
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16] = Subset::unwrap_ref(next.unwrap());
+        assert!(*value_u8 == 1);
+        assert!(*value_u16 == 1);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16] = Subset::unwrap_ref(next.unwrap());
+        assert!(*value_u8 == 2);
+        assert!(*value_u16 == 2);
+
+        let next = iter.next();
+        assert!(next.is_none());
+    }
+
+    #[test]
+    fn test_subset_mut_iterator() {
+        let mut collection = GenVecCollection::default();
+
+        let gen_vec_u8 = collection.get_mut::<GenVec<u8>, _>();
+        let _ = gen_vec_u8.push(1);
+        let _ = gen_vec_u8.push(2);
+        let _ = gen_vec_u8.push(3);
+
+        let gen_vec_u16 = collection.get_mut::<GenVec<u16>, _>();
+        let _ = gen_vec_u16.push(1);
+        let _ = gen_vec_u16.push(2);
+
+        let gen_vec_u32 = collection.get_mut::<GenVec<u32>, _>();
+        let _ = gen_vec_u32.push(1);
+
+        let mut iter = unsafe { ListIter::iter_sub_mut::<_, _, Subset>(&mut collection).all() };
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16] = Subset::unwrap_mut(next.unwrap());
+        *value_u8 += 1;
+        *value_u16 += 1;
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16] = Subset::unwrap_mut(next.unwrap());
+        *value_u8 += 1;
+        *value_u16 += 1;
+
+        let next = iter.next();
+        assert!(next.is_none());
+
+        let mut iter = ListIter::iter_sub::<_, _, Subset>(&collection).all();
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16] = Subset::unwrap_ref(next.unwrap());
+        assert!(*value_u8 == 2);
+        assert!(*value_u16 == 2);
+
+        let next = iter.next();
+        assert!(next.is_some());
+        let unpack_list![value_u8, value_u16] = Subset::unwrap_ref(next.unwrap());
+        assert!(*value_u8 == 3);
+        assert!(*value_u16 == 3);
+
+        let next = iter.next();
+        assert!(next.is_none());
     }
 }

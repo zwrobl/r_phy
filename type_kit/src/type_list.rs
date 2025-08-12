@@ -353,6 +353,12 @@ pub trait TypeList: Sized {
     unsafe fn sub_mut<'a, M: Marker, S: Subset<Self, M>>(&'a mut self) -> S::MutList<'a> {
         S::sub_get_mut(self)
     }
+
+    fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a>;
+
+    fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a>;
+
+    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self;
 }
 
 impl<N: 'static> TypeList for TypedNil<N> {
@@ -372,6 +378,18 @@ impl<N: 'static> TypeList for TypedNil<N> {
     fn as_mut(&mut self) -> Self::MutList<'_> {
         *self
     }
+
+    fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a> {
+        opt
+    }
+
+    fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a> {
+        opt
+    }
+
+    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self {
+        opt
+    }
 }
 
 impl<T: 'static> TypeList for Fin<T> {
@@ -390,6 +408,18 @@ impl<T: 'static> TypeList for Fin<T> {
 
     fn as_mut(&mut self) -> Self::MutList<'_> {
         self
+    }
+
+    fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a> {
+        opt.unwrap()
+    }
+
+    fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a> {
+        opt.unwrap()
+    }
+
+    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self {
+        opt
     }
 }
 
@@ -425,6 +455,18 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
 
     fn as_mut(&mut self) -> Self::MutList<'_> {
         Cons::new(&mut self.head, self.tail.as_mut())
+    }
+
+    fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a> {
+        Cons::new(opt.head.unwrap(), N::unwrap_ref(opt.tail))
+    }
+
+    fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a> {
+        Cons::new(opt.head.unwrap(), N::unwrap_mut(opt.tail))
+    }
+
+    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self {
+        Cons::new(opt.head.unwrap(), N::unwrap_owned(opt.tail))
     }
 }
 
@@ -909,7 +951,7 @@ pub trait BoolList {
     fn none(&self) -> bool;
 }
 
-impl BoolList for Nil {
+impl<T: 'static> BoolList for TypedNil<T> {
     #[inline]
     fn all(&self) -> bool {
         true
