@@ -701,7 +701,12 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityUpdate<C, M, E> {
 }
 
 pub enum UpdateResult<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    ArchetypeChanged((EntityBuilder<C, M, E>, PersistentIndexTyped<C, M, E>)),
+    ArchetypeChanged(
+        (
+            EntityBuilder<C, M, E>,
+            PersistentIndexTyped<EntityIndexTyped<C, M, E>>,
+        ),
+    ),
     NotFound(EntityUpdate<C, M, E>),
     InPlace,
 }
@@ -919,33 +924,33 @@ impl<
     }
 }
 
-pub struct PersistentIndexTyped<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    index: GenVecIndex<EntityIndexTyped<C, M, E>>,
+pub struct PersistentIndexTyped<T: Clone + Copy + Eq + Hash + 'static> {
+    index: GenVecIndex<T>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Hash for PersistentIndexTyped<C, M, E> {
+impl<T: Clone + Copy + Eq + Hash + 'static> Hash for PersistentIndexTyped<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.index.hash(state);
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> PartialEq for PersistentIndexTyped<C, M, E> {
+impl<T: Clone + Copy + Eq + Hash + 'static> PartialEq for PersistentIndexTyped<T> {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Eq for PersistentIndexTyped<C, M, E> {}
+impl<T: Clone + Copy + Eq + Hash + 'static> Eq for PersistentIndexTyped<T> {}
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Clone for PersistentIndexTyped<C, M, E> {
+impl<T: Clone + Copy + Eq + Hash + 'static> Clone for PersistentIndexTyped<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Copy for PersistentIndexTyped<C, M, E> {}
+impl<T: Clone + Copy + Eq + Hash + 'static> Copy for PersistentIndexTyped<T> {}
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Debug for PersistentIndexTyped<C, M, E> {
+impl<T: Clone + Copy + Eq + Hash + 'static> Debug for PersistentIndexTyped<T> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PersistentEntityIndexTyped")
@@ -959,11 +964,9 @@ pub struct PersistentIndex {
     index: TypeGuard<GenIndexRaw>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> From<PersistentIndexTyped<C, M, E>>
-    for PersistentIndex
-{
+impl<T: Clone + Copy + Eq + Hash + 'static> From<PersistentIndexTyped<T>> for PersistentIndex {
     #[inline]
-    fn from(index: PersistentIndexTyped<C, M, E>) -> Self {
+    fn from(index: PersistentIndexTyped<T>) -> Self {
         Self {
             index: index.index.into_guard(),
         }
@@ -972,20 +975,20 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> From<PersistentIndexTyped<C, 
 
 impl PersistentIndex {
     #[inline]
-    pub fn in_context<C: EntityComponentConfiguration>(
+    pub fn entity_index<C: EntityComponentConfiguration>(
         &self,
-    ) -> PersistentIndexTyped<C::Components, C::Marker, C::Entity> {
+    ) -> PersistentIndexTyped<EntityIndexTyped<C::Components, C::Marker, C::Entity>> {
         let index = GenVecIndex::try_from_guard(self.index).unwrap();
         PersistentIndexTyped { index }
     }
 }
 
-pub struct PersistentIndexMap<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    lookup: HashMap<EntityIndexTyped<C, M, E>, GenVecIndex<EntityIndexTyped<C, M, E>>>,
-    entities: GenVec<EntityIndexTyped<C, M, E>>,
+pub struct PersistentIndexMap<T: Clone + Copy + Eq + Hash + 'static> {
+    lookup: HashMap<T, GenVecIndex<T>>,
+    entities: GenVec<T>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> PersistentIndexMap<C, M, E> {
+impl<T: Clone + Copy + Eq + Hash + 'static> PersistentIndexMap<T> {
     #[inline]
     pub fn new() -> Self {
         Self {
@@ -995,7 +998,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> PersistentIndexMap<C, M, E> {
     }
 
     #[inline]
-    pub fn register(&mut self, entity: EntityIndexTyped<C, M, E>) {
+    pub fn register(&mut self, entity: T) {
         if !self.lookup.contains_key(&entity) {
             let index_mapping = self.entities.push(entity).unwrap();
             self.lookup.insert(entity, index_mapping);
@@ -1003,18 +1006,14 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> PersistentIndexMap<C, M, E> {
     }
 
     #[inline]
-    pub fn unregister(&mut self, entity: EntityIndexTyped<C, M, E>) {
+    pub fn unregister(&mut self, entity: T) {
         if let Some(index_mapping) = self.lookup.remove(&entity) {
             self.entities.pop(index_mapping).unwrap();
         }
     }
 
     #[inline]
-    pub fn update(
-        &mut self,
-        index: PersistentIndexTyped<C, M, E>,
-        entity: EntityIndexTyped<C, M, E>,
-    ) {
+    pub fn update(&mut self, index: PersistentIndexTyped<T>, entity: T) {
         let PersistentIndexTyped { index } = index;
         if let Ok(&registered) = self.entities.get(index) {
             if registered != entity {
@@ -1026,16 +1025,13 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> PersistentIndexMap<C, M, E> {
     }
 
     #[inline]
-    pub fn get_index(&self, entity: EntityIndexTyped<C, M, E>) -> PersistentIndexTyped<C, M, E> {
+    pub fn get_index(&self, entity: T) -> PersistentIndexTyped<T> {
         let index = *self.lookup.get(&entity).unwrap();
         PersistentIndexTyped { index }
     }
 
     #[inline]
-    pub fn try_get_entity(
-        &self,
-        index: PersistentIndexTyped<C, M, E>,
-    ) -> Option<EntityIndexTyped<C, M, E>> {
+    pub fn try_get_entity(&self, index: PersistentIndexTyped<T>) -> Option<T> {
         let PersistentIndexTyped { index } = index;
         self.entities.get(index).ok().copied()
     }
@@ -1045,7 +1041,7 @@ pub struct EntityComponentContext<C: ComponentList, M: Marker, E: Entity<C, M>> 
     archetypes: GenVec<Archetype<C, M, E>>,
     indices: GenVec<GenVecIndex<Archetype<C, M, E>>>,
     lookup: HashMap<GenVecIndex<Archetype<C, M, E>>, GenVecIndex<GenVecIndex<Archetype<C, M, E>>>>,
-    persistent_map: PersistentIndexMap<C, M, E>,
+    persistent_map: PersistentIndexMap<EntityIndexTyped<C, M, E>>,
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for EntityComponentContext<C, M, E> {
@@ -1069,7 +1065,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
     pub fn push_entity(
         &mut self,
         entity: EntityBuilder<C, M, E>,
-        persistent_index: Option<PersistentIndexTyped<C, M, E>>,
+        persistent_index: Option<PersistentIndexTyped<EntityIndexTyped<C, M, E>>>,
     ) {
         let archetype = self
             .iter_mut()
@@ -1157,13 +1153,13 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
     pub fn get_persistent_index(
         &self,
         entity: EntityIndexTyped<C, M, E>,
-    ) -> PersistentIndexTyped<C, M, E> {
+    ) -> PersistentIndexTyped<EntityIndexTyped<C, M, E>> {
         self.persistent_map.get_index(entity)
     }
 
     pub fn try_map_persistent(
         &self,
-        index: PersistentIndexTyped<C, M, E>,
+        index: PersistentIndexTyped<EntityIndexTyped<C, M, E>>,
     ) -> Option<EntityIndexTyped<C, M, E>> {
         self.persistent_map.try_get_entity(index)
     }
@@ -1423,7 +1419,7 @@ mod test_ecs {
                 );
             } else {
                 let index = context
-                    .try_map_persistent(persistent_index.unwrap().in_context::<EscContextType>());
+                    .try_map_persistent(persistent_index.unwrap().entity_index::<EscContextType>());
                 if let Some(index) = index {
                     let entity = context.try_get_entity(index).unwrap();
                     println!(
