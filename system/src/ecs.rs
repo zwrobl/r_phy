@@ -1,10 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::{Debug, Formatter},
-    hash::Hash,
-    hash::Hasher,
+    hash::{Hash, Hasher},
     marker::PhantomData,
-    ops::Deref,
+    ops::{Deref, DerefMut},
 };
 
 use type_kit::{
@@ -70,14 +69,13 @@ where
     #[inline]
     pub fn execute<'a, 'b>(
         &'a self,
-        index: GenVecIndex<Archetype<L, M1, E>>,
-        archetype: &'b Archetype<L, M1, E>,
+        archetype: ArchetypeRef<'b, L, M1, E>,
         context: &EntityComponentContext<L, M1, E>,
         operation_queue: &mut OperationQueue<L, M1, E>,
     ) {
         if self.is_matching(archetype) {
             archetype
-                .sub_iter_entity::<_, S::Components>(index)
+                .sub_iter_entity::<_, S::Components>()
                 .for_each(|entity| {
                     self.system.execute(
                         entity.index.into(),
@@ -90,7 +88,7 @@ where
     }
 
     #[inline]
-    pub fn is_matching(&self, archetype: &Archetype<L, M1, E>) -> bool {
+    pub fn is_matching(&self, archetype: ArchetypeRef<'_, L, M1, E>) -> bool {
         self.query.is_subset(&archetype.query)
     }
 }
@@ -98,8 +96,7 @@ where
 pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
     fn execute<'a>(
         &'a self,
-        index: GenVecIndex<Archetype<T, M, E>>,
-        archetype: &Archetype<T, M, E>,
+        archetype: ArchetypeRef<'a, T, M, E>,
         context: &EntityComponentContext<T, M, E>,
         operation_queue: &mut OperationQueue<T, M, E>,
     );
@@ -108,8 +105,7 @@ pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
 impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemList<T, M, E> for Nil {
     fn execute<'a>(
         &'a self,
-        _index: GenVecIndex<Archetype<T, M, E>>,
-        _archetype: &Archetype<T, M, E>,
+        _archetype: ArchetypeRef<'a, T, M, E>,
         _context: &EntityComponentContext<T, M, E>,
         _operation_queue: &mut OperationQueue<T, M, E>,
     ) {
@@ -127,17 +123,14 @@ impl<
 where
     S::Components: IntoSubsetIterator<L, M2>,
 {
-    fn execute(
+    fn execute<'a>(
         &self,
-        index: GenVecIndex<Archetype<L, M1, E>>,
-        archetype: &Archetype<L, M1, E>,
+        archetype: ArchetypeRef<'a, L, M1, E>,
         context: &EntityComponentContext<L, M1, E>,
         operation_queue: &mut OperationQueue<L, M1, E>,
     ) {
-        self.head
-            .execute(index, archetype, context, operation_queue);
-        self.tail
-            .execute(index, archetype, context, operation_queue);
+        self.head.execute(archetype, context, operation_queue);
+        self.tail.execute(archetype, context, operation_queue);
     }
 }
 
@@ -437,6 +430,87 @@ impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, S: SystemList<T, M1, E>>
     }
 }
 
+pub struct ArchetypeRef<'a, T: ComponentList, M: Marker, E: Entity<T, M>> {
+    archetype: &'a Archetype<T, M, E>,
+    index: GenVecIndex<Archetype<T, M, E>>,
+}
+
+impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Deref for ArchetypeRef<'a, T, M, E> {
+    type Target = Archetype<T, M, E>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.archetype
+    }
+}
+
+impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> ArchetypeRef<'a, T, M, E> {
+    #[inline]
+    pub fn sub_iter_entity<M2: Marker, N: IntoSubsetIterator<T, M2> + 'a>(
+        self,
+    ) -> impl Iterator<Item = EntityRef<'a, T, M, M2, E, N>> {
+        // Entity components and its corresponding entity index are pushed/removed into the collections
+        // in the same order, this should result in them being stored at the same index in GenVec internal storage
+        // thus is safe to assume that zip will yield the correct pairs
+        self.archetype
+            .sub_iter::<_, N>()
+            .zip((&self.archetype.indices).into_iter())
+            .map(move |(components, &entity)| EntityRef::new(self.index, entity, components))
+    }
+}
+
+impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Clone for ArchetypeRef<'a, T, M, E> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Copy for ArchetypeRef<'a, T, M, E> {}
+
+pub struct ArchetypeMut<'a, T: ComponentList, M: Marker, E: Entity<T, M>> {
+    archetype: &'a mut Archetype<T, M, E>,
+    index: GenVecIndex<Archetype<T, M, E>>,
+}
+
+impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> ArchetypeMut<'a, T, M, E> {
+    #[inline]
+    pub fn push_entity(&mut self, entity: EntityBuilder<T, M, E>) -> EntityIndexTyped<T, M, E> {
+        let entity = entity.build();
+        let entity = entity.insert(&mut self.components).unwrap();
+        let index = self.entities.push(entity).unwrap();
+        let mapping = self.indices.push(index).unwrap();
+        self.lookup.insert(index, mapping);
+        EntityIndexTyped::new(self.index, index)
+    }
+
+    #[inline]
+    pub fn set_archetype(&mut self, entity: EntityBuilder<T, M, E>) -> EntityIndexTyped<T, M, E> {
+        if self.entities.is_empty() {
+            self.query = entity.query_builder;
+            self.push_entity(entity)
+        } else {
+            panic!("Cannot set archetype for non-empty archetype");
+        }
+    }
+}
+
+impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Deref for ArchetypeMut<'a, T, M, E> {
+    type Target = Archetype<T, M, E>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.archetype
+    }
+}
+
+impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> DerefMut for ArchetypeMut<'a, T, M, E> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.archetype
+    }
+}
+
 #[derive(Debug)]
 pub struct Archetype<T: ComponentList, M: Marker, E: Entity<T, M>> {
     query: E::Query,
@@ -468,16 +542,18 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     }
 
     #[inline]
-    pub fn try_set_archetype(
-        &mut self,
-        index: GenVecIndex<Self>,
-        entity: EntityBuilder<T, M, E>,
-    ) -> Option<EntityIndexTyped<T, M, E>> {
-        if self.entities.is_empty() {
-            self.query = entity.query_builder;
-            Some(self.push_entity(index, entity))
-        } else {
-            None
+    pub fn as_ref(&self, index: GenVecIndex<Self>) -> ArchetypeRef<T, M, E> {
+        ArchetypeRef {
+            archetype: self,
+            index,
+        }
+    }
+
+    #[inline]
+    pub fn as_mut(&mut self, index: GenVecIndex<Self>) -> ArchetypeMut<T, M, E> {
+        ArchetypeMut {
+            archetype: self,
+            index,
         }
     }
 
@@ -487,39 +563,12 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     }
 
     #[inline]
-    pub fn push_entity(
-        &mut self,
-        archetype_index: GenVecIndex<Archetype<T, M, E>>,
-        entity: EntityBuilder<T, M, E>,
-    ) -> EntityIndexTyped<T, M, E> {
-        let entity = entity.build();
-        let entity = entity.insert(&mut self.components).unwrap();
-        let index = self.entities.push(entity).unwrap();
-        let mapping = self.indices.push(index).unwrap();
-        self.lookup.insert(index, mapping);
-        EntityIndexTyped::new(archetype_index, index)
-    }
-
-    #[inline]
     pub fn sub_iter<'a, M2: Marker, N: IntoSubsetIterator<T, M2> + 'a>(
         &'a self,
     ) -> impl Iterator<Item = N::RefList<'a>> {
         ListIter::iter_sub::<_, _, N>(&self.components)
             .all()
             .map(|entity| N::unwrap_ref(entity))
-    }
-
-    #[inline]
-    pub fn sub_iter_entity<'a, M2: Marker, N: IntoSubsetIterator<T, M2> + 'a>(
-        &'a self,
-        index: GenVecIndex<Self>,
-    ) -> impl Iterator<Item = EntityRef<'a, T, M, M2, E, N>> {
-        // Entity components and its corresponding entity index are pushed/removed into the collections
-        // in the same order, this should result in them being stored at the same index in GenVec internal storage
-        // thus is safe to assume that zip will yield the correct pairs
-        self.sub_iter::<_, N>()
-            .zip((&self.indices).into_iter())
-            .map(move |(components, &entity)| EntityRef::new(index, entity, components))
     }
 
     pub fn try_pop_entity<'a>(&'a mut self, index: EntityIndexTyped<T, M, E>) -> Option<E::Owned> {
@@ -1024,16 +1073,16 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
     ) {
         let archetype = self
             .iter_mut()
-            .find(|(archetype, _)| archetype.is_matching(&entity));
+            .find(|archetype| archetype.is_matching(&entity));
         let entity = match archetype {
-            Some((archetype, index)) => archetype.push_entity(*index, entity),
+            Some(mut archetype) => archetype.push_entity(entity),
             None => {
                 let archetype = self.archetypes.push(Archetype::new()).unwrap();
                 let index_mapping = self.indices.push(archetype).unwrap();
                 self.lookup.insert(archetype, index_mapping);
                 self.archetypes[archetype]
-                    .try_set_archetype(archetype, entity)
-                    .unwrap()
+                    .as_mut(archetype)
+                    .set_archetype(entity)
             }
         };
         if let Some(persistent_index) = persistent_index {
@@ -1075,25 +1124,18 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
         UpdateResult::NotFound(update)
     }
 
-    pub fn iter_ref<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (&'a Archetype<C, M, E>, &'a GenVecIndex<Archetype<C, M, E>>)> {
+    pub fn iter_ref<'a>(&'a self) -> impl Iterator<Item = ArchetypeRef<'a, C, M, E>> {
         (&self.archetypes)
             .into_iter()
             .zip((&self.indices).into_iter())
+            .map(|(archetype, &index)| archetype.as_ref(index))
     }
 
-    fn iter_mut<'a>(
-        &'a mut self,
-    ) -> impl Iterator<
-        Item = (
-            &'a mut Archetype<C, M, E>,
-            &'a GenVecIndex<Archetype<C, M, E>>,
-        ),
-    > {
+    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = ArchetypeMut<'a, C, M, E>> {
         (&mut self.archetypes)
             .into_iter()
             .zip((&self.indices).into_iter())
+            .map(|(archetype, &index)| archetype.as_mut(index))
     }
 
     pub fn query<'a, M2: Marker, N: IntoSubsetIterator<C, M2> + QueryWrite<E::Query, M2> + 'a>(
@@ -1101,8 +1143,8 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
     ) -> impl Iterator<Item = EntityRef<'a, C, M, M2, E, N>> {
         let query = N::write(E::Query::default());
         self.iter_ref()
-            .filter(move |(archetype, ..)| query.is_subset(&archetype.query))
-            .flat_map(|(archetype, &index)| archetype.sub_iter_entity(index))
+            .filter(move |archetype| query.is_subset(&archetype.query))
+            .flat_map(|archetype| archetype.sub_iter_entity())
     }
 
     pub fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<C, M, E>) -> Option<E::Ref<'a>> {
@@ -1195,9 +1237,9 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
     #[inline]
     pub fn execute_systems(&mut self) {
         let mut operation_queue = OperationQueue::new();
-        self.storage.iter_ref().for_each(|(archetype, &index)| {
+        self.storage.iter_ref().for_each(|archetype| {
             self.systems
-                .execute(index, archetype, &self.storage, &mut operation_queue);
+                .execute(archetype, &self.storage, &mut operation_queue);
         });
         operation_queue.process(&mut self.storage);
     }

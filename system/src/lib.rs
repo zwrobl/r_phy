@@ -1,4 +1,4 @@
-mod ecs;
+pub mod ecs;
 
 use type_kit::{Cons, Nil};
 use winit::{
