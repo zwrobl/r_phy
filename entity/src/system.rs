@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use rayon::Scope;
 use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset, TypeList};
 
-use crate::ecs::{
+use crate::{
     context::{EntityComponentConfiguration, EntityComponentContext},
     entity::{Entity, Query, QueryWrite},
     index::EntityIndex,

@@ -1,6 +1,6 @@
 use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, Marker, Nil};
 
-use crate::ecs::{
+use crate::{
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
     entity::{
         Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateBuilder, Query, QueryWrite,

@@ -7,7 +7,7 @@ use type_kit::{
     GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, ListIter, MarkedItemList, Marker,
 };
 
-use crate::ecs::{
+use crate::{
     entity::{Entity, EntityBuilder, EntityRef},
     index::EntityIndexTyped,
     ComponentList, PersistentIndexMap,

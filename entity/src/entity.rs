@@ -5,7 +5,7 @@ use type_kit::{
     MarkedItemList, Marker, Nil, OptionalList, StaticTypeList, TypeList,
 };
 
-use crate::ecs::{index::EntityIndexTyped, Archetype, ComponentData, ComponentList};
+use crate::{index::EntityIndexTyped, Archetype, ComponentData, ComponentList};
 
 pub trait Entity<C: ComponentList, M: Marker>:
     MarkedIndexList<C, M> + StaticTypeList + OptionalList + Clone + Copy + Send + Sync

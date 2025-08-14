@@ -5,7 +5,7 @@ use std::{
 
 use type_kit::{Marker, TypeList};
 
-use crate::ecs::{
+use crate::{
     context::{EntityComponentConfiguration, EntityComponentContext, UpdateResult},
     entity::{Entity, EntityBuilder, EntityUpdate, EntityUpdateBuilder},
     index::EntityIndexTyped,

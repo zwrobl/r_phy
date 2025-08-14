@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 
 use type_kit::{Cons, GenVec, IntoCollectionIterator, Marker, Nil, StaticTypeList, TypeList};
 
-use crate::ecs::{
+use crate::{
     archetype::{Archetype, ArchetypeRef},
     context::EntityComponentContext,
     entity::{Entity, EntityBuilder},
@@ -74,12 +74,9 @@ mod test_ecs {
     };
 
     use crate::{
-        component_list_type,
-        ecs::{
-            context::EntityComponentConfiguration, index::EntityIndex, index::PersistentIndex,
-            operation::ContextQueue, system::System, ComponentData, EntityComponentContext,
-        },
-        ecs_context_type, entity_type, marker_type,
+        component_list_type, context::EntityComponentConfiguration, ecs_context_type, entity_type,
+        index::EntityIndex, index::PersistentIndex, marker_type, operation::ContextQueue,
+        system::System, ComponentData, EntityComponentContext,
     };
 
     type EscContextType = ecs_context_type![

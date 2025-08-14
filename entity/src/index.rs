@@ -5,7 +5,7 @@ use std::{
 };
 use type_kit::{FromGuard, GenCollection, GenIndexRaw, GenVec, GenVecIndex, Marker, TypeGuard};
 
-use crate::ecs::{
+use crate::{
     archetype::Archetype, context::EntityComponentConfiguration, entity::Entity, ComponentList,
 };
 

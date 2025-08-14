@@ -10,6 +10,7 @@ members = [
     "physics",
     "vulkan_low",
     "vulkan_high",
+    "entity",
 ]
 
 [workspace.dependencies]
