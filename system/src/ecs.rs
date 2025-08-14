@@ -877,37 +877,54 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
     }
 }
 
-pub struct EntityUpdate<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    index: EntityIndexTyped<C, M, E>,
+pub struct EntityUpdateBuilder<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> {
+    index: EntityIndexTyped<C, M1, E>,
     components: E::Update,
+    _phantom: PhantomData<W>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityUpdate<C, M, E> {
+impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBuilder<C, M1, E, W> {
     #[inline]
-    pub fn new(index: EntityIndexTyped<C, M, E>) -> Self {
+    pub fn new(index: EntityIndexTyped<C, M1, E>) -> Self {
         Self {
             index,
             components: E::Update::default(),
+            _phantom: PhantomData,
         }
     }
 
     #[inline]
-    pub fn update<C2: 'static, M2: Marker>(mut self, component: C2) -> Self
+    pub fn update<C2: 'static, M2: Marker, M3: Marker>(mut self, component: C2) -> Self
     where
         E::Update: Contains<ComponentUpdate<C2>, M2>,
+        W: Contains<C2, M3>,
     {
         *self.components.get_mut() = ComponentUpdate::Update(component);
         self
     }
 
     #[inline]
-    pub fn remove<C2: 'static, M2: Marker>(mut self) -> Self
+    pub fn remove<C2: 'static, M2: Marker, M3: Marker>(mut self) -> Self
     where
         E::Update: Contains<ComponentUpdate<C2>, M2>,
+        W: Contains<C2, M3>,
     {
         *self.components.get_mut() = ComponentUpdate::Remove;
         self
     }
+
+    #[inline]
+    pub fn build(self) -> EntityUpdate<C, M1, E> {
+        EntityUpdate {
+            index: self.index,
+            components: self.components,
+        }
+    }
+}
+
+pub struct EntityUpdate<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    index: EntityIndexTyped<C, M, E>,
+    components: E::Update,
 }
 
 pub enum UpdateResult<C: ComponentList, M: Marker, E: Entity<C, M>> {
@@ -998,8 +1015,8 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
     }
 
     #[inline]
-    pub fn update_entity(&mut self, entity: EntityUpdate<C, M, E>) {
-        self.operations.push(Operation::Update(entity));
+    pub fn update_entity<W: TypeList>(&mut self, entity: EntityUpdateBuilder<C, M, E, W>) {
+        self.operations.push(Operation::Update(entity.build()));
     }
 }
 
@@ -1389,11 +1406,12 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
         EntityBuilder::new()
     }
 
-    pub fn get_entity_update_builder(
+    pub fn get_entity_update_builder<S: System<Self>>(
         &self,
+        _system: &S,
         index: EntityIndexTyped<C, M, E>,
-    ) -> EntityUpdate<C, M, E> {
-        EntityUpdate::new(index)
+    ) -> EntityUpdateBuilder<C, M, E, S::WriteList> {
+        EntityUpdateBuilder::new(index)
     }
 }
 
@@ -1573,9 +1591,9 @@ mod test_ecs {
                 });
             queue.update_entity(
                 context
-                    .get_entity_update_builder(entity.in_context::<EscContextType>())
+                    .get_entity_update_builder(self, entity.in_context::<EscContextType>())
                     .update("UpdatedQueryEntity".to_string())
-                    .remove::<u16, _>(),
+                    .remove::<u16, _, _>(),
             );
         }
     }
@@ -1631,7 +1649,7 @@ mod test_ecs {
                     .map(|entity_ref| context.get_persistent_index(entity_ref.index).into());
                 queue.update_entity(
                     context
-                        .get_entity_update_builder(entity.in_context::<EscContextType>())
+                        .get_entity_update_builder(self, entity.in_context::<EscContextType>())
                         .update(persistent),
                 );
                 println!(
