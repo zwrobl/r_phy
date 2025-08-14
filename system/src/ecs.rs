@@ -11,14 +11,18 @@ use rayon::Scope;
 use type_kit::{
     CollectionType, Cons, Contains, FromGuard, GenCollection, GenIndexRaw, GenVec, GenVecIndex,
     IntoCollectionIterator, IntoSubsetIterator, ListIter, MarkedIndexList, MarkedItemList, Marker,
-    Nil, OptionalList, Subset, TypeGuard, TypeList,
+    Nil, OptionalList, StaticTypeList, Subset, TypeGuard, TypeList,
 };
 
-pub trait ExternalSystem: TypeList + Sync {}
+pub trait ExternalSystem: StaticTypeList + Sync {}
 
-impl<T: TypeList + Sync> ExternalSystem for T {}
+impl<T: StaticTypeList + Sync> ExternalSystem for T {}
 
-pub trait System<T: EntityComponentConfiguration>: 'static + Sync {
+pub trait ComponentData: Send + Sync + 'static {}
+
+impl<T: Send + Sync + 'static> ComponentData for T {}
+
+pub trait System<T: EntityComponentConfiguration>: Sync {
     type External: TypeList;
     type WriteList: TypeList;
     type Components: TypeList;
@@ -37,7 +41,7 @@ pub trait ComponentList: IntoCollectionIterator + Send + Sync {}
 
 impl ComponentList for Nil {}
 
-impl<C: 'static + Send + Sync, N: ComponentList> ComponentList for Cons<GenVec<C>, N> {}
+impl<C: ComponentData, N: ComponentList> ComponentList for Cons<GenVec<C>, N> {}
 
 pub struct SystemExecutor<
     L: ComponentList,
@@ -191,21 +195,21 @@ where
 }
 
 #[derive(Debug)]
-pub struct Expected<T: 'static> {
+pub struct Expected<C: ComponentData> {
     expected: bool,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<C>,
 }
 
-impl<T: 'static> PartialEq for Expected<T> {
+impl<C: ComponentData> PartialEq for Expected<C> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.expected == other.expected
     }
 }
 
-impl<T: 'static> Eq for Expected<T> {}
+impl<C: ComponentData> Eq for Expected<C> {}
 
-impl<T: 'static> Expected<T> {
+impl<C: ComponentData> Expected<C> {
     #[inline]
     pub fn new(expected: bool) -> Self {
         Self {
@@ -220,27 +224,27 @@ impl<T: 'static> Expected<T> {
     }
 }
 
-impl<T: 'static> Clone for Expected<T> {
+impl<C: ComponentData> Clone for Expected<C> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: 'static> Copy for Expected<T> {}
+impl<C: ComponentData> Copy for Expected<C> {}
 
-impl<T: 'static> Default for Expected<T> {
+impl<C: ComponentData> Default for Expected<C> {
     #[inline]
     fn default() -> Self {
         Self::new(false)
     }
 }
 
-pub trait QueryWrite<Q: 'static, M: Marker> {
+pub trait QueryWrite<Q: TypeList, M: Marker> {
     fn write(query: Q) -> Q;
 }
 
-impl<Q: 'static, M: Marker> QueryWrite<Q, M> for Nil
+impl<Q: TypeList, M: Marker> QueryWrite<Q, M> for Nil
 where
     Q: Contains<Nil, M>,
 {
@@ -249,7 +253,7 @@ where
     }
 }
 
-impl<Q: 'static, C: 'static, M1: Marker, M2: Marker, N: QueryWrite<Q, M2>>
+impl<Q: TypeList, C: ComponentData, M1: Marker, M2: Marker, N: QueryWrite<Q, M2>>
     QueryWrite<Q, Cons<M1, M2>> for Cons<C, N>
 where
     Q: Contains<Expected<C>, M1>,
@@ -290,7 +294,7 @@ impl Query for Nil {
     }
 }
 
-impl<C: 'static, N: Query> Query for Cons<Expected<C>, N> {
+impl<C: ComponentData, N: Query> Query for Cons<Expected<C>, N> {
     #[inline]
     fn is_subset(self, other: &Self) -> bool {
         let valid = if self.head.is_expected() {
@@ -323,20 +327,20 @@ impl<C: 'static, N: Query> Query for Cons<Expected<C>, N> {
     }
 }
 
-pub enum ComponentUpdate<C: 'static> {
+pub enum ComponentUpdate<C: ComponentData> {
     Update(C),
     Remove,
     Keep,
 }
 
-impl<C: 'static> Default for ComponentUpdate<C> {
+impl<C: ComponentData> Default for ComponentUpdate<C> {
     #[inline]
     fn default() -> Self {
         Self::Keep
     }
 }
 
-impl<'a, C: 'static> From<&'a ComponentUpdate<C>> for Expected<C> {
+impl<'a, C: ComponentData> From<&'a ComponentUpdate<C>> for Expected<C> {
     #[inline]
     fn from(value: &'a ComponentUpdate<C>) -> Self {
         match value {
@@ -347,11 +351,11 @@ impl<'a, C: 'static> From<&'a ComponentUpdate<C>> for Expected<C> {
 }
 
 pub trait Entity<C: ComponentList, M: Marker>:
-    MarkedIndexList<C, M> + OptionalList + Clone + Copy + 'static + Send + Sync
+    MarkedIndexList<C, M> + StaticTypeList + OptionalList + Clone + Copy + Send + Sync
 {
-    type Query: Default + Clone + Copy + 'static + Query + Send + Sync;
+    type Query: TypeList + Default + Clone + Copy + Query + Send + Sync;
     type Builder: MarkedItemList<C, M, IndexList = Self> + OptionalList + Default + Send;
-    type Update: Default + 'static + Send;
+    type Update: Default + Send;
 
     fn is_matching(&self, query: &Self::Query) -> bool;
 
@@ -413,7 +417,7 @@ where
     fn update_in_place<'a>(_value: Self::Mut<'a>, _update: Self::Update) {}
 }
 
-impl<C: 'static + Send + Sync, T: ComponentList, M1: Marker, M2: Marker, N: Entity<T, M2>>
+impl<C: ComponentData, T: ComponentList, M1: Marker, M2: Marker, N: Entity<T, M2>>
     Entity<T, Cons<M1, M2>> for Cons<Option<GenVecIndex<C>>, N>
 where
     T: Contains<GenVec<C>, M1>,
@@ -650,10 +654,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> ExternalListBuilder<T, Nil, M
 impl<T: ComponentList, C: ExternalSystem, M: Marker, E: Entity<T, M>>
     ExternalListBuilder<T, C, M, E>
 {
-    pub fn with_external<N: 'static>(
-        self,
-        external: N,
-    ) -> ExternalListBuilder<T, Cons<N, C>, M, E> {
+    pub fn with_external<N>(self, external: N) -> ExternalListBuilder<T, Cons<N, C>, M, E> {
         ExternalListBuilder {
             external: Cons::new(external, self.external),
             _marker: PhantomData,
@@ -947,7 +948,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
     }
 
     #[inline]
-    pub fn with_component<C: 'static, M2: Marker>(self, component: C) -> Self
+    pub fn with_component<C: ComponentData, M2: Marker>(self, component: C) -> Self
     where
         E::Builder: Contains<Option<CollectionType<C, GenVec<C>>>, M2>,
         E::Query: Contains<Expected<C>, M2>,
@@ -993,7 +994,7 @@ impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBu
     }
 
     #[inline]
-    pub fn update<C2: 'static, M2: Marker, M3: Marker>(mut self, component: C2) -> Self
+    pub fn update<C2: ComponentData, M2: Marker, M3: Marker>(mut self, component: C2) -> Self
     where
         E::Update: Contains<ComponentUpdate<C2>, M2>,
         W: Contains<C2, M3>,
@@ -1003,7 +1004,7 @@ impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBu
     }
 
     #[inline]
-    pub fn remove<C2: 'static, M2: Marker, M3: Marker>(mut self) -> Self
+    pub fn remove<C2: ComponentData, M2: Marker, M3: Marker>(mut self) -> Self
     where
         E::Update: Contains<ComponentUpdate<C2>, M2>,
         W: Contains<C2, M3>,
@@ -1261,33 +1262,33 @@ impl<
     }
 }
 
-pub struct PersistentIndexTyped<T: Clone + Copy + Eq + Hash + 'static> {
+pub struct PersistentIndexTyped<T: Clone + Copy + Eq + Hash> {
     index: GenVecIndex<T>,
 }
 
-impl<T: Clone + Copy + Eq + Hash + 'static> Hash for PersistentIndexTyped<T> {
+impl<T: Clone + Copy + Eq + Hash> Hash for PersistentIndexTyped<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.index.hash(state);
     }
 }
 
-impl<T: Clone + Copy + Eq + Hash + 'static> PartialEq for PersistentIndexTyped<T> {
+impl<T: Clone + Copy + Eq + Hash> PartialEq for PersistentIndexTyped<T> {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index
     }
 }
 
-impl<T: Clone + Copy + Eq + Hash + 'static> Eq for PersistentIndexTyped<T> {}
+impl<T: Clone + Copy + Eq + Hash> Eq for PersistentIndexTyped<T> {}
 
-impl<T: Clone + Copy + Eq + Hash + 'static> Clone for PersistentIndexTyped<T> {
+impl<T: Clone + Copy + Eq + Hash> Clone for PersistentIndexTyped<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: Clone + Copy + Eq + Hash + 'static> Copy for PersistentIndexTyped<T> {}
+impl<T: Clone + Copy + Eq + Hash> Copy for PersistentIndexTyped<T> {}
 
-impl<T: Clone + Copy + Eq + Hash + 'static> Debug for PersistentIndexTyped<T> {
+impl<T: Clone + Copy + Eq + Hash> Debug for PersistentIndexTyped<T> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PersistentEntityIndexTyped")
@@ -1608,8 +1609,8 @@ mod test_ecs {
     use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList};
 
     use crate::ecs::{
-        ContextQueue, EntityComponentConfiguration, EntityComponentContext, EntityIndex,
-        PersistentIndex, System,
+        ComponentData, ContextQueue, EntityComponentConfiguration, EntityComponentContext,
+        EntityIndex, PersistentIndex, System,
     };
 
     type EscContextType = ecs_context_type![
@@ -1621,11 +1622,11 @@ mod test_ecs {
         Nil
     ];
 
-    struct TestSystem<T: 'static + Debug + Send + Sync> {
+    struct TestSystem<T: ComponentData> {
         _marker: PhantomData<T>,
     }
 
-    impl<T: 'static + Debug + Send + Sync> TestSystem<T> {
+    impl<T: ComponentData> TestSystem<T> {
         pub fn new() -> Self {
             Self {
                 _marker: PhantomData,
@@ -1633,7 +1634,7 @@ mod test_ecs {
         }
     }
 
-    impl<T: 'static + Debug + Send + Sync> System<EscContextType> for TestSystem<T> {
+    impl<T: ComponentData + Debug> System<EscContextType> for TestSystem<T> {
         type External = Nil;
         type WriteList = Nil;
         type Components = list_type![T, Nil];
@@ -1659,11 +1660,11 @@ mod test_ecs {
         }
     }
 
-    struct TestSystemMulti<T: 'static + Debug + Send + Sync, N: 'static + Debug + Send + Sync> {
+    struct TestSystemMulti<T: ComponentData, N: ComponentData> {
         _marker: PhantomData<(T, N)>,
     }
 
-    impl<T: 'static + Debug + Send + Sync, N: 'static + Debug + Send + Sync> TestSystemMulti<T, N> {
+    impl<T: ComponentData, N: ComponentData> TestSystemMulti<T, N> {
         pub fn new() -> Self {
             Self {
                 _marker: PhantomData,
@@ -1671,7 +1672,7 @@ mod test_ecs {
         }
     }
 
-    impl<T: 'static + Debug + Send + Sync, N: 'static + Debug + Send + Sync> System<EscContextType>
+    impl<T: ComponentData + Debug, N: ComponentData + Debug> System<EscContextType>
         for TestSystemMulti<T, N>
     {
         type External = Nil;
