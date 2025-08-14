@@ -9,3 +9,4 @@ math = { path = "../math" }
 winit = { workspace = true }
 input = { path = "../input" }
 graphics = { path = "../graphics" }
+rayon = { workspace = true }

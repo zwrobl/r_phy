@@ -4,15 +4,21 @@ use std::{
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::{Deref, DerefMut},
+    sync::mpsc::{channel, Receiver, Sender},
 };
 
+use rayon::Scope;
 use type_kit::{
     CollectionType, Cons, Contains, FromGuard, GenCollection, GenIndexRaw, GenVec, GenVecIndex,
     IntoCollectionIterator, IntoSubsetIterator, ListIter, MarkedIndexList, MarkedItemList, Marker,
     Nil, OptionalList, Subset, TypeGuard, TypeList,
 };
 
-pub trait System<T: EntityComponentConfiguration>: 'static {
+pub trait ExternalSystem: TypeList + Sync {}
+
+impl<T: TypeList + Sync> ExternalSystem for T {}
+
+pub trait System<T: EntityComponentConfiguration>: 'static + Sync {
     type External: TypeList;
     type WriteList: TypeList;
     type Components: TypeList;
@@ -22,16 +28,16 @@ pub trait System<T: EntityComponentConfiguration>: 'static {
         entity: EntityIndex,
         components: <Self::Components as TypeList>::RefList<'a>,
         context: &T::Context,
-        queue: &mut ContextQueue<T>,
+        queue: &ContextQueue<T>,
         external: <Self::External as TypeList>::RefList<'a>,
     );
 }
 
-pub trait ComponentList: IntoCollectionIterator {}
+pub trait ComponentList: IntoCollectionIterator + Send + Sync {}
 
 impl ComponentList for Nil {}
 
-impl<C: 'static, N: ComponentList> ComponentList for Cons<GenVec<C>, N> {}
+impl<C: 'static + Send + Sync, N: ComponentList> ComponentList for Cons<GenVec<C>, N> {}
 
 pub struct SystemExecutor<
     L: ComponentList,
@@ -83,7 +89,7 @@ where
         &'a self,
         archetype: ArchetypeRef<'b, L, M1, E>,
         context: &EntityComponentContext<L, M1, E>,
-        operation_queue: &mut OperationQueue<L, M1, E>,
+        operation_queue: &OperationSender<L, M1, E>,
         external: &C,
     ) {
         if self.is_matching(archetype) {
@@ -112,26 +118,29 @@ where
     }
 }
 
-pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>, C: TypeList> {
-    fn execute<'a>(
+pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>, C: TypeList>: Sync {
+    fn execute<'a, 'b>(
         &'a self,
-        archetype: ArchetypeRef<'a, T, M, E>,
-        context: &EntityComponentContext<T, M, E>,
-        operation_queue: &mut OperationQueue<T, M, E>,
-        external: &C,
-    );
+        _scope: &'b Scope<'a>,
+        context: &'a EntityComponentContext<T, M, E>,
+        operation_queue: OperationSender<T, M, E>,
+        external: &'a C,
+    ) where
+        'a: 'b;
 
     fn component_write(&self) -> E::Query;
 }
 
 impl<T: ComponentList, M: Marker, E: Entity<T, M>, C: TypeList> SystemList<T, M, E, C> for Nil {
-    fn execute<'a>(
+    fn execute<'a, 'b>(
         &'a self,
-        _archetype: ArchetypeRef<'a, T, M, E>,
-        _context: &EntityComponentContext<T, M, E>,
-        _operation_queue: &mut OperationQueue<T, M, E>,
-        _external: &C,
-    ) {
+        _scope: &'b Scope<'a>,
+        _context: &'a EntityComponentContext<T, M, E>,
+        _operation_queue: OperationSender<T, M, E>,
+        _external: &'a C,
+    ) where
+        'a: 'b,
+    {
     }
 
     fn component_write(&self) -> E::Query {
@@ -141,7 +150,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>, C: TypeList> SystemList<T, M,
 
 impl<
         L: ComponentList,
-        C: TypeList,
+        C: ExternalSystem,
         M1: Marker,
         M2: Marker,
         M3: Marker,
@@ -153,17 +162,25 @@ where
     S::Components: IntoSubsetIterator<L, M2>,
     S::External: Subset<C, M3>,
 {
-    fn execute<'a>(
-        &self,
-        archetype: ArchetypeRef<'a, L, M1, E>,
-        context: &EntityComponentContext<L, M1, E>,
-        operation_queue: &mut OperationQueue<L, M1, E>,
-        external: &C,
-    ) {
-        self.head
-            .execute(archetype, context, operation_queue, external);
-        self.tail
-            .execute(archetype, context, operation_queue, external);
+    fn execute<'a, 'b>(
+        &'a self,
+        scope: &'b Scope<'a>,
+        context: &'a EntityComponentContext<L, M1, E>,
+        operation_queue: OperationSender<L, M1, E>,
+        external: &'a C,
+    ) where
+        'a: 'b,
+    {
+        {
+            let operation_queue = operation_queue.clone();
+            scope.spawn(move |_| {
+                context.iter_ref().for_each(|archetype| {
+                    self.head
+                        .execute(archetype, context, &operation_queue, external);
+                })
+            });
+        }
+        self.tail.execute(scope, context, operation_queue, external);
     }
 
     fn component_write(&self) -> E::Query {
@@ -330,11 +347,11 @@ impl<'a, C: 'static> From<&'a ComponentUpdate<C>> for Expected<C> {
 }
 
 pub trait Entity<C: ComponentList, M: Marker>:
-    MarkedIndexList<C, M> + OptionalList + Clone + Copy + 'static
+    MarkedIndexList<C, M> + OptionalList + Clone + Copy + 'static + Send + Sync
 {
-    type Query: Default + Clone + Copy + 'static + Query;
-    type Builder: MarkedItemList<C, M, IndexList = Self> + OptionalList + Default;
-    type Update: Default + 'static;
+    type Query: Default + Clone + Copy + 'static + Query + Send + Sync;
+    type Builder: MarkedItemList<C, M, IndexList = Self> + OptionalList + Default + Send;
+    type Update: Default + 'static + Send;
 
     fn is_matching(&self, query: &Self::Query) -> bool;
 
@@ -396,8 +413,8 @@ where
     fn update_in_place<'a>(_value: Self::Mut<'a>, _update: Self::Update) {}
 }
 
-impl<C: 'static, T: ComponentList, M1: Marker, M2: Marker, N: Entity<T, M2>> Entity<T, Cons<M1, M2>>
-    for Cons<Option<GenVecIndex<C>>, N>
+impl<C: 'static + Send + Sync, T: ComponentList, M1: Marker, M2: Marker, N: Entity<T, M2>>
+    Entity<T, Cons<M1, M2>> for Cons<Option<GenVecIndex<C>>, N>
 where
     T: Contains<GenVec<C>, M1>,
 {
@@ -494,15 +511,20 @@ pub struct Stage<
     T: ComponentList,
     M: Marker,
     E: Entity<T, M>,
-    C: TypeList,
+    C: ExternalSystem,
     L: SystemList<T, M, E, C>,
 > {
     systems: L,
     _phantom: PhantomData<(T, M, E, C)>,
 }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>, C: TypeList, L: SystemList<T, M, E, C>>
-    Stage<T, M, E, C, L>
+impl<
+        T: ComponentList,
+        M: Marker,
+        E: Entity<T, M>,
+        C: ExternalSystem,
+        L: SystemList<T, M, E, C>,
+    > Stage<T, M, E, C, L>
 {
     #[inline]
     pub fn new(systems: L) -> Self {
@@ -514,12 +536,11 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>, C: TypeList, L: SystemList<T,
 
     #[inline]
     pub fn execute<'a>(&self, context: &mut EntityComponentContext<T, M, E>, external: &C) {
-        let mut operation_queue = OperationQueue::new();
-        context.iter_ref().for_each(|archetype| {
-            self.systems
-                .execute(archetype, &context, &mut operation_queue, external);
+        let (sender, receiver) = OperationChannel::new();
+        rayon::scope(|scope| {
+            self.systems.execute(scope, &context, sender, external);
         });
-        operation_queue.process(context);
+        receiver.process(context);
     }
 
     #[inline]
@@ -530,7 +551,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>, C: TypeList, L: SystemList<T,
 
 impl<
         T: ComponentList,
-        C: TypeList,
+        C: ExternalSystem,
         M: Marker,
         E: Entity<T, M>,
         L: SystemList<T, M, E, C>,
@@ -555,14 +576,14 @@ pub struct SystemListBuilder<
     T: ComponentList,
     M: Marker,
     E: Entity<T, M>,
-    C: TypeList,
+    C: ExternalSystem,
     S: SystemList<T, M, E, C>,
 > {
     systems: S,
     _marker: PhantomData<(T, M, E, C)>,
 }
 
-impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, C: TypeList>
+impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, C: ExternalSystem>
     SystemListBuilder<T, M1, E, C, Nil>
 {
     pub fn new() -> Self {
@@ -573,8 +594,13 @@ impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, C: TypeList>
     }
 }
 
-impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, C: TypeList, S: SystemList<T, M1, E, C>>
-    SystemListBuilder<T, M1, E, C, S>
+impl<
+        T: ComponentList,
+        M1: Marker,
+        E: Entity<T, M1>,
+        C: ExternalSystem,
+        S: SystemList<T, M1, E, C>,
+    > SystemListBuilder<T, M1, E, C, S>
 {
     pub fn with_system<
         M2: Marker,
@@ -621,7 +647,9 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> ExternalListBuilder<T, Nil, M
     }
 }
 
-impl<T: ComponentList, C: TypeList, M: Marker, E: Entity<T, M>> ExternalListBuilder<T, C, M, E> {
+impl<T: ComponentList, C: ExternalSystem, M: Marker, E: Entity<T, M>>
+    ExternalListBuilder<T, C, M, E>
+{
     pub fn with_external<N: 'static>(
         self,
         external: N,
@@ -644,7 +672,7 @@ impl<T: ComponentList, C: TypeList, M: Marker, E: Entity<T, M>> ExternalListBuil
 
 pub struct StageListBuilder<
     T: ComponentList,
-    C: TypeList,
+    C: ExternalSystem,
     M: Marker,
     E: Entity<T, M>,
     L: SystemList<T, M, E, C>,
@@ -658,7 +686,7 @@ pub struct StageListBuilder<
 
 impl<
         T: ComponentList,
-        C: TypeList,
+        C: ExternalSystem,
         M1: Marker,
         E: Entity<T, M1>,
         L: SystemList<T, M1, E, C>,
@@ -1015,30 +1043,46 @@ pub enum Operation<C: ComponentList, M: Marker, E: Entity<C, M>> {
     Update(EntityUpdate<C, M, E>),
 }
 
-pub struct OperationQueue<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    operations: Vec<Operation<C, M, E>>,
+pub struct OperationSender<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    sender: Sender<Operation<C, M, E>>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for OperationQueue<C, M, E> {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
-    #[inline]
-    pub fn new() -> Self {
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Clone for OperationSender<C, M, E> {
+    fn clone(&self) -> Self {
         Self {
-            operations: Vec::new(),
+            sender: self.sender.clone(),
         }
     }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationSender<C, M, E> {
+    #[inline]
+    pub fn push_entity(&self, entity: EntityBuilder<C, M, E>) {
+        self.sender.send(Operation::Push(entity)).unwrap();
+    }
 
     #[inline]
+    pub fn pop_entity(&self, entity: EntityIndexTyped<C, M, E>) {
+        self.sender.send(Operation::Pop(entity)).unwrap();
+    }
+
+    #[inline]
+    pub fn update_entity<W: TypeList>(&self, entity: EntityUpdateBuilder<C, M, E, W>) {
+        self.sender.send(Operation::Update(entity.build())).unwrap();
+    }
+}
+
+pub struct OperationReceiver<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    receiver: Receiver<Operation<C, M, E>>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationReceiver<C, M, E> {
     pub fn process(self, world: &mut EntityComponentContext<C, M, E>) {
-        let mut updated = HashMap::new();
-        let mut removed = HashSet::new();
-        self.operations
+        let operations: Vec<_> = self.receiver.into_iter().collect();
+
+        let mut updated = HashMap::with_capacity(operations.len());
+        let mut removed = HashSet::with_capacity(operations.len());
+        operations
             .into_iter()
             .for_each(|operation| match operation {
                 Operation::Push(entity) => world.push_entity(entity, None),
@@ -1074,20 +1118,15 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationQueue<C, M, E> {
                 world.push_entity(builder, Some(persistent_index));
             });
     }
+}
 
-    #[inline]
-    pub fn push_entity(&mut self, entity: EntityBuilder<C, M, E>) {
-        self.operations.push(Operation::Push(entity));
-    }
+pub struct OperationChannel {}
 
-    #[inline]
-    pub fn pop_entity(&mut self, entity: EntityIndexTyped<C, M, E>) {
-        self.operations.push(Operation::Pop(entity));
-    }
-
-    #[inline]
-    pub fn update_entity<W: TypeList>(&mut self, entity: EntityUpdateBuilder<C, M, E, W>) {
-        self.operations.push(Operation::Update(entity.build()));
+impl OperationChannel {
+    pub fn new<C: ComponentList, M: Marker, E: Entity<C, M>>(
+    ) -> (OperationSender<C, M, E>, OperationReceiver<C, M, E>) {
+        let (sender, receiver) = channel();
+        (OperationSender { sender }, OperationReceiver { receiver })
     }
 }
 
@@ -1112,7 +1151,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentConfiguration
     type Context = Self;
 }
 
-pub type ContextQueue<C> = OperationQueue<
+pub type ContextQueue<C> = OperationSender<
     <C as EntityComponentConfiguration>::Components,
     <C as EntityComponentConfiguration>::Marker,
     <C as EntityComponentConfiguration>::Entity,
@@ -1560,7 +1599,11 @@ impl<T: ComponentList, C: TypeList, M: Marker, E: Entity<T, M>, S: StageList<T, 
 
 #[cfg(test)]
 mod test_ecs {
-    use std::{cell::RefCell, fmt::Debug, marker::PhantomData};
+    use std::{
+        fmt::Debug,
+        marker::PhantomData,
+        sync::{Arc, Mutex},
+    };
 
     use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList};
 
@@ -1578,11 +1621,11 @@ mod test_ecs {
         Nil
     ];
 
-    struct TestSystem<T: 'static + Debug> {
+    struct TestSystem<T: 'static + Debug + Send + Sync> {
         _marker: PhantomData<T>,
     }
 
-    impl<T: 'static + Debug> TestSystem<T> {
+    impl<T: 'static + Debug + Send + Sync> TestSystem<T> {
         pub fn new() -> Self {
             Self {
                 _marker: PhantomData,
@@ -1590,7 +1633,7 @@ mod test_ecs {
         }
     }
 
-    impl<T: 'static + Debug> System<EscContextType> for TestSystem<T> {
+    impl<T: 'static + Debug + Send + Sync> System<EscContextType> for TestSystem<T> {
         type External = Nil;
         type WriteList = Nil;
         type Components = list_type![T, Nil];
@@ -1600,7 +1643,7 @@ mod test_ecs {
             _entity: EntityIndex,
             unpack_list![borrowed_value]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &mut ContextQueue<EscContextType>,
+            queue: &ContextQueue<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             println!(
@@ -1616,11 +1659,11 @@ mod test_ecs {
         }
     }
 
-    struct TestSystemMulti<T: 'static + Debug, N: 'static + Debug> {
+    struct TestSystemMulti<T: 'static + Debug + Send + Sync, N: 'static + Debug + Send + Sync> {
         _marker: PhantomData<(T, N)>,
     }
 
-    impl<T: 'static + Debug, N: 'static + Debug> TestSystemMulti<T, N> {
+    impl<T: 'static + Debug + Send + Sync, N: 'static + Debug + Send + Sync> TestSystemMulti<T, N> {
         pub fn new() -> Self {
             Self {
                 _marker: PhantomData,
@@ -1628,7 +1671,9 @@ mod test_ecs {
         }
     }
 
-    impl<T: 'static + Debug, N: 'static + Debug> System<EscContextType> for TestSystemMulti<T, N> {
+    impl<T: 'static + Debug + Send + Sync, N: 'static + Debug + Send + Sync> System<EscContextType>
+        for TestSystemMulti<T, N>
+    {
         type External = Nil;
         type WriteList = Nil;
         type Components = list_type![T, N, Nil];
@@ -1640,7 +1685,7 @@ mod test_ecs {
                 'a,
             >,
             _context: &EscContextType,
-            _queue: &mut ContextQueue<EscContextType>,
+            _queue: &ContextQueue<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             println!(
@@ -1665,7 +1710,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![_borrow_u16]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &mut ContextQueue<EscContextType>,
+            queue: &ContextQueue<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             let _ = context
@@ -1699,7 +1744,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![entity_index]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &mut ContextQueue<EscContextType>,
+            queue: &ContextQueue<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             if let Some(index) = entity_index {
@@ -1732,7 +1777,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![persistent_index]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &mut ContextQueue<EscContextType>,
+            queue: &ContextQueue<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             if persistent_index.is_none() {
@@ -1845,13 +1890,13 @@ mod test_ecs {
     }
 
     pub struct ExternalSystem {
-        messages: RefCell<Vec<String>>,
+        messages: Arc<Mutex<Vec<String>>>,
     }
 
     impl ExternalSystem {
         pub fn new() -> Self {
             Self {
-                messages: RefCell::new(Vec::new()),
+                messages: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
@@ -1868,13 +1913,14 @@ mod test_ecs {
             _entity: EntityIndex,
             unpack_list![component]: <Self::Components as TypeList>::RefList<'a>,
             _context: &<EscContextType as EntityComponentConfiguration>::Context,
-            _queue: &mut ContextQueue<EscContextType>,
+            _queue: &ContextQueue<EscContextType>,
             unpack_list![external]: <Self::External as TypeList>::RefList<'a>,
         ) {
             println!("TestExternalSystemAcces received component: {}", component);
             external
                 .messages
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .push(format!("ExternalSystem received component: {}", component));
         }
     }
@@ -1905,7 +1951,7 @@ mod test_ecs {
         ecs.execute_systems();
 
         let external_system = ecs.get_external().get::<ExternalSystem, _>();
-        let messages = external_system.messages.borrow();
+        let messages = external_system.messages.lock().unwrap();
         assert_eq!(
             messages.len(),
             3,

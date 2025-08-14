@@ -45,18 +45,18 @@ mod tests {
     }
 }
 
-pub trait Marker: 'static + Clone + Copy {}
+pub trait Marker: 'static + Clone + Copy + Send + Sync {}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Here {}
 
 impl Marker for Here {}
 
-pub struct There<T> {
+pub struct There<T: Marker> {
     _phantom: PhantomData<T>,
 }
 
-impl<T> Debug for There<T> {
+impl<T: Marker> Debug for There<T> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         f.debug_struct("There")
             .field("T", &type_name::<T>())
@@ -64,7 +64,7 @@ impl<T> Debug for There<T> {
     }
 }
 
-impl<T> Default for There<T> {
+impl<T: Marker> Default for There<T> {
     #[inline]
     fn default() -> Self {
         Self {
@@ -73,16 +73,16 @@ impl<T> Default for There<T> {
     }
 }
 
-impl<T> Clone for There<T> {
+impl<T: Marker> Clone for There<T> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for There<T> {}
+impl<T: Marker> Copy for There<T> {}
 
-impl<T: 'static> Marker for There<T> {}
+impl<T: Marker> Marker for There<T> {}
 
 pub trait Contains<T, M: Marker> {
     fn get(&self) -> &T;
