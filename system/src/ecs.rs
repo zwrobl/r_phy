@@ -636,41 +636,6 @@ impl<
     }
 }
 
-pub struct ExternalListBuilder<T: ComponentList, C: TypeList, M: Marker, E: Entity<T, M>> {
-    external: C,
-    _marker: PhantomData<(T, M, E)>,
-}
-
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> ExternalListBuilder<T, Nil, M, E> {
-    #[inline]
-    pub fn new() -> Self {
-        ExternalListBuilder {
-            external: Nil::new(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T: ComponentList, C: ExternalSystem, M: Marker, E: Entity<T, M>>
-    ExternalListBuilder<T, C, M, E>
-{
-    pub fn with_external<N>(self, external: N) -> ExternalListBuilder<T, Cons<N, C>, M, E> {
-        ExternalListBuilder {
-            external: Cons::new(external, self.external),
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn build(self) -> StageListBuilder<T, C, M, E, Nil, Nil> {
-        StageListBuilder {
-            builder: SystemListBuilder::new(),
-            stages: Nil::new(),
-            external: self.external,
-            _marker: PhantomData,
-        }
-    }
-}
-
 pub struct StageListBuilder<
     T: ComponentList,
     C: ExternalSystem,
@@ -681,8 +646,19 @@ pub struct StageListBuilder<
 > {
     builder: SystemListBuilder<T, M, E, C, L>,
     stages: S,
-    external: C,
-    _marker: PhantomData<(T, M, E)>,
+    _marker: PhantomData<(T, M, E, C)>,
+}
+
+impl<T: ComponentList, C: ExternalSystem, M: Marker, E: Entity<T, M>>
+    StageListBuilder<T, C, M, E, Nil, Nil>
+{
+    pub fn new() -> Self {
+        StageListBuilder {
+            builder: SystemListBuilder::new(),
+            stages: Nil::new(),
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<
@@ -720,7 +696,6 @@ impl<
         StageListBuilder {
             builder: self.builder.with_system(system),
             stages: self.stages,
-            external: self.external,
             _marker: PhantomData,
         }
     }
@@ -729,7 +704,6 @@ impl<
         StageListBuilder {
             builder: SystemListBuilder::new(),
             stages: Cons::new(Stage::new(self.builder.build()), self.stages),
-            external: self.external,
             _marker: PhantomData,
         }
     }
@@ -738,7 +712,6 @@ impl<
         EntityComponentSystem {
             storage: EntityComponentContext::default(),
             stages: Cons::new(Stage::new(self.builder.build()), self.stages),
-            external: self.external,
             _marker: PhantomData,
         }
     }
@@ -1138,8 +1111,10 @@ pub trait EntityComponentConfiguration {
     type Context;
 
     #[inline]
-    fn builder() -> ExternalListBuilder<Self::Components, Nil, Self::Marker, Self::Entity> {
-        ExternalListBuilder::new()
+    fn with_external<E: ExternalSystem>(
+        _: &E,
+    ) -> StageListBuilder<Self::Components, E, Self::Marker, Self::Entity, Nil, Nil> {
+        StageListBuilder::new()
     }
 }
 
@@ -1566,8 +1541,7 @@ pub struct EntityComponentSystem<
 > {
     storage: EntityComponentContext<T, M, E>,
     stages: S,
-    external: C,
-    _marker: PhantomData<(T, M)>,
+    _marker: PhantomData<(T, M, C)>,
 }
 
 impl<T: ComponentList, C: TypeList, M: Marker, E: Entity<T, M>, S: StageList<T, M, E, C>>
@@ -1583,18 +1557,8 @@ impl<T: ComponentList, C: TypeList, M: Marker, E: Entity<T, M>, S: StageList<T, 
     }
 
     #[inline]
-    pub fn execute_systems(&mut self) {
-        self.stages.execute(&mut self.storage, &self.external);
-    }
-
-    #[inline]
-    pub fn get_external(&self) -> &C {
-        &self.external
-    }
-
-    #[inline]
-    pub fn get_external_mut(&mut self) -> &mut C {
-        &mut self.external
+    pub fn execute_systems(&mut self, external: &C) {
+        self.stages.execute(&mut self.storage, external);
     }
 }
 
@@ -1606,7 +1570,9 @@ mod test_ecs {
         sync::{Arc, Mutex},
     };
 
-    use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList};
+    use type_kit::{
+        list_type, list_value, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList,
+    };
 
     use crate::ecs::{
         ComponentData, ContextQueue, EntityComponentConfiguration, EntityComponentContext,
@@ -1813,8 +1779,8 @@ mod test_ecs {
 
     #[test]
     fn test_ecs_execution() {
-        let mut ecs = EscContextType::builder()
-            .build()
+        let external = Nil::new();
+        let mut ecs = EscContextType::with_external(&external)
             .with_system(TestSystem::<String>::new())
             .with_system(TestSystem::<u32>::new())
             .with_system(TestSystem::<u16>::new())
@@ -1839,15 +1805,15 @@ mod test_ecs {
         ecs.push_entity(entity);
         let entity = ecs.get_entity_builder().with_component(1u16);
         ecs.push_entity(entity);
-        ecs.execute_systems();
+        ecs.execute_systems(&external);
 
         println!("\n\tECS executed successfully first!\n");
 
-        ecs.execute_systems();
+        ecs.execute_systems(&external);
 
         println!("\n\tECS executed successfully second!\n");
 
-        ecs.execute_systems();
+        ecs.execute_systems(&external);
 
         println!("\n\tECS executed successfully third!\n");
     }
@@ -1855,8 +1821,8 @@ mod test_ecs {
     #[test]
     #[should_panic(expected = "New system's write access is a subset of existing systems")]
     fn test_ecs_stage_write_conflict() {
-        let _ = EscContextType::builder()
-            .build()
+        let external = Nil::new();
+        let _ = EscContextType::with_external(&external)
             .with_system(TestEntityQuery)
             .with_system(TestEntityQuery)
             .build();
@@ -1864,8 +1830,8 @@ mod test_ecs {
 
     #[test]
     fn test_ecs_stage_write_conflict_barier() {
-        let _ = EscContextType::builder()
-            .build()
+        let external = Nil::new();
+        let _ = EscContextType::with_external(&external)
             .with_system(TestEntityQuery)
             .barrier()
             .with_system(TestEntityQuery)
@@ -1874,8 +1840,8 @@ mod test_ecs {
 
     #[test]
     fn test_component_update_on_barrier() {
-        let mut ecs = EscContextType::builder()
-            .build()
+        let external = Nil::new();
+        let mut ecs = EscContextType::with_external(&external)
             .with_system(TestEntityPersistentIndex)
             .barrier()
             .with_system(TestEntityPersistentIndex)
@@ -1887,7 +1853,7 @@ mod test_ecs {
             .get_entity_builder()
             .with_component::<Option<PersistentIndex>, _>(None);
         ecs.push_entity(entity);
-        ecs.execute_systems();
+        ecs.execute_systems(&external);
     }
 
     pub struct ExternalSystem {
@@ -1928,9 +1894,8 @@ mod test_ecs {
 
     #[test]
     fn test_external_system_access() {
-        let mut ecs = EscContextType::builder()
-            .with_external(ExternalSystem::new())
-            .build()
+        let external = list_value![ExternalSystem::new(), Nil::new()];
+        let mut ecs = EscContextType::with_external(&external)
             .with_system(TestExternalSystemAcces)
             .build();
 
@@ -1949,9 +1914,9 @@ mod test_ecs {
             .with_component(2u16);
         ecs.push_entity(entity);
 
-        ecs.execute_systems();
+        ecs.execute_systems(&external);
 
-        let external_system = ecs.get_external().get::<ExternalSystem, _>();
+        let external_system = external.get::<ExternalSystem, _>();
         let messages = external_system.messages.lock().unwrap();
         assert_eq!(
             messages.len(),
