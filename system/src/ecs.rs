@@ -13,6 +13,7 @@ use type_kit::{
 };
 
 pub trait System<T: EntityComponentConfiguration>: 'static {
+    type WriteList: TypeList;
     type Components: TypeList;
 
     fn execute<'a>(
@@ -40,6 +41,7 @@ pub struct SystemExecutor<
     S::Components: IntoSubsetIterator<L, M2>,
 {
     query: E::Query,
+    write: E::Query,
     system: S,
     _phantom: std::marker::PhantomData<(L, M1, M2)>,
 }
@@ -55,12 +57,14 @@ where
     S::Components: IntoSubsetIterator<L, M2>,
 {
     #[inline]
-    pub fn new<M3: Marker>(system: S) -> Self
+    pub fn new<M3: Marker, M4: Marker>(system: S) -> Self
     where
         S::Components: QueryWrite<E::Query, M3>,
+        S::WriteList: QueryWrite<E::Query, M4>,
     {
         Self {
             query: <S::Components as QueryWrite<E::Query, M3>>::write(E::Query::default()),
+            write: <S::WriteList as QueryWrite<E::Query, M4>>::write(E::Query::default()),
             system,
             _phantom: std::marker::PhantomData,
         }
@@ -91,6 +95,11 @@ where
     pub fn is_matching(&self, archetype: ArchetypeRef<'_, L, M1, E>) -> bool {
         self.query.is_subset(&archetype.query)
     }
+
+    #[inline]
+    pub fn component_write(&self) -> E::Query {
+        self.write
+    }
 }
 
 pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
@@ -100,6 +109,8 @@ pub trait SystemList<T: ComponentList, M: Marker, E: Entity<T, M>> {
         context: &EntityComponentContext<T, M, E>,
         operation_queue: &mut OperationQueue<T, M, E>,
     );
+
+    fn component_write(&self) -> E::Query;
 }
 
 impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemList<T, M, E> for Nil {
@@ -109,6 +120,10 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemList<T, M, E> for Nil {
         _context: &EntityComponentContext<T, M, E>,
         _operation_queue: &mut OperationQueue<T, M, E>,
     ) {
+    }
+
+    fn component_write(&self) -> E::Query {
+        E::Query::default()
     }
 }
 
@@ -131,6 +146,12 @@ where
     ) {
         self.head.execute(archetype, context, operation_queue);
         self.tail.execute(archetype, context, operation_queue);
+    }
+
+    fn component_write(&self) -> E::Query {
+        let head = self.head.component_write();
+        let tail = self.tail.component_write();
+        head.get_union(&tail)
     }
 }
 
@@ -206,12 +227,31 @@ where
 
 pub trait Query: PartialEq + Eq {
     fn is_subset(self, other: &Self) -> bool;
+
+    fn is_empty(self) -> bool;
+
+    fn get_union(self, other: &Self) -> Self;
+
+    fn get_intersection(self, other: &Self) -> Self;
 }
 
 impl Query for Nil {
     #[inline]
     fn is_subset(self, _other: &Self) -> bool {
         true
+    }
+
+    fn is_empty(self) -> bool {
+        true
+    }
+
+    #[inline]
+    fn get_union(self, _other: &Self) -> Self {
+        self
+    }
+
+    fn get_intersection(self, _other: &Self) -> Self {
+        self
     }
 }
 
@@ -224,6 +264,27 @@ impl<C: 'static, N: Query> Query for Cons<Expected<C>, N> {
             true
         };
         valid && self.tail.is_subset(&other.tail)
+    }
+
+    #[inline]
+    fn is_empty(self) -> bool {
+        !self.head.is_expected() && self.tail.is_empty()
+    }
+
+    #[inline]
+    fn get_union(self, other: &Self) -> Self {
+        Cons::new(
+            Expected::new(self.is_expected() || other.head.is_expected()),
+            self.tail.get_union(&other.tail),
+        )
+    }
+
+    #[inline]
+    fn get_intersection(self, other: &Self) -> Self {
+        Cons::new(
+            Expected::new(self.is_expected() && other.head.is_expected()),
+            self.tail.get_intersection(&other.tail),
+        )
     }
 }
 
@@ -391,6 +452,78 @@ where
     }
 }
 
+pub trait StageList<T: ComponentList, M: Marker, E: Entity<T, M>> {
+    type SystemList: SystemList<T, M, E>;
+
+    fn execute<'a>(&self, context: &mut EntityComponentContext<T, M, E>);
+
+    fn component_write(&self) -> E::Query;
+}
+
+impl<T: ComponentList, M: Marker, E: Entity<T, M>> StageList<T, M, E> for Nil {
+    type SystemList = Nil;
+
+    #[inline]
+    fn execute<'a>(&self, _context: &mut EntityComponentContext<T, M, E>) {}
+
+    #[inline]
+    fn component_write(&self) -> E::Query {
+        E::Query::default()
+    }
+}
+
+pub struct Stage<T: ComponentList, M: Marker, E: Entity<T, M>, L: SystemList<T, M, E>> {
+    systems: L,
+    _phantom: PhantomData<(T, M, E)>,
+}
+
+impl<T: ComponentList, M: Marker, E: Entity<T, M>, L: SystemList<T, M, E>> Stage<T, M, E, L> {
+    #[inline]
+    pub fn new(systems: L) -> Self {
+        Self {
+            systems,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn execute<'a>(&self, context: &mut EntityComponentContext<T, M, E>) {
+        let mut operation_queue = OperationQueue::new();
+        context.iter_ref().for_each(|archetype| {
+            self.systems
+                .execute(archetype, &context, &mut operation_queue);
+        });
+        operation_queue.process(context);
+    }
+
+    #[inline]
+    pub fn component_write(&self) -> E::Query {
+        self.systems.component_write()
+    }
+}
+
+impl<
+        T: ComponentList,
+        M: Marker,
+        E: Entity<T, M>,
+        L: SystemList<T, M, E>,
+        N: StageList<T, M, E>,
+    > StageList<T, M, E> for Cons<Stage<T, M, E, L>, N>
+{
+    type SystemList = L;
+
+    #[inline]
+    fn execute<'a>(&self, context: &mut EntityComponentContext<T, M, E>) {
+        self.head.execute(context);
+        self.tail.execute(context);
+    }
+
+    #[inline]
+    fn component_write(&self) -> E::Query {
+        self.head.component_write()
+    }
+}
+
 pub struct SystemListBuilder<T: ComponentList, M: Marker, E: Entity<T, M>, S: SystemList<T, M, E>> {
     systems: S,
     _marker: PhantomData<(T, M, E)>,
@@ -408,23 +541,104 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> SystemListBuilder<T, M, E, Ni
 impl<T: ComponentList, M1: Marker, E: Entity<T, M1>, S: SystemList<T, M1, E>>
     SystemListBuilder<T, M1, E, S>
 {
-    pub fn with_system<M2: Marker, M3: Marker, N: System<EntityComponentContext<T, M1, E>>>(
+    pub fn with_system<
+        M2: Marker,
+        M3: Marker,
+        M4: Marker,
+        N: System<EntityComponentContext<T, M1, E>>,
+    >(
         self,
-        system: N,
+        system: SystemExecutor<T, M1, M2, E, N>,
     ) -> SystemListBuilder<T, M1, E, Cons<SystemExecutor<T, M1, M2, E, N>, S>>
     where
         N::Components: IntoSubsetIterator<T, M2> + QueryWrite<E::Query, M3>,
+        N::WriteList: QueryWrite<E::Query, M4>,
     {
         SystemListBuilder {
-            systems: Cons::new(SystemExecutor::new(system), self.systems),
+            systems: Cons::new(system, self.systems),
             _marker: PhantomData,
         }
     }
 
-    pub fn build(self) -> EntityComponentSystem<T, M1, E, S> {
+    pub fn component_write(&self) -> E::Query {
+        self.systems.component_write()
+    }
+
+    pub fn build(self) -> S {
+        self.systems
+    }
+}
+
+pub struct StageListBuilder<
+    T: ComponentList,
+    M: Marker,
+    E: Entity<T, M>,
+    L: SystemList<T, M, E>,
+    S: StageList<T, M, E>,
+> {
+    builder: SystemListBuilder<T, M, E, L>,
+    stages: S,
+    _marker: PhantomData<(T, M, E)>,
+}
+
+impl<T: ComponentList, M: Marker, E: Entity<T, M>> StageListBuilder<T, M, E, Nil, Nil> {
+    pub fn new() -> Self {
+        Self {
+            builder: SystemListBuilder::new(),
+            stages: Nil::new(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<
+        T: ComponentList,
+        M1: Marker,
+        E: Entity<T, M1>,
+        L: SystemList<T, M1, E>,
+        S: StageList<T, M1, E>,
+    > StageListBuilder<T, M1, E, L, S>
+{
+    pub fn with_system<
+        M2: Marker,
+        M3: Marker,
+        M4: Marker,
+        N: System<EntityComponentContext<T, M1, E>>,
+    >(
+        self,
+        system: N,
+    ) -> StageListBuilder<T, M1, E, Cons<SystemExecutor<T, M1, M2, E, N>, L>, S>
+    where
+        N::Components: IntoSubsetIterator<T, M2> + QueryWrite<E::Query, M3>,
+        N::WriteList: QueryWrite<E::Query, M4>,
+    {
+        let system = SystemExecutor::new(system);
+        if !system
+            .component_write()
+            .get_intersection(&self.builder.component_write())
+            .is_empty()
+        {
+            panic!("New system's write access is a subset of existing systems");
+        }
+        StageListBuilder {
+            builder: self.builder.with_system(system),
+            stages: self.stages,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn barrier(self) -> StageListBuilder<T, M1, E, Nil, Cons<Stage<T, M1, E, L>, S>> {
+        StageListBuilder {
+            builder: SystemListBuilder::new(),
+            stages: Cons::new(Stage::new(self.builder.build()), self.stages),
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn build(self) -> EntityComponentSystem<T, M1, E, Cons<Stage<T, M1, E, L>, S>> {
         EntityComponentSystem {
             storage: EntityComponentContext::default(),
-            systems: self.systems,
+            stages: Cons::new(Stage::new(self.builder.build()), self.stages),
             _marker: PhantomData,
         }
     }
@@ -796,8 +1010,8 @@ pub trait EntityComponentConfiguration {
     type Context;
 
     #[inline]
-    fn builder() -> SystemListBuilder<Self::Components, Self::Marker, Self::Entity, Nil> {
-        SystemListBuilder::new()
+    fn builder() -> StageListBuilder<Self::Components, Self::Marker, Self::Entity, Nil, Nil> {
+        StageListBuilder::new()
     }
 }
 
@@ -1218,14 +1432,14 @@ pub struct EntityComponentSystem<
     C: ComponentList,
     M: Marker,
     E: Entity<C, M>,
-    S: SystemList<C, M, E>,
+    S: StageList<C, M, E>,
 > {
     storage: EntityComponentContext<C, M, E>,
-    systems: S,
+    stages: S,
     _marker: PhantomData<(C, M)>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
+impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: StageList<C, M, E>>
     EntityComponentSystem<C, M, E, S>
 {
     #[inline]
@@ -1239,12 +1453,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>, S: SystemList<C, M, E>>
 
     #[inline]
     pub fn execute_systems(&mut self) {
-        let mut operation_queue = OperationQueue::new();
-        self.storage.iter_ref().for_each(|archetype| {
-            self.systems
-                .execute(archetype, &self.storage, &mut operation_queue);
-        });
-        operation_queue.process(&mut self.storage);
+        self.stages.execute(&mut self.storage);
     }
 }
 
@@ -1281,6 +1490,7 @@ mod test_ecs {
     }
 
     impl<T: 'static + Debug> System<EscContextType> for TestSystem<T> {
+        type WriteList = Nil;
         type Components = list_type![T, Nil];
 
         fn execute<'a>(
@@ -1316,6 +1526,7 @@ mod test_ecs {
     }
 
     impl<T: 'static + Debug, N: 'static + Debug> System<EscContextType> for TestSystemMulti<T, N> {
+        type WriteList = Nil;
         type Components = list_type![T, N, Nil];
 
         fn execute<'a>(
@@ -1340,6 +1551,7 @@ mod test_ecs {
     pub struct TestEntityQuery;
 
     impl System<EscContextType> for TestEntityQuery {
+        type WriteList = list_type![u16, String, Nil];
         type Components = list_type![u16, Nil];
 
         fn execute<'a>(
@@ -1371,6 +1583,7 @@ mod test_ecs {
     pub struct TestEntityTryGet;
 
     impl System<EscContextType> for TestEntityTryGet {
+        type WriteList = Nil;
         type Components = list_type![Option<EntityIndex>, Nil];
 
         fn execute<'a>(
@@ -1401,6 +1614,7 @@ mod test_ecs {
     pub struct TestEntityPersistentIndex;
 
     impl System<EscContextType> for TestEntityPersistentIndex {
+        type WriteList = list_type![Option<PersistentIndex>, Nil];
         type Components = list_type![Option<PersistentIndex>, Nil];
 
         fn execute<'a>(
@@ -1441,7 +1655,7 @@ mod test_ecs {
     }
 
     #[test]
-    fn test_ecs() {
+    fn test_ecs_execution() {
         let mut ecs = EscContextType::builder()
             .with_system(TestSystem::<String>::new())
             .with_system(TestSystem::<u32>::new())
@@ -1478,5 +1692,40 @@ mod test_ecs {
         ecs.execute_systems();
 
         println!("\n\tECS executed successfully third!\n");
+    }
+
+    #[test]
+    #[should_panic(expected = "New system's write access is a subset of existing systems")]
+    fn test_ecs_stage_write_conflict() {
+        let _ = EscContextType::builder()
+            .with_system(TestEntityQuery)
+            .with_system(TestEntityQuery)
+            .build();
+    }
+
+    #[test]
+    fn test_ecs_stage_write_conflict_barier() {
+        let _ = EscContextType::builder()
+            .with_system(TestEntityQuery)
+            .barrier()
+            .with_system(TestEntityQuery)
+            .build();
+    }
+
+    #[test]
+    fn test_component_update_on_barrier() {
+        let mut ecs = EscContextType::builder()
+            .with_system(TestEntityPersistentIndex)
+            .barrier()
+            .with_system(TestEntityPersistentIndex)
+            .build();
+
+        let entity = ecs.get_entity_builder().with_component(1u16);
+        ecs.push_entity(entity);
+        let entity = ecs
+            .get_entity_builder()
+            .with_component::<Option<PersistentIndex>, _>(None);
+        ecs.push_entity(entity);
+        ecs.execute_systems();
     }
 }
