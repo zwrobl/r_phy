@@ -382,11 +382,7 @@ impl<T: Destroy> Display for CollectionDestroyError<T> {
     }
 }
 
-impl<T: Destroy> Error for CollectionDestroyError<T> {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.err.source()
-    }
-}
+impl<T: Destroy> Error for CollectionDestroyError<T> {}
 
 impl<T: Destroy> Destroy for Vec<T>
 where

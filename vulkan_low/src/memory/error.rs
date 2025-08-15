@@ -3,6 +3,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use graphics::error::GraphicsError;
 use type_kit::{DropGuard, GuardError, TypeGuard};
 
 use crate::{
@@ -70,3 +71,9 @@ impl<E: Into<ExtError>> From<E> for MemoryError {
 }
 
 pub type MemoryResult<T> = Result<T, MemoryError>;
+
+impl From<MemoryError> for GraphicsError {
+    fn from(error: MemoryError) -> Self {
+        GraphicsError::External(error.to_string())
+    }
+}

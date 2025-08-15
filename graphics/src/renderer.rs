@@ -1,11 +1,12 @@
 pub mod camera;
 
 use math::types::Matrix4;
-use std::{error::Error, marker::PhantomData};
+use std::marker::PhantomData;
 use type_kit::{Cons, Contains, Marker, Nil};
 use winit::window::Window;
 
 use crate::{
+    error::{GraphicsError, GraphicsResult},
     model::{Material, MaterialHandleTyped, Mesh, MeshHandleTyped, Model, ModelTyped, Vertex},
     shader::{Shader, ShaderHandle, ShaderHandleTyped, ShaderType},
 };
@@ -22,17 +23,17 @@ pub trait DrawMapper {
         shader: ShaderHandle,
         model: Model,
         transform: &Matrix4,
-    ) -> Result<(), Box<dyn Error>>;
+    ) -> GraphicsResult<()>;
 }
 
 impl DrawMapper for Nil {
     fn try_draw(
         _: &mut impl RendererContext,
-        _: ShaderHandle,
-        _: Model,
+        shader: ShaderHandle,
+        model: Model,
         _: &Matrix4,
-    ) -> Result<(), Box<dyn Error>> {
-        Err("Draw configuration is invalid".into())
+    ) -> GraphicsResult<()> {
+        Err(GraphicsError::InvalidDrawCall { shader, model })
     }
 }
 
@@ -42,7 +43,7 @@ impl<V: Vertex, M: Material, N: DrawMapper> DrawMapper for Cons<Vec<Shader<V, M>
         shader: ShaderHandle,
         model: Model,
         transform: &Matrix4,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> GraphicsResult<()> {
         let shader_typed: Result<ShaderHandleTyped<Shader<V, M>>, _> = shader.try_into();
         let model_typed: Result<ModelTyped<M, V>, _> = model.try_into();
         if let (Ok(shader_typed), Ok(model_typed)) = (shader_typed, model_typed) {
@@ -61,12 +62,12 @@ pub struct Context<R: RendererContext, M: DrawMapper> {
 
 impl<R: RendererContext, M: DrawMapper> Context<R, M> {
     #[inline]
-    pub fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
+    pub fn begin_frame<C: Camera>(&mut self, camera: &C) -> GraphicsResult<()> {
         self.context.begin_frame(camera)
     }
 
     #[inline]
-    pub fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn end_frame(&mut self) -> GraphicsResult<()> {
         self.context.end_frame()
     }
 
@@ -76,7 +77,7 @@ impl<R: RendererContext, M: DrawMapper> Context<R, M> {
         shader: ShaderHandleTyped<S>,
         model: ModelTyped<S::Material, S::Vertex>,
         transform: &Matrix4,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> GraphicsResult<()> {
         self.context.draw_typed(shader, model, transform)
     }
 
@@ -86,7 +87,7 @@ impl<R: RendererContext, M: DrawMapper> Context<R, M> {
         shader: ShaderHandle,
         model: Model,
         transform: &Matrix4,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> GraphicsResult<()> {
         M::try_draw(&mut self.context, shader, model, transform)
     }
 }
@@ -94,7 +95,7 @@ impl<R: RendererContext, M: DrawMapper> Context<R, M> {
 pub fn create_context<B: ContextBuilder>(
     renderer: &mut B::Renderer,
     builder: B,
-) -> Result<Context<impl RendererContext + use<'_, B>, B::Shaders>, Box<dyn Error>> {
+) -> GraphicsResult<Context<impl RendererContext + use<'_, B>, B::Shaders>> {
     Ok(Context {
         context: builder.build(renderer)?,
         _phantom: PhantomData,
@@ -108,7 +109,7 @@ pub trait ContextBuilder {
 
     type Renderer: Renderer;
 
-    fn build(self, renderer: &mut Self::Renderer) -> Result<impl RendererContext, Box<dyn Error>>;
+    fn build(self, renderer: &mut Self::Renderer) -> GraphicsResult<impl RendererContext>;
 
     fn with_material_type<N: Material>(
         self,
@@ -158,16 +159,16 @@ pub trait RendererContext {
     type Materials;
     type Meshes;
 
-    fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>>;
-    fn end_frame(&mut self) -> Result<(), Box<dyn Error>>;
+    fn begin_frame<C: Camera>(&mut self, camera: &C) -> GraphicsResult<()>;
+    fn end_frame(&mut self) -> GraphicsResult<()>;
     fn draw_typed<S: ShaderType>(
         &mut self,
         shader: ShaderHandleTyped<S>,
         model: ModelTyped<S::Material, S::Vertex>,
         transform: &Matrix4,
-    ) -> Result<(), Box<dyn Error>>;
+    ) -> GraphicsResult<()>;
 }
 
 pub trait RendererBuilder {
-    fn build(self, window: &Window) -> Result<impl Renderer + use<Self>, Box<dyn Error>>;
+    fn build(self, window: &Window) -> GraphicsResult<impl Renderer + use<Self>>;
 }

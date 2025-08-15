@@ -1,4 +1,4 @@
-use std::{any::TypeId, convert::Infallible, error::Error, marker::PhantomData};
+use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
 use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard};
 
@@ -196,7 +196,7 @@ fn allocate_material_pack_textures_memory<'a>(
 fn prepare_material_pack_uniforms<'a, M: Material>(
     context: &Context,
     materials: &'a [M],
-) -> Result<Option<MaterialUniformPartial<'a, M>>, Box<dyn Error>> {
+) -> VkResult<Option<MaterialUniformPartial<'a, M>>> {
     let data = materials
         .iter()
         .filter_map(|material| material.uniform())
@@ -219,7 +219,7 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
     context: &Context,
     partial: MaterialUniformPartial<'a, M>,
     allocator: Option<AllocatorIndex>,
-) -> Result<ResourceIndex<PackUniform<M>>, Box<dyn Error>> {
+) -> VkResult<ResourceIndex<PackUniform<M>>> {
     let MaterialUniformPartial { uniform, data } = partial;
     let uniform_buffer = context.create_resource::<PackUniform<M>, _>((uniform, allocator))?;
     context.operate_mut(
@@ -236,7 +236,7 @@ fn allocate_material_pack_uniforms_memory<'a, M: Material>(
 pub fn prepare_material_pack<'a, M: Material>(
     context: &Context,
     materials: &'a [M],
-) -> Result<MaterialPackPartial<'a, M>, Box<dyn Error>> {
+) -> VkResult<MaterialPackPartial<'a, M>> {
     let textures = prepare_material_pack_textures(context, materials)?;
     let uniforms = prepare_material_pack_uniforms(context, materials)?;
     Ok(MaterialPackPartial {
@@ -250,7 +250,7 @@ pub fn allocate_material_pack_memory<'a, M: Material>(
     context: &Context,
     partial: MaterialPackPartial<'a, M>,
     allocator: Option<AllocatorIndex>,
-) -> Result<MaterialPack<M>, Box<dyn Error>> {
+) -> VkResult<MaterialPack<M>> {
     let MaterialPackPartial {
         textures,
         uniforms,
@@ -309,7 +309,7 @@ pub fn load_material_pack<M: Material>(
     context: &Context,
     materials: &[M],
     allocator: Option<AllocatorIndex>,
-) -> Result<MaterialPack<M>, Box<dyn Error>> {
+) -> VkResult<MaterialPack<M>> {
     let pack = prepare_material_pack(context, materials)?;
     let pack = allocate_material_pack_memory(context, pack, allocator)?;
     Ok(pack)

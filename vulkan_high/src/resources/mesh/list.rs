@@ -1,8 +1,9 @@
-use std::{any::type_name, error::Error};
+use std::any::type_name;
 
 use graphics::model::{Mesh, MeshTypeList, Vertex};
 use type_kit::{Cons, Create, Destroy, Nil, TypedNil};
 use vulkan_low::{
+    error::VkResult,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::Partial,
     Context,
@@ -64,14 +65,14 @@ pub trait MeshPackListBuilder: MeshTypeList {
     type Partial<'a>: MeshPackListPartial<Pack = Self::Pack>
         + for<'b> Destroy<Context<'b> = &'b Context>;
 
-    fn prepare<'a>(&'a self, context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>>;
+    fn prepare<'a>(&'a self, context: &Context) -> VkResult<Self::Partial<'a>>;
 }
 
 impl MeshPackListBuilder for Nil {
     type Pack = TypedNil<DummyPack>;
     type Partial<'a> = TypedNil<DummyPack>;
 
-    fn prepare<'a>(&'a self, _context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
+    fn prepare<'a>(&'a self, _context: &Context) -> VkResult<Self::Partial<'a>> {
         Ok(TypedNil::new())
     }
 }
@@ -80,7 +81,7 @@ impl<V: Vertex, N: MeshPackListBuilder> MeshPackListBuilder for Cons<Vec<Mesh<V>
     type Pack = Cons<Option<MeshPack<V>>, N::Pack>;
     type Partial<'a> = Cons<Option<MeshPackPartial<'a, V>>, N::Partial<'a>>;
 
-    fn prepare<'a>(&'a self, context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
+    fn prepare<'a>(&'a self, context: &Context) -> VkResult<Self::Partial<'a>> {
         let meshes = self.get();
         let partial = if !meshes.is_empty() {
             Some(MeshPackPartial::create(self.get(), context)?)
@@ -99,11 +100,8 @@ pub trait MeshPackListPartial: Sized {
 
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B);
 
-    fn allocate(
-        self,
-        context: &Context,
-        allocator: Option<AllocatorIndex>,
-    ) -> Result<Self::Pack, Box<dyn Error>>;
+    fn allocate(self, context: &Context, allocator: Option<AllocatorIndex>)
+        -> VkResult<Self::Pack>;
 }
 
 impl MeshPackListPartial for TypedNil<DummyPack> {
@@ -113,7 +111,7 @@ impl MeshPackListPartial for TypedNil<DummyPack> {
         self,
         _context: &Context,
         _allocator: Option<AllocatorIndex>,
-    ) -> Result<Self::Pack, Box<dyn Error>> {
+    ) -> VkResult<Self::Pack> {
         Ok(TypedNil::new())
     }
 
@@ -136,7 +134,7 @@ impl<'a, V: Vertex, N: MeshPackListPartial> MeshPackListPartial
         self,
         context: &Context,
         allocator: Option<AllocatorIndex>,
-    ) -> Result<Self::Pack, Box<dyn Error>> {
+    ) -> VkResult<Self::Pack> {
         let Self { head, tail } = self;
         let pack = if let Some(partial) = head {
             Some(MeshPack::create((partial, allocator), context)?)

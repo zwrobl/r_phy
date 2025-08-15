@@ -6,6 +6,15 @@ use math::types::{Vector2, Vector3, Vector4};
 use physics::shape;
 use type_kit::{Cons, FromGuard, Nil, TypeGuard, TypeGuardError, TypedNil};
 
+// TODO: Currently used for error handling missing vertex attributes, consider usability in other areas
+#[derive(Debug)]
+pub enum VertexAttribute {
+    Position,
+    Normal,
+    Tangent,
+    TexCoord,
+}
+
 pub struct Component {
     pub size: usize,
     pub offset: usize,

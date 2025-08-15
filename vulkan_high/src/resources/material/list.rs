@@ -1,8 +1,9 @@
-use std::{any::type_name, error::Error};
+use std::any::type_name;
 
 use graphics::model::{MaterialCollection, MaterialTypeList};
 use type_kit::{Cons, Destroy, Nil, TypedNil};
 use vulkan_low::{
+    error::VkResult,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::Partial,
     Context,
@@ -17,14 +18,14 @@ pub trait MaterialPackListBuilder: MaterialTypeList {
     type Partial<'a>: MaterialPackListPartial<Pack = Self::Pack>
         + for<'b> Destroy<Context<'b> = &'b Context>;
 
-    fn prepare<'a>(&'a self, device: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>>;
+    fn prepare<'a>(&'a self, device: &Context) -> VkResult<Self::Partial<'a>>;
 }
 
 impl MaterialPackListBuilder for Nil {
     type Pack = TypedNil<DummyPack>;
     type Partial<'a> = TypedNil<DummyPack>;
 
-    fn prepare<'a>(&'a self, _device: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
+    fn prepare<'a>(&'a self, _device: &Context) -> VkResult<Self::Partial<'a>> {
         Ok(TypedNil::new())
     }
 }
@@ -33,7 +34,7 @@ impl<M: Material, N: MaterialPackListBuilder> MaterialPackListBuilder for Cons<V
     type Pack = Cons<Option<MaterialPack<M>>, N::Pack>;
     type Partial<'a> = Cons<Option<MaterialPackPartial<'a, M>>, N::Partial<'a>>;
 
-    fn prepare<'a>(&'a self, context: &Context) -> Result<Self::Partial<'a>, Box<dyn Error>> {
+    fn prepare<'a>(&'a self, context: &Context) -> VkResult<Self::Partial<'a>> {
         let materials = self.get();
         let partial = if !materials.is_empty() {
             Some(prepare_material_pack(context, materials)?)
@@ -52,11 +53,8 @@ pub trait MaterialPackListPartial: Sized {
 
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B);
 
-    fn allocate(
-        self,
-        context: &Context,
-        allocator: Option<AllocatorIndex>,
-    ) -> Result<Self::Pack, Box<dyn Error>>;
+    fn allocate(self, context: &Context, allocator: Option<AllocatorIndex>)
+        -> VkResult<Self::Pack>;
 }
 
 impl MaterialPackListPartial for TypedNil<DummyPack> {
@@ -68,7 +66,7 @@ impl MaterialPackListPartial for TypedNil<DummyPack> {
         self,
         _context: &Context,
         _allocator: Option<AllocatorIndex>,
-    ) -> Result<Self::Pack, Box<dyn Error>> {
+    ) -> VkResult<Self::Pack> {
         Ok(TypedNil::new())
     }
 }
@@ -87,7 +85,7 @@ impl<'a, M: Material, N: MaterialPackListPartial> MaterialPackListPartial
         self,
         context: &Context,
         allocator: Option<AllocatorIndex>,
-    ) -> Result<Self::Pack, Box<dyn Error>> {
+    ) -> VkResult<Self::Pack> {
         let Self { head, tail } = self;
         let pack = if let Some(pack) = head {
             Some(allocate_material_pack_memory(context, pack, allocator)?)

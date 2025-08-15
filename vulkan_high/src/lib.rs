@@ -1,8 +1,9 @@
 pub mod context;
+pub mod error;
 pub mod renderer;
 pub mod resources;
 
-use std::error::Error;
+use graphics::error::GraphicsResult;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use type_kit::{Create, Destroy};
@@ -29,7 +30,7 @@ impl VulkanRendererConfig {
 }
 
 impl VulkanRendererConfigBuilder {
-    pub fn build(self) -> Result<VulkanRendererConfig, Box<dyn Error>> {
+    pub fn build(self) -> GraphicsResult<VulkanRendererConfig> {
         let config = VulkanRendererConfig {};
         Ok(config)
     }
@@ -70,7 +71,7 @@ impl VulkanContext {
 }
 
 impl VulkanContext {
-    pub fn new(window: &Window, config: VulkanRendererConfig) -> Result<Rc<Self>, Box<dyn Error>> {
+    pub fn new(window: &Window, config: VulkanRendererConfig) -> GraphicsResult<Rc<Self>> {
         let context = Context::build(window)?;
         let common_resources = CommonResourcesPartial::create((), &context)?;
         let mut allocator_config = StaticConfig::new();
@@ -106,10 +107,7 @@ impl Drop for VulkanContext {
 }
 
 impl<R: RendererBuilder> graphics::renderer::RendererBuilder for VulkanRendererBuilder<R> {
-    fn build(
-        self,
-        window: &Window,
-    ) -> Result<impl graphics::renderer::Renderer + use<R>, Box<dyn Error>> {
+    fn build(self, window: &Window) -> GraphicsResult<impl graphics::renderer::Renderer + use<R>> {
         let Self { config, renderer } = self;
         let context = VulkanContext::new(&window, config.unwrap())?;
         let mut allocator = StaticConfig::new();

@@ -1,12 +1,12 @@
 use core::slice;
-use std::{
-    any::TypeId, collections::HashMap, error::Error, marker::PhantomData, ops::Deref, path::PathBuf,
-};
+use std::{any::TypeId, collections::HashMap, marker::PhantomData, ops::Deref, path::PathBuf};
 
 use bytemuck::AnyBitPattern;
 
 use math::types::{Vector3, Vector4};
 use type_kit::{Cons, FromGuard, Nil, TypeGuard, TypeGuardError, TypedNil};
+
+use crate::error::{GraphicsError, GraphicsResult};
 
 #[allow(dead_code)]
 pub const fn has_data<T: Material>() -> bool {
@@ -116,9 +116,11 @@ pub struct UnlitMaterial {
 }
 
 impl UnlitMaterialBuilder {
-    pub fn build(self) -> Result<UnlitMaterial, Box<dyn Error>> {
+    pub fn build(self) -> GraphicsResult<UnlitMaterial> {
         Ok(UnlitMaterial {
-            albedo: self.albedo.ok_or("Albedo texture not provided!")?,
+            albedo: self
+                .albedo
+                .ok_or(GraphicsError::MissingPbrTexture(PbrMaps::Albedo))?,
         })
     }
 
@@ -194,7 +196,7 @@ pub struct PbrMaterialBuilder {
 }
 
 impl PbrMaterialBuilder {
-    pub fn build(self) -> Result<PbrMaterial, Box<dyn Error>> {
+    pub fn build(self) -> GraphicsResult<PbrMaterial> {
         let Self {
             images: [albedo, normal, metallic_roughness, occlusion, emissive],
             factors,
@@ -202,11 +204,12 @@ impl PbrMaterialBuilder {
         Ok(PbrMaterial {
             images: PbrImages {
                 images: [
-                    albedo.ok_or("Albedo texture not provided!")?,
-                    normal.ok_or("Normal texture not provided!")?,
-                    metallic_roughness.ok_or("Metallic-roughness texture not provided!")?,
-                    occlusion.ok_or("Occlusion texture not provided!")?,
-                    emissive.ok_or("Emissive texture not provided!")?,
+                    albedo.ok_or(GraphicsError::MissingPbrTexture(PbrMaps::Albedo))?,
+                    normal.ok_or(GraphicsError::MissingPbrTexture(PbrMaps::Normal))?,
+                    metallic_roughness
+                        .ok_or(GraphicsError::MissingPbrTexture(PbrMaps::MetallicRoughness))?,
+                    occlusion.ok_or(GraphicsError::MissingPbrTexture(PbrMaps::Occlusion))?,
+                    emissive.ok_or(GraphicsError::MissingPbrTexture(PbrMaps::Emissive))?,
                 ],
             },
             factors,

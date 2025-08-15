@@ -1,3 +1,4 @@
+use graphics::error::GraphicsResult;
 use graphics::model::ModelTyped;
 use graphics::renderer::DrawMapper;
 use graphics::shader::Shader;
@@ -9,7 +10,6 @@ use graphics::{
     model::{Material, MaterialHandleTyped, Mesh, MeshHandleTyped, Vertex},
     shader::{ShaderHandleTyped, ShaderType},
 };
-use std::error::Error;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
@@ -77,7 +77,7 @@ impl<
     fn build(
         self,
         renderer: &mut Self::Renderer,
-    ) -> Result<impl graphics::renderer::RendererContext, Box<dyn Error>> {
+    ) -> GraphicsResult<impl graphics::renderer::RendererContext> {
         let context = renderer.shared_context();
         let mut config = StaticConfig::new();
         let resources = ResourcePack::<R, _, _, _>::prepare(
@@ -217,14 +217,14 @@ impl<
     type Materials = M;
     type Meshes = V;
 
-    fn begin_frame<C: Camera>(&mut self, camera: &C) -> Result<(), Box<dyn Error>> {
+    fn begin_frame<C: Camera>(&mut self, camera: &C) -> GraphicsResult<()> {
         let camera_matrices = camera.get_matrices();
         let camera_descriptor = self.renderer.begin_frame(&self.context, camera_matrices)?;
         self.draw_recorder.begin_frame(camera_descriptor);
         Ok(())
     }
 
-    fn end_frame(&mut self) -> Result<(), Box<dyn Error>> {
+    fn end_frame(&mut self) -> GraphicsResult<()> {
         let draw_storage = self.draw_recorder.end_frame();
         self.renderer.render(&self.context, draw_storage)?;
         Ok(())
@@ -235,7 +235,7 @@ impl<
         shader: ShaderHandleTyped<T>,
         model: ModelTyped<T::Material, T::Vertex>,
         transform: &Matrix4,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> GraphicsResult<()> {
         let shader = shader.map::<R::ShaderType<T>>();
         self.draw_recorder.append_draw_call(
             &self.context,

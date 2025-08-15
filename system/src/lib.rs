@@ -1,3 +1,4 @@
+pub mod error;
 pub mod system;
 
 use entity::{context::EntityComponentContext, entity::EntityBuilder, EntityComponentSystem};
@@ -11,15 +12,18 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use std::{error::Error, marker::PhantomData, time::Instant};
+use std::{marker::PhantomData, time::Instant};
 
 use graphics::renderer::{camera::CameraNone, create_context};
 
 use graphics::renderer::{camera::Camera, ContextBuilder, Renderer, RendererBuilder};
 
-use crate::system::{
-    frame::FrameData,
-    renderer::{DrawCommandChannel, DrawQueue},
+use crate::{
+    error::{SystemError, SystemResult},
+    system::{
+        frame::FrameData,
+        renderer::{DrawCommandChannel, DrawQueue},
+    },
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -32,7 +36,7 @@ impl CursorState {
     pub fn new() -> Self {
         Self::Free
     }
-    pub fn switch(&mut self, window: &Window) -> Result<(), Box<dyn Error>> {
+    pub fn switch(&mut self, window: &Window) -> SystemResult<()> {
         *self = match self {
             Self::Free => {
                 let window_extent = window.inner_size();
@@ -89,7 +93,7 @@ impl<R: RendererBuilder, C: Camera> LoopBuilder<R, C> {
         }
     }
 
-    pub fn build(self) -> Result<Loop<impl Renderer, C>, Box<dyn Error>> {
+    pub fn build(self) -> SystemResult<Loop<impl Renderer, C>> {
         let Self {
             window,
             renderer,
@@ -97,10 +101,10 @@ impl<R: RendererBuilder, C: Camera> LoopBuilder<R, C> {
         } = self;
         let event_loop = EventLoop::new()?;
         let window = window
-            .ok_or("Window configuration not provided for Loop!")?
+            .ok_or(SystemError::MissingWindowConfiguration)?
             .build(&event_loop)?;
         let renderer = renderer.build(&window)?;
-        let camera = camera.ok_or("Camera not selected for Loop!")?;
+        let camera = camera.ok_or(SystemError::MissingCameraConfiguration)?;
         let (draw_queue, draw_storage) = DrawCommandChannel::new();
         let external = list_value![
             InputSystem::new(),
@@ -200,7 +204,7 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
     >(
         self,
         scene: Scene<E, D, B>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> SystemResult<()> {
         let Self {
             window,
             event_loop,

@@ -5,6 +5,7 @@ use std::{
 };
 
 use ash::{vk, LoadingError};
+use graphics::error::GraphicsError;
 use type_kit::{DropGuard, GenCollectionError, TypeGuard, TypeGuardError};
 use winit::raw_window_handle::HandleError;
 
@@ -161,3 +162,9 @@ impl From<DeviceError> for VkError {
 }
 
 pub type VkResult<T> = Result<T, VkError>;
+
+impl From<VkError> for GraphicsError {
+    fn from(error: VkError) -> Self {
+        GraphicsError::External(error.to_string())
+    }
+}

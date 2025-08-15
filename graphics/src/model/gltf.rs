@@ -1,9 +1,12 @@
 use super::{CommonVertex, Mesh, PbrMaps, PbrMaterial};
 use base64::Engine;
 use gltf::{self, buffer, mesh::Mode, Gltf, Semantic};
-use std::{error::Error, path::Path};
+use std::path::Path;
 
-use crate::model::Image;
+use crate::{
+    error::{GraphicsError, GraphicsResult},
+    model::{Image, VertexAttribute},
+};
 use math::types::{Vector2, Vector3, Vector4};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -86,49 +89,44 @@ impl<'a> Iterator for AttributeReader<'a> {
 }
 
 impl DocumentReader {
-    pub fn new(path: &Path) -> Result<Self, Box<dyn Error>> {
+    pub fn new(path: &Path) -> GraphicsResult<Self> {
         let base = path.parent().unwrap_or(Path::new("./"));
         let Gltf { document, blob } = Gltf::open(path)?;
         let buffers = gltf::import_buffers(&document, Some(base), blob)?;
         Ok(Self { document, buffers })
     }
 
-    fn get_view(&self, view: gltf::buffer::View) -> Result<BufferView, Box<dyn Error>> {
+    fn get_view(&self, view: gltf::buffer::View) -> BufferView {
         let buffer = &self.buffers[view.buffer().index()];
-        Ok(BufferView {
+        BufferView {
             stride: view.stride().unwrap_or(0),
             buffer: &buffer[view.offset()..(view.offset() + view.length())],
-        })
+        }
     }
 
-    fn get_accessor(&self, accessor: gltf::Accessor) -> Result<AttributeReader, Box<dyn Error>> {
-        let view = self.get_view(accessor.view().unwrap())?;
-        Ok(AttributeReader {
+    fn get_accessor(&self, accessor: gltf::Accessor) -> AttributeReader {
+        let view = self.get_view(accessor.view().unwrap());
+        AttributeReader {
             view,
             count: accessor.count(),
             cursor: accessor.offset(),
             element_size: accessor.size(),
-        })
+        }
     }
 
     fn get_primitive_data(
         &self,
         primitive: gltf::Primitive,
-    ) -> Result<(Vec<u32>, Vec<CommonVertex>), Box<dyn Error>> {
-        let mut reader = PrimitiveReaderBuilder::new().with_indices(
-            self.get_accessor(
-                primitive
-                    .indices()
-                    .ok_or_else::<Box<dyn Error>, _>(|| "Mesh indices not found".into())?,
-            )?,
-        );
+    ) -> GraphicsResult<(Vec<u32>, Vec<CommonVertex>)> {
+        let mut reader = PrimitiveReaderBuilder::new()
+            .with_indices(self.get_accessor(primitive.indices().unwrap()));
         for (semantic, accessor) in primitive.attributes() {
-            reader = reader.with_attribute(semantic, self.get_accessor(accessor)?)?;
+            reader = reader.with_attribute(semantic, self.get_accessor(accessor))?;
         }
         reader.build()?.read()
     }
 
-    fn get_mesh(&self, mesh: gltf::Mesh) -> Result<Mesh<CommonVertex>, Box<dyn Error>> {
+    fn get_mesh(&self, mesh: gltf::Mesh) -> GraphicsResult<Mesh<CommonVertex>> {
         let mut indices = Vec::new();
         let mut vertices = Vec::new();
         for primitive in mesh.primitives() {
@@ -137,8 +135,7 @@ impl DocumentReader {
                 indices.push(p_indices);
                 vertices.push(p_vertices);
             } else {
-                // TODO: Should skip instaed of returning error
-                Err("Only triangle list models are supported")?;
+                Err(GraphicsError::UnsupportedPrimitive(primitive.mode()))?;
             }
         }
         Ok(Mesh {
@@ -148,27 +145,19 @@ impl DocumentReader {
     }
 
     // TODO: Restore mime_type checkf for image format support
-    fn get_image(&self, image: gltf::Image, base: &Path) -> Result<Image, Box<dyn Error>> {
+    fn get_image(&self, image: gltf::Image, base: &Path) -> GraphicsResult<Image> {
         let image = match image.source() {
             gltf::image::Source::View { view, .. } => {
-                // match mime_type {
-                //     "image/png" => (),
-                //     _ => Err("Unsupported image format")?,
-                // }
-                let view = self.get_view(view)?;
+                let view = self.get_view(view);
                 Image::Buffer(view.buffer.to_vec())
             }
             gltf::image::Source::Uri { uri, .. } => {
-                // match mime_type {
-                //     Some("image/png") => (),
-                //     _ => Err("Unsupported image format")?,
-                // };
                 if let Some(rest) = uri.strip_prefix("data:") {
                     let mut it = rest.split(";base64,");
                     let data = match (it.next(), it.next()) {
                         (_, Some(data)) => data,
                         (Some(data), None) => data,
-                        _ => Err("Invalid data uri")?,
+                        _ => Err(GraphicsError::InvalidURI(uri.to_string()))?,
                     };
                     Image::Buffer(base64::engine::general_purpose::STANDARD.decode(data)?)
                 } else {
@@ -179,11 +168,7 @@ impl DocumentReader {
         Ok(image)
     }
 
-    fn get_material(
-        &self,
-        material: gltf::Material,
-        base: &Path,
-    ) -> Result<PbrMaterial, Box<dyn Error>> {
+    fn get_material(&self, material: gltf::Material, base: &Path) -> GraphicsResult<PbrMaterial> {
         let mut builder = PbrMaterial::builder();
 
         let pbr = material.pbr_metallic_roughness();
@@ -237,7 +222,7 @@ struct PrimitiveReader<'a> {
 }
 
 impl<'a> PrimitiveReader<'a> {
-    fn read(mut self) -> Result<(Vec<u32>, Vec<CommonVertex>), Box<dyn Error>> {
+    fn read(mut self) -> GraphicsResult<(Vec<u32>, Vec<CommonVertex>)> {
         let mut indices = Vec::new();
         for bytes in self.indices {
             let bytes = <[u8; 2]>::try_from(bytes)?;
@@ -249,15 +234,18 @@ impl<'a> PrimitiveReader<'a> {
             let normal = self
                 .norm
                 .next()
-                .ok_or_else::<Box<dyn Error>, _>(|| "Missing normal data".into())?;
-            let uv = self
-                .uv
-                .next()
-                .ok_or_else::<Box<dyn Error>, _>(|| "Missing uv data".into())?;
+                .ok_or(GraphicsError::MissingVertexAttribute(
+                    VertexAttribute::Normal,
+                ))?;
+            let uv = self.uv.next().ok_or(GraphicsError::MissingVertexAttribute(
+                VertexAttribute::TexCoord,
+            ))?;
             let tangent = self
                 .tan
                 .next()
-                .ok_or_else::<Box<dyn Error>, _>(|| "Missing normal data".into())?;
+                .ok_or(GraphicsError::MissingVertexAttribute(
+                    VertexAttribute::Tangent,
+                ))?;
             vertices.push(
                 VertexBuilder::new()
                     .with_pos(Vector3::try_from_le_bytes(pos)?)
@@ -291,14 +279,14 @@ impl<'a> PrimitiveReaderBuilder<'a> {
         mut self,
         semantic: Semantic,
         reader: AttributeReader<'a>,
-    ) -> Result<Self, Box<dyn Error>> {
+    ) -> GraphicsResult<Self> {
         match semantic {
             Semantic::Positions => self.pos = Some(reader),
             Semantic::Normals => self.norm = Some(reader),
             Semantic::TexCoords(0) => self.uv = Some(reader),
             Semantic::Tangents => self.tan = Some(reader),
             _ => {
-                Err("Unsupported semantic")?;
+                Err(GraphicsError::UnsupportedSemantics(semantic))?;
             }
         }
         Ok(self)
@@ -309,28 +297,42 @@ impl<'a> PrimitiveReaderBuilder<'a> {
         self
     }
 
-    fn build(self) -> Result<PrimitiveReader<'a>, Box<dyn Error>> {
+    fn build(self) -> GraphicsResult<PrimitiveReader<'a>> {
         Ok(PrimitiveReader {
-            pos: self.pos.ok_or("Missing position attribute")?,
-            norm: self.norm.ok_or("Missing normal attribute")?,
-            uv: self.uv.ok_or("Missing uv attribute")?,
-            tan: self.tan.ok_or("Missing tangent attribute")?,
-            indices: self.indices.ok_or("Missing vertex indices data")?,
+            pos: self.pos.ok_or(GraphicsError::MissingVertexAttribute(
+                VertexAttribute::Position,
+            ))?,
+            norm: self.norm.ok_or(GraphicsError::MissingVertexAttribute(
+                VertexAttribute::Normal,
+            ))?,
+            uv: self.uv.ok_or(GraphicsError::MissingVertexAttribute(
+                VertexAttribute::TexCoord,
+            ))?,
+            tan: self.tan.ok_or(GraphicsError::MissingVertexAttribute(
+                VertexAttribute::Tangent,
+            ))?,
+            indices: self.indices.ok_or(GraphicsError::MissingVertexIndices)?,
         })
     }
 }
 
 impl Mesh<CommonVertex> {
-    pub fn load_gltf(path: &Path) -> Result<(Mesh<CommonVertex>, PbrMaterial), Box<dyn Error>> {
+    pub fn load_gltf(path: &Path) -> GraphicsResult<(Mesh<CommonVertex>, PbrMaterial)> {
         let base = path.parent().unwrap_or(Path::new("./"));
         let reader = DocumentReader::new(path)?;
-        let mesh = reader.get_mesh(reader.document.meshes().next().ok_or("No mesh found")?)?;
+        let mesh = reader.get_mesh(
+            reader
+                .document
+                .meshes()
+                .next()
+                .ok_or(GraphicsError::MissingMeshData(path.to_path_buf()))?,
+        )?;
         let material = reader.get_material(
             reader
                 .document
                 .materials()
                 .next()
-                .ok_or("No material found")?,
+                .ok_or(GraphicsError::MissingMaterialData(path.to_path_buf()))?,
             base,
         )?;
         Ok((mesh, material))

@@ -10,11 +10,12 @@ pub use mesh::*;
 pub use pipeline::*;
 pub use skybox::*;
 
-use std::{convert::Infallible, error::Error, marker::PhantomData};
+use std::{convert::Infallible, marker::PhantomData};
 
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use vulkan_low::{
+    error::VkResult,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::Partial,
     Context,
@@ -99,10 +100,7 @@ where
         }
     }
 
-    pub fn build(
-        self,
-        context: &Context,
-    ) -> Result<ResourcePack<R, M, V, P::Pack<R>>, Box<dyn Error>> {
+    pub fn build(self, context: &Context) -> VkResult<ResourcePack<R, M, V, P::Pack<R>>> {
         let Self {
             materials,
             meshes,
@@ -185,7 +183,7 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
         materials: &'a MB,
         meshes: &'a MV,
         pipelines: MP,
-    ) -> Result<PackPartial<'a, R, M, V, MP, MB, MV>, Box<dyn Error>> {
+    ) -> VkResult<PackPartial<'a, R, M, V, MP, MB, MV>> {
         let materials = materials.prepare(context)?;
         let meshes = meshes.prepare(context)?;
         Ok(ResourcePackPartial {

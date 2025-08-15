@@ -6,6 +6,7 @@ use std::{
 };
 
 use ash::vk;
+use graphics::error::GraphicsError;
 use png::{BitDepth, ColorType};
 
 use crate::{
@@ -225,3 +226,9 @@ impl<E: Into<ExtError>> From<E> for ResourceError {
 }
 
 pub type ResourceResult<T> = Result<T, ResourceError>;
+
+impl From<ResourceError> for GraphicsError {
+    fn from(error: ResourceError) -> Self {
+        GraphicsError::External(error.to_string())
+    }
+}

@@ -1,7 +1,7 @@
 use super::EPS;
 use bytemuck::{Pod, Zeroable};
 use std::{
-    error::Error,
+    array::TryFromSliceError,
     ops::{Add, Div, Index, IndexMut, Mul, Neg, Sub},
 };
 
@@ -139,7 +139,7 @@ impl From<Vector2> for [f32; 2] {
 
 impl Vector2 {
     #[inline]
-    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, TryFromSliceError> {
         Ok(Self {
             x: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4])?),
             y: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[4..8])?),
@@ -352,7 +352,7 @@ impl From<Vector3> for [f32; 3] {
 
 impl Vector3 {
     #[inline]
-    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, TryFromSliceError> {
         Ok(Self {
             x: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4])?),
             y: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[4..8])?),
@@ -604,7 +604,7 @@ impl From<Vector4> for [f32; 4] {
 
 impl Vector4 {
     #[inline]
-    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn try_from_le_bytes(bytes: &[u8]) -> Result<Self, TryFromSliceError> {
         Ok(Self {
             x: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4])?),
             y: f32::from_le_bytes(<[u8; 4]>::try_from(&bytes[4..8])?),
