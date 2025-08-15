@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use rayon::Scope;
-use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset, TypeList};
+use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, RefList, Subset, TypeList};
 
 use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
@@ -19,10 +19,10 @@ pub trait System<E: EntityComponentContext>: Sync {
     fn execute<'a>(
         &self,
         entity: EntityIndex,
-        components: <Self::Components as TypeList>::RefList<'a>,
+        components: RefList<'a, Self::Components>,
         context: &E,
         queue: &OperationSender<E>,
-        external: <Self::External as TypeList>::RefList<'a>,
+        external: RefList<'a, Self::External>,
     );
 }
 

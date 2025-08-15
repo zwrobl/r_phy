@@ -77,7 +77,8 @@ mod test_ecs {
     };
 
     use type_kit::{
-        list_type, list_value, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList,
+        list_type, list_value, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, RefList, There,
+        TypeList,
     };
 
     use crate::{
@@ -121,10 +122,10 @@ mod test_ecs {
         fn execute<'a>(
             &self,
             _entity: EntityIndex,
-            unpack_list![borrowed_value]: <Self::Components as TypeList>::RefList<'a>,
+            unpack_list![borrowed_value]: RefList<'a, Self::Components>,
             context: &EscContextType,
             queue: &OperationSender<EscContextType>,
-            _external: <Self::External as TypeList>::RefList<'a>,
+            _external: RefList<'a, Self::External>,
         ) {
             println!(
                 "Executing TestSystem<{}> with components: {:?}",
@@ -161,12 +162,10 @@ mod test_ecs {
         fn execute<'a>(
             &self,
             _entity: EntityIndex,
-            unpack_list![borrowed_first, borrowed_second]: <Self::Components as TypeList>::RefList<
-                'a,
-            >,
+            unpack_list![borrowed_first, borrowed_second]: RefList<'a, Self::Components>,
             _context: &EscContextType,
             _queue: &OperationSender<EscContextType>,
-            _external: <Self::External as TypeList>::RefList<'a>,
+            _external: RefList<'a, Self::External>,
         ) {
             println!(
                 "Executing TestSystem<{}, {}> with components: {:?}, {:?}",
@@ -188,10 +187,10 @@ mod test_ecs {
         fn execute<'a>(
             &self,
             entity: EntityIndex,
-            unpack_list![_borrow_u16]: <Self::Components as TypeList>::RefList<'a>,
+            unpack_list![_borrow_u16]: RefList<'a, Self::Components>,
             context: &EscContextType,
             queue: &OperationSender<EscContextType>,
-            _external: <Self::External as TypeList>::RefList<'a>,
+            _external: RefList<'a, Self::External>,
         ) {
             let _ = context
                 .query::<_, list_type![String, Nil]>()
@@ -222,10 +221,10 @@ mod test_ecs {
         fn execute<'a>(
             &self,
             entity: EntityIndex,
-            unpack_list![entity_index]: <Self::Components as TypeList>::RefList<'a>,
+            unpack_list![entity_index]: RefList<'a, Self::Components>,
             context: &EscContextType,
             queue: &OperationSender<EscContextType>,
-            _external: <Self::External as TypeList>::RefList<'a>,
+            _external: RefList<'a, Self::External>,
         ) {
             if let Some(index) = entity_index {
                 if let Some(components) =
@@ -255,10 +254,10 @@ mod test_ecs {
         fn execute<'a>(
             &self,
             entity: EntityIndex,
-            unpack_list![persistent_index]: <Self::Components as TypeList>::RefList<'a>,
+            unpack_list![persistent_index]: RefList<'a, Self::Components>,
             context: &EscContextType,
             queue: &OperationSender<EscContextType>,
-            _external: <Self::External as TypeList>::RefList<'a>,
+            _external: RefList<'a, Self::External>,
         ) {
             if persistent_index.is_none() {
                 let persistent: Option<PersistentIndex> = context
@@ -389,10 +388,10 @@ mod test_ecs {
         fn execute<'a>(
             &self,
             _entity: EntityIndex,
-            unpack_list![component]: <Self::Components as TypeList>::RefList<'a>,
+            unpack_list![component]: RefList<'a, Self::Components>,
             _context: &EscContextType,
             _queue: &OperationSender<EscContextType>,
-            unpack_list![external]: <Self::External as TypeList>::RefList<'a>,
+            unpack_list![external]: RefList<'a, Self::External>,
         ) {
             println!("TestExternalSystemAcces received component: {}", component);
             external

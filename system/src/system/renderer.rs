@@ -5,7 +5,7 @@ use entity::{
 };
 use graphics::{model::Model, shader::ShaderHandle};
 use math::{transform::Transform, types::Matrix4};
-use type_kit::{list_type, unpack_list, Cons, Nil, TypeList};
+use type_kit::{list_type, unpack_list, Cons, Nil, RefList};
 
 #[derive(Clone, Copy)]
 pub struct DrawCommand {
@@ -58,10 +58,10 @@ impl<E: EntityComponentContext> System<E> for RenderingSystem {
     fn execute<'a>(
         &self,
         _entity: EntityIndex,
-        unpack_list![model, shader, transform]: <Self::Components as TypeList>::RefList<'a>,
+        unpack_list![model, shader, transform]: RefList<'a, Self::Components>,
         _context: &E,
         _queue: &OperationSender<E>,
-        unpack_list![draw_queue]: <Self::External as TypeList>::RefList<'a>,
+        unpack_list![draw_queue]: RefList<'a, Self::External>,
     ) {
         draw_queue.push(DrawCommand::new(*shader, *model, (*transform).into()));
     }

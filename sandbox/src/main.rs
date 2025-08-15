@@ -16,7 +16,7 @@ use graphics::{
     shader::{Shader, ShaderHandle},
 };
 use std::{error::Error, path::Path, result::Result};
-use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, There, TypeList};
+use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, RefList, There};
 use vulkan_high::{
     renderer::deferred::{DeferredRendererBuilder, DeferredRendererConfig},
     VulkanRendererBuilder, VulkanRendererConfig,
@@ -61,10 +61,10 @@ impl System<EntityComponent> for SpinningSystem {
     fn execute<'a>(
         &self,
         entity: EntityIndex,
-        unpack_list![transform, spinning_data]: <Self::Components as TypeList>::RefList<'a>,
+        unpack_list![transform, spinning_data]: RefList<'a, Self::Components>,
         context: &EntityComponent,
         queue: &OperationSender<EntityComponent>,
-        unpack_list![frame_data]: <Self::External as TypeList>::RefList<'a>,
+        unpack_list![frame_data]: RefList<'a, Self::External>,
     ) {
         let transform = Transform::identity().rotate(
             spinning_data.axis,

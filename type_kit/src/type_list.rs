@@ -307,6 +307,12 @@ impl<H: PartialEq, T: PartialEq> PartialEq for Cons<H, T> {
 
 impl<H: Eq, T: Eq> Eq for Cons<H, T> {}
 
+pub type RefList<'a, T> = <T as TypeList>::RefList<'a>;
+pub type MutList<'a, T> = <T as TypeList>::MutList<'a>;
+pub type RefListOpt<'a, T> = <T as TypeList>::RefListOpt<'a>;
+pub type MutListOpt<'a, T> = <T as TypeList>::MutListOpt<'a>;
+pub type OptList<T> = <T as TypeList>::OptList;
+
 pub trait TypeList: Sized {
     const LEN: usize;
     type Item;
@@ -323,7 +329,7 @@ pub trait TypeList: Sized {
     type MutListOpt<'a>
     where
         Self: 'a;
-    type OptionalList: TypeList;
+    type OptList: TypeList;
 
     #[inline]
     fn len(&self) -> usize {
@@ -358,7 +364,7 @@ pub trait TypeList: Sized {
 
     fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a>;
 
-    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self;
+    fn unwrap_owned<'a>(opt: Self::OptList) -> Self;
 }
 
 impl<N: 'static> TypeList for TypedNil<N> {
@@ -369,7 +375,7 @@ impl<N: 'static> TypeList for TypedNil<N> {
     type RefListOpt<'a> = Self;
     type MutList<'a> = Self;
     type MutListOpt<'a> = Self;
-    type OptionalList = Self;
+    type OptList = Self;
 
     fn as_ref(&self) -> Self::RefList<'_> {
         *self
@@ -387,7 +393,7 @@ impl<N: 'static> TypeList for TypedNil<N> {
         opt
     }
 
-    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self {
+    fn unwrap_owned<'a>(opt: Self::OptList) -> Self {
         opt
     }
 }
@@ -400,7 +406,7 @@ impl<T: 'static> TypeList for Fin<T> {
     type RefListOpt<'a> = Option<&'a Self>;
     type MutList<'a> = &'a mut Self;
     type MutListOpt<'a> = Option<&'a mut Self>;
-    type OptionalList = Self;
+    type OptList = Self;
 
     fn as_ref(&self) -> Self::RefList<'_> {
         self
@@ -418,7 +424,7 @@ impl<T: 'static> TypeList for Fin<T> {
         opt.unwrap()
     }
 
-    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self {
+    fn unwrap_owned<'a>(opt: Self::OptList) -> Self {
         opt
     }
 }
@@ -447,7 +453,7 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
     where
         T: 'a,
         N: 'a;
-    type OptionalList = Cons<Option<T>, N::OptionalList>;
+    type OptList = Cons<Option<T>, N::OptList>;
 
     fn as_ref(&self) -> Self::RefList<'_> {
         Cons::new(&self.head, self.tail.as_ref())
@@ -465,7 +471,7 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
         Cons::new(opt.head.unwrap(), N::unwrap_mut(opt.tail))
     }
 
-    fn unwrap_owned<'a>(opt: Self::OptionalList) -> Self {
+    fn unwrap_owned<'a>(opt: Self::OptList) -> Self {
         Cons::new(opt.head.unwrap(), N::unwrap_owned(opt.tail))
     }
 }

@@ -588,7 +588,8 @@ use std::{
 
 use crate::{
     BoolList, Cons, Contains, Destroy, DestroyResult, DropGuard, FromGuard, Guard, IntoOuter,
-    Marked, Marker, Nil, TypeGuard, TypeGuardError, TypeList, TypedNil, ValidMut, ValidRef,
+    Marked, Marker, MutListOpt, Nil, OptList, RefListOpt, TypeGuard, TypeGuardError, TypeList,
+    TypedNil, ValidMut, ValidRef,
 };
 
 pub struct GenIndex<T, C> {
@@ -1734,13 +1735,13 @@ impl<T: ListIterator> Iterator for ListIterAll<T> {
 
 pub trait IntoCollectionIterator: TypeList + Default + 'static {
     type ItemList: TypeList;
-    type RefIterator<'a>: ListIterator<IteratorItem = <Self::ItemList as TypeList>::RefListOpt<'a>>
+    type RefIterator<'a>: ListIterator<IteratorItem = RefListOpt<'a, Self::ItemList>>
     where
         Self: 'a;
-    type MutIterator<'a>: ListIterator<IteratorItem = <Self::ItemList as TypeList>::MutListOpt<'a>>
+    type MutIterator<'a>: ListIterator<IteratorItem = MutListOpt<'a, Self::ItemList>>
     where
         Self: 'a;
-    type IntoIterator: ListIterator<IteratorItem = <Self::ItemList as TypeList>::OptionalList>;
+    type IntoIterator: ListIterator<IteratorItem = OptList<Self::ItemList>>;
 
     fn iter_ref<'a>(&'a self) -> Self::RefIterator<'a>;
     fn iter_mut<'a>(&'a mut self) -> Self::MutIterator<'a>;
