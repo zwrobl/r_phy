@@ -367,14 +367,26 @@ pub trait TypeList: Sized {
     fn unwrap_owned<'a>(opt: Self::OptList) -> Self;
 }
 
-impl<N: 'static> TypeList for TypedNil<N> {
+impl<N> TypeList for TypedNil<N> {
     const LEN: usize = 0;
     type Item = N;
     type Next = Self;
-    type RefList<'a> = Self;
-    type RefListOpt<'a> = Self;
-    type MutList<'a> = Self;
-    type MutListOpt<'a> = Self;
+    type RefList<'a>
+        = Self
+    where
+        N: 'a;
+    type RefListOpt<'a>
+        = Self
+    where
+        N: 'a;
+    type MutList<'a>
+        = Self
+    where
+        N: 'a;
+    type MutListOpt<'a>
+        = Self
+    where
+        N: 'a;
     type OptList = Self;
 
     fn as_ref(&self) -> Self::RefList<'_> {
@@ -385,11 +397,17 @@ impl<N: 'static> TypeList for TypedNil<N> {
         *self
     }
 
-    fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a> {
+    fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a>
+    where
+        N: 'a,
+    {
         opt
     }
 
-    fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a> {
+    fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a>
+    where
+        N: 'a,
+    {
         opt
     }
 
@@ -1030,3 +1048,10 @@ impl<C: 'static, N: OptionalList> OptionalList for Cons<Option<C>, N> {
         self.tail.update(value.tail);
     }
 }
+
+pub trait NonEmptyList: TypeList {}
+
+impl<C, N: NonEmptyList> NonEmptyList for Cons<C, N> {}
+
+// TODO: Technically, Cons<Nil, Nil> would be marked as NonEmptyList
+impl<T, C> NonEmptyList for Cons<C, TypedNil<T>> {}

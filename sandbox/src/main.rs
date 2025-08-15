@@ -1,11 +1,6 @@
 use entity::{
-    component_list_type,
-    context::{EntityComponentContext, EntityComponentStorage},
-    ecs_context_type, entity_type,
-    index::EntityIndex,
-    marker_type,
-    operation::OperationSender,
-    stage::Builder,
+    component_list_type, context::EntityComponentStorage, ecs_context_type, entity_type,
+    index::EntityIndex, marker_type, operation::OperationSender, stage::Builder,
 };
 use graphics::{
     model::{
@@ -62,7 +57,7 @@ impl System<EntityComponent> for SpinningSystem {
         &self,
         entity: EntityIndex,
         unpack_list![transform, spinning_data]: RefList<'a, Self::Components>,
-        context: &EntityComponent,
+        _context: &EntityComponent,
         queue: &OperationSender<EntityComponent>,
         unpack_list![frame_data]: RefList<'a, Self::External>,
     ) {
@@ -70,8 +65,8 @@ impl System<EntityComponent> for SpinningSystem {
             spinning_data.axis,
             frame_data.delta_time() * spinning_data.speed,
         ) * *transform;
-        let update = context
-            .get_entity_update_builder(self, entity.in_context())
+        let update = self
+            .get_entity_update_builder(entity.in_context())
             .update(transform);
         queue.update_entity(update);
     }
