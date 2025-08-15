@@ -7,12 +7,12 @@ pub mod system;
 
 use std::marker::PhantomData;
 
-use type_kit::{Cons, GenVec, IntoCollectionIterator, Marker, Nil, StaticTypeList, TypeList};
+use type_kit::{Cons, GenVec, IntoCollectionIterator, Nil, StaticTypeList};
 
 use crate::{
     archetype::{Archetype, ArchetypeRef},
     context::EntityComponentContext,
-    entity::{Entity, EntityBuilder},
+    entity::EntityBuilder,
     index::PersistentIndexMap,
     system::StageList,
 };
@@ -31,33 +31,39 @@ impl ComponentList for Nil {}
 
 impl<C: ComponentData, N: ComponentList> ComponentList for Cons<GenVec<C>, N> {}
 
-pub struct EntityComponentSystem<
-    T: ComponentList,
-    C: TypeList,
-    M: Marker,
-    E: Entity<T, M>,
-    S: StageList<T, M, E, C>,
-> {
-    storage: EntityComponentContext<T, M, E>,
-    stages: S,
-    _marker: PhantomData<(T, M, C)>,
+pub trait EntityComponentSystem<E: EntityComponentContext, C: ExternalSystem> {
+    fn get_entity_builder(&self) -> EntityBuilder<E>;
+
+    fn push_entity(&mut self, entity: EntityBuilder<E>);
+
+    fn execute_systems(&mut self, external: &C);
 }
 
-impl<T: ComponentList, C: TypeList, M: Marker, E: Entity<T, M>, S: StageList<T, M, E, C>>
-    EntityComponentSystem<T, C, M, E, S>
+pub struct EntityComponentSystemContext<
+    E: EntityComponentContext,
+    C: ExternalSystem,
+    S: StageList<E, C>,
+> {
+    context: E,
+    stages: S,
+    _marker: PhantomData<C>,
+}
+
+impl<E: EntityComponentContext, C: ExternalSystem, S: StageList<E, C>> EntityComponentSystem<E, C>
+    for EntityComponentSystemContext<E, C, S>
 {
     #[inline]
-    pub fn get_entity_builder(&self) -> EntityBuilder<T, M, E> {
+    fn get_entity_builder(&self) -> EntityBuilder<E> {
         EntityBuilder::new()
     }
 
-    pub fn push_entity(&mut self, entity: EntityBuilder<T, M, E>) {
-        self.storage.push_entity(entity, None);
+    fn push_entity(&mut self, entity: EntityBuilder<E>) {
+        self.context.push_entity(entity, None);
     }
 
     #[inline]
-    pub fn execute_systems(&mut self, external: &C) {
-        self.stages.execute(&mut self.storage, external);
+    fn execute_systems(&mut self, external: &C) {
+        self.stages.execute(&mut self.context, external);
     }
 }
 
@@ -74,9 +80,15 @@ mod test_ecs {
     };
 
     use crate::{
-        component_list_type, context::EntityComponentConfiguration, ecs_context_type, entity_type,
-        index::EntityIndex, index::PersistentIndex, marker_type, operation::ContextQueue,
-        system::System, ComponentData, EntityComponentContext,
+        component_list_type,
+        context::EntityComponentContext,
+        context::EntityComponentStorage,
+        ecs_context_type, entity_type,
+        index::{EntityIndex, PersistentIndex},
+        marker_type,
+        operation::OperationSender,
+        system::System,
+        ComponentData, EntityComponentSystem,
     };
 
     type EscContextType = ecs_context_type![
@@ -110,7 +122,7 @@ mod test_ecs {
             _entity: EntityIndex,
             unpack_list![borrowed_value]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &ContextQueue<EscContextType>,
+            queue: &OperationSender<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             println!(
@@ -152,7 +164,7 @@ mod test_ecs {
                 'a,
             >,
             _context: &EscContextType,
-            _queue: &ContextQueue<EscContextType>,
+            _queue: &OperationSender<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             println!(
@@ -177,7 +189,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![_borrow_u16]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &ContextQueue<EscContextType>,
+            queue: &OperationSender<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             let _ = context
@@ -211,7 +223,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![entity_index]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &ContextQueue<EscContextType>,
+            queue: &OperationSender<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             if let Some(index) = entity_index {
@@ -244,7 +256,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![persistent_index]: <Self::Components as TypeList>::RefList<'a>,
             context: &EscContextType,
-            queue: &ContextQueue<EscContextType>,
+            queue: &OperationSender<EscContextType>,
             _external: <Self::External as TypeList>::RefList<'a>,
         ) {
             if persistent_index.is_none() {
@@ -379,8 +391,8 @@ mod test_ecs {
             &self,
             _entity: EntityIndex,
             unpack_list![component]: <Self::Components as TypeList>::RefList<'a>,
-            _context: &<EscContextType as EntityComponentConfiguration>::Context,
-            _queue: &ContextQueue<EscContextType>,
+            _context: &EscContextType,
+            _queue: &OperationSender<EscContextType>,
             unpack_list![external]: <Self::External as TypeList>::RefList<'a>,
         ) {
             println!("TestExternalSystemAcces received component: {}", component);

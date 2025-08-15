@@ -3,26 +3,25 @@ use std::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-use type_kit::{Marker, TypeList};
+use type_kit::TypeList;
 
 use crate::{
-    context::{EntityComponentConfiguration, EntityComponentContext, UpdateResult},
-    entity::{Entity, EntityBuilder, EntityUpdate, EntityUpdateBuilder},
+    context::{EntityComponentContext, UpdateResult},
+    entity::{EntityBuilder, EntityUpdate, EntityUpdateBuilder},
     index::EntityIndexTyped,
-    ComponentList,
 };
 
-pub enum Operation<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    Push(EntityBuilder<C, M, E>),
-    Pop(EntityIndexTyped<C, M, E>),
-    Update(EntityUpdate<C, M, E>),
+pub enum Operation<E: EntityComponentContext> {
+    Push(EntityBuilder<E>),
+    Pop(EntityIndexTyped<E>),
+    Update(EntityUpdate<E>),
 }
 
-pub struct OperationSender<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    sender: Sender<Operation<C, M, E>>,
+pub struct OperationSender<E: EntityComponentContext> {
+    sender: Sender<Operation<E>>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Clone for OperationSender<C, M, E> {
+impl<E: EntityComponentContext> Clone for OperationSender<E> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -30,29 +29,29 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> Clone for OperationSender<C, 
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationSender<C, M, E> {
+impl<E: EntityComponentContext> OperationSender<E> {
     #[inline]
-    pub fn push_entity(&self, entity: EntityBuilder<C, M, E>) {
+    pub fn push_entity(&self, entity: EntityBuilder<E>) {
         self.sender.send(Operation::Push(entity)).unwrap();
     }
 
     #[inline]
-    pub fn pop_entity(&self, entity: EntityIndexTyped<C, M, E>) {
+    pub fn pop_entity(&self, entity: EntityIndexTyped<E>) {
         self.sender.send(Operation::Pop(entity)).unwrap();
     }
 
     #[inline]
-    pub fn update_entity<W: TypeList>(&self, entity: EntityUpdateBuilder<C, M, E, W>) {
+    pub fn update_entity<W: TypeList>(&self, entity: EntityUpdateBuilder<E, W>) {
         self.sender.send(Operation::Update(entity.build())).unwrap();
     }
 }
 
-pub struct OperationReceiver<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    receiver: Receiver<Operation<C, M, E>>,
+pub struct OperationReceiver<E: EntityComponentContext> {
+    receiver: Receiver<Operation<E>>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationReceiver<C, M, E> {
-    pub fn process(self, world: &mut EntityComponentContext<C, M, E>) {
+impl<E: EntityComponentContext> OperationReceiver<E> {
+    pub fn process(self, world: &mut E) {
         let operations: Vec<_> = self.receiver.into_iter().collect();
 
         let mut updated = HashMap::with_capacity(operations.len());
@@ -98,15 +97,8 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> OperationReceiver<C, M, E> {
 pub struct OperationChannel {}
 
 impl OperationChannel {
-    pub fn new<C: ComponentList, M: Marker, E: Entity<C, M>>(
-    ) -> (OperationSender<C, M, E>, OperationReceiver<C, M, E>) {
+    pub fn new<E: EntityComponentContext>() -> (OperationSender<E>, OperationReceiver<E>) {
         let (sender, receiver) = channel();
         (OperationSender { sender }, OperationReceiver { receiver })
     }
 }
-
-pub type ContextQueue<C> = OperationSender<
-    <C as EntityComponentConfiguration>::Components,
-    <C as EntityComponentConfiguration>::Marker,
-    <C as EntityComponentConfiguration>::Entity,
->;

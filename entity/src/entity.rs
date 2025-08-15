@@ -1,11 +1,18 @@
 use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
 use type_kit::{
-    CollectionType, Cons, Contains, GenVec, GenVecIndex, IntoSubsetIterator, MarkedIndexList,
-    MarkedItemList, Marker, Nil, OptionalList, StaticTypeList, TypeList,
+    CollectionType, Cons, Contains, GenCollectionResult, GenVec, GenVecIndex, IntoSubsetIterator,
+    MarkedIndexList, MarkedItemList, Marker, Nil, OptionalList, StaticTypeList, TypeList,
 };
 
-use crate::{index::EntityIndexTyped, Archetype, ComponentData, ComponentList};
+use crate::{
+    context::{
+        ComponentListType, EntityBuilderType, EntityComponentContext, EntityOwnedType,
+        EntityQueryType, EntityType, EntityUpdateType,
+    },
+    index::EntityIndexTyped,
+    Archetype, ComponentData, ComponentList,
+};
 
 pub trait Entity<C: ComponentList, M: Marker>:
     MarkedIndexList<C, M> + StaticTypeList + OptionalList + Clone + Copy + Send + Sync
@@ -29,6 +36,18 @@ pub trait Entity<C: ComponentList, M: Marker>:
     fn update_builder(value: &mut Self::Builder, update: Self::Update);
 
     fn update_in_place<'a>(value: Self::Mut<'a>, update: Self::Update);
+
+    fn get_ref<'a>(self, components: &'a C) -> GenCollectionResult<Self::Ref<'a>> {
+        <Self as MarkedIndexList<C, M>>::get_ref(self, components)
+    }
+
+    fn get_mut<'a>(self, components: &'a mut C) -> GenCollectionResult<Self::Mut<'a>> {
+        unsafe { <Self as MarkedIndexList<C, M>>::get_mut(self, components) }
+    }
+
+    fn get_owned<'a>(self, components: &'a mut C) -> GenCollectionResult<Self::Owned> {
+        <Self as MarkedIndexList<C, M>>::get_owned(self, components)
+    }
 }
 
 impl<T: ComponentList, M: Marker> Entity<T, M> for Nil
@@ -304,18 +323,18 @@ impl<'a, C: ComponentData> From<&'a ComponentUpdate<C>> for Expected<C> {
     }
 }
 
-pub struct EntityUpdateBuilder<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> {
-    index: EntityIndexTyped<C, M1, E>,
-    components: E::Update,
+pub struct EntityUpdateBuilder<E: EntityComponentContext, W: TypeList> {
+    index: EntityIndexTyped<E>,
+    components: EntityUpdateType<E>,
     _phantom: PhantomData<W>,
 }
 
-impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBuilder<C, M1, E, W> {
+impl<E: EntityComponentContext, W: TypeList> EntityUpdateBuilder<E, W> {
     #[inline]
-    pub fn new(index: EntityIndexTyped<C, M1, E>) -> Self {
+    pub fn new(index: EntityIndexTyped<E>) -> Self {
         Self {
             index,
-            components: E::Update::default(),
+            components: EntityUpdateType::<E>::default(),
             _phantom: PhantomData,
         }
     }
@@ -323,7 +342,7 @@ impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBu
     #[inline]
     pub fn update<C2: ComponentData, M2: Marker, M3: Marker>(mut self, component: C2) -> Self
     where
-        E::Update: Contains<ComponentUpdate<C2>, M2>,
+        EntityUpdateType<E>: Contains<ComponentUpdate<C2>, M2>,
         W: Contains<C2, M3>,
     {
         *self.components.get_mut() = ComponentUpdate::Update(component);
@@ -333,7 +352,7 @@ impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBu
     #[inline]
     pub fn remove<C2: ComponentData, M2: Marker, M3: Marker>(mut self) -> Self
     where
-        E::Update: Contains<ComponentUpdate<C2>, M2>,
+        EntityUpdateType<E>: Contains<ComponentUpdate<C2>, M2>,
         W: Contains<C2, M3>,
     {
         *self.components.get_mut() = ComponentUpdate::Remove;
@@ -341,7 +360,7 @@ impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBu
     }
 
     #[inline]
-    pub fn build(self) -> EntityUpdate<C, M1, E> {
+    pub fn build(self) -> EntityUpdate<E> {
         EntityUpdate {
             index: self.index,
             components: self.components,
@@ -349,36 +368,32 @@ impl<C: ComponentList, M1: Marker, E: Entity<C, M1>, W: TypeList> EntityUpdateBu
     }
 }
 
-pub struct EntityUpdate<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    pub index: EntityIndexTyped<C, M, E>,
-    pub components: E::Update,
+pub struct EntityUpdate<E: EntityComponentContext> {
+    pub index: EntityIndexTyped<E>,
+    pub components: EntityUpdateType<E>,
 }
 
 pub struct EntityRef<
     'a,
-    C: ComponentList,
-    M1: Marker,
+    E: EntityComponentContext,
     M2: Marker,
-    E: Entity<C, M1>,
-    N: IntoSubsetIterator<C, M2> + 'a,
+    N: IntoSubsetIterator<ComponentListType<E>, M2> + 'a,
 > {
-    pub index: EntityIndexTyped<C, M1, E>,
+    pub index: EntityIndexTyped<E>,
     pub components: N::RefList<'a>,
     _marker: PhantomData<M2>,
 }
 
 impl<
         'a,
-        C: ComponentList,
-        M1: Marker,
+        E: EntityComponentContext,
         M2: Marker,
-        E: Entity<C, M1>,
-        N: IntoSubsetIterator<C, M2> + 'a,
-    > EntityRef<'a, C, M1, M2, E, N>
+        N: IntoSubsetIterator<ComponentListType<E>, M2> + 'a,
+    > EntityRef<'a, E, M2, N>
 {
     pub fn new(
-        archetype: GenVecIndex<Archetype<C, M1, E>>,
-        entity: GenVecIndex<E>,
+        archetype: GenVecIndex<Archetype<E>>,
+        entity: GenVecIndex<EntityType<E>>,
         components: N::RefList<'a>,
     ) -> Self {
         Self {
@@ -389,41 +404,41 @@ impl<
     }
 }
 
-pub struct EntityBuilder<T: ComponentList, M: Marker, E: Entity<T, M>> {
-    pub query_builder: E::Query,
-    entity_builder: E::Builder,
+pub struct EntityBuilder<E: EntityComponentContext> {
+    pub query_builder: EntityQueryType<E>,
+    entity_builder: EntityBuilderType<E>,
 }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> Deref for EntityBuilder<T, M, E> {
-    type Target = E::Query;
+impl<E: EntityComponentContext> Deref for EntityBuilder<E> {
+    type Target = EntityQueryType<E>;
 
     fn deref(&self) -> &Self::Target {
         &self.query_builder
     }
 }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
+impl<E: EntityComponentContext> EntityBuilder<E> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            query_builder: E::Query::default(),
-            entity_builder: E::Builder::default(),
+            query_builder: EntityQueryType::<E>::default(),
+            entity_builder: EntityBuilderType::<E>::default(),
         }
     }
 
     #[inline]
-    pub fn from_owned(entity: E::Owned) -> Self {
+    pub fn from_owned(entity: EntityOwnedType<E>) -> Self {
         Self {
-            query_builder: E::query_from_owned(&entity),
-            entity_builder: E::into_builder(entity),
+            query_builder: EntityType::<E>::query_from_owned(&entity),
+            entity_builder: EntityType::<E>::into_builder(entity),
         }
     }
 
     #[inline]
     pub fn with_component<C: ComponentData, M2: Marker>(self, component: C) -> Self
     where
-        E::Builder: Contains<Option<CollectionType<C, GenVec<C>>>, M2>,
-        E::Query: Contains<Expected<C>, M2>,
+        EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M2>,
+        EntityQueryType<E>: Contains<Expected<C>, M2>,
     {
         let Self {
             mut entity_builder,
@@ -438,13 +453,13 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> EntityBuilder<T, M, E> {
     }
 
     #[inline]
-    pub fn update_components(&mut self, components: E::Update) {
-        E::update_builder(&mut self.entity_builder, components);
-        self.query_builder = E::query_from_builder(&self.entity_builder);
+    pub fn update_components(&mut self, components: EntityUpdateType<E>) {
+        EntityType::<E>::update_builder(&mut self.entity_builder, components);
+        self.query_builder = EntityType::<E>::query_from_builder(&self.entity_builder);
     }
 
     #[inline]
-    pub fn build(self) -> E::Builder {
+    pub fn build(self) -> EntityBuilderType<E> {
         self.entity_builder
     }
 }

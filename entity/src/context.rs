@@ -1,4 +1,6 @@
-use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, Marker, Nil};
+use type_kit::{
+    GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedIndexList, Marker, Nil,
+};
 
 use crate::{
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
@@ -11,67 +13,113 @@ use crate::{
     ComponentList, ExternalSystem,
 };
 
-pub enum UpdateResult<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    ArchetypeChanged(
-        (
-            EntityBuilder<C, M, E>,
-            PersistentIndexTyped<EntityIndexTyped<C, M, E>>,
-        ),
-    ),
-    NotFound(EntityUpdate<C, M, E>),
+pub enum UpdateResult<E: EntityComponentContext> {
+    ArchetypeChanged((EntityBuilder<E>, PersistentIndexTyped<EntityIndexTyped<E>>)),
+    NotFound(EntityUpdate<E>),
     InPlace,
 }
 
-pub trait EntityComponentConfiguration {
+pub type EntityType<E> = <E as EntityComponentContext>::Entity;
+
+pub type ComponentListType<E> = <E as EntityComponentContext>::Components;
+
+pub type EntityQueryType<E> = <EntityType<E> as Entity<
+    <E as EntityComponentContext>::Components,
+    <E as EntityComponentContext>::Marker,
+>>::Query;
+
+pub type EntityUpdateType<E> = <EntityType<E> as Entity<
+    <E as EntityComponentContext>::Components,
+    <E as EntityComponentContext>::Marker,
+>>::Update;
+
+pub type EntityBuilderType<E> = <EntityType<E> as Entity<
+    <E as EntityComponentContext>::Components,
+    <E as EntityComponentContext>::Marker,
+>>::Builder;
+
+pub type EntityOwnedType<E> = <EntityType<E> as MarkedIndexList<
+    <E as EntityComponentContext>::Components,
+    <E as EntityComponentContext>::Marker,
+>>::Owned;
+
+pub type EntityRefType<'a, E> = <EntityType<E> as MarkedIndexList<
+    <E as EntityComponentContext>::Components,
+    <E as EntityComponentContext>::Marker,
+>>::Ref<'a>;
+
+pub type EntityMutType<'a, E> = <EntityType<E> as MarkedIndexList<
+    <E as EntityComponentContext>::Components,
+    <E as EntityComponentContext>::Marker,
+>>::Mut<'a>;
+
+pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     type Components: ComponentList;
     type Marker: Marker;
     type Entity: Entity<Self::Components, Self::Marker>;
-    type Context;
 
     #[inline]
-    fn with_external<E: ExternalSystem>(
-        _: &E,
-    ) -> StageListBuilder<Self::Components, E, Self::Marker, Self::Entity, Nil, Nil> {
+    fn with_external<E: ExternalSystem>(_: &E) -> StageListBuilder<Self, E, Nil, Nil> {
         StageListBuilder::new()
     }
+
+    fn push_entity(
+        &mut self,
+        entity: EntityBuilder<Self>,
+        persistent_index: Option<PersistentIndexTyped<EntityIndexTyped<Self>>>,
+    );
+
+    fn pop_entity(&mut self, index: EntityIndexTyped<Self>) -> Option<EntityOwnedType<Self>>;
+
+    fn update_entity(&mut self, update: EntityUpdate<Self>) -> UpdateResult<Self>;
+
+    fn iter_ref<'a>(&'a self) -> impl Iterator<Item = ArchetypeRef<'a, Self>>;
+
+    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = ArchetypeMut<'a, Self>>;
+
+    fn query<
+        'a,
+        M2: Marker,
+        N: IntoSubsetIterator<Self::Components, M2> + QueryWrite<EntityQueryType<Self>, M2> + 'a,
+    >(
+        &'a self,
+    ) -> impl Iterator<Item = EntityRef<'a, Self, M2, N>>;
+
+    fn try_get_entity<'a>(
+        &'a self,
+        index: EntityIndexTyped<Self>,
+    ) -> Option<EntityRefType<'a, Self>>;
+
+    fn get_persistent_index(
+        &self,
+        entity: EntityIndexTyped<Self>,
+    ) -> PersistentIndexTyped<EntityIndexTyped<Self>>;
+
+    fn try_map_persistent(
+        &self,
+        index: PersistentIndexTyped<EntityIndexTyped<Self>>,
+    ) -> Option<EntityIndexTyped<Self>>;
+
+    fn get_entity_builder(&self) -> EntityBuilder<Self>;
+
+    fn get_entity_update_builder<S: System<Self>>(
+        &self,
+        _system: &S,
+        index: EntityIndexTyped<Self>,
+    ) -> EntityUpdateBuilder<Self, S::WriteList>;
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentConfiguration
-    for EntityComponentContext<C, M, E>
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
+    for EntityComponentStorage<C, M, E>
 {
     type Components = C;
     type Marker = M;
     type Entity = E;
-    type Context = Self;
-}
 
-pub struct EntityComponentContext<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    archetypes: GenVec<Archetype<C, M, E>>,
-    persistent_archetype_map: PersistentIndexMap<GenVecIndex<Archetype<C, M, E>>>,
-    persistent_entity_map: PersistentIndexMap<EntityIndexTyped<C, M, E>>,
-}
-
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for EntityComponentContext<C, M, E> {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, E> {
-    #[inline]
-    pub fn new() -> Self {
-        Self {
-            archetypes: GenVec::new(),
-            persistent_archetype_map: PersistentIndexMap::new(),
-            persistent_entity_map: PersistentIndexMap::new(),
-        }
-    }
-
-    pub fn push_entity(
+    fn push_entity(
         &mut self,
-        entity: EntityBuilder<C, M, E>,
-        persistent_index: Option<PersistentIndexTyped<EntityIndexTyped<C, M, E>>>,
+        entity: EntityBuilder<Self>,
+        persistent_index: Option<PersistentIndexTyped<EntityIndexTyped<Self>>>,
     ) {
         let archetype = self
             .iter_mut()
@@ -93,7 +141,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
         }
     }
 
-    pub fn pop_entity(&mut self, index: EntityIndexTyped<C, M, E>) -> Option<E::Owned> {
+    fn pop_entity(&mut self, index: EntityIndexTyped<Self>) -> Option<E::Owned> {
         let removed = self
             .persistent_archetype_map
             .contains(index.archetype)
@@ -105,7 +153,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
         removed
     }
 
-    pub fn update_entity(&mut self, update: EntityUpdate<C, M, E>) -> UpdateResult<C, M, E> {
+    fn update_entity(&mut self, update: EntityUpdate<Self>) -> UpdateResult<Self> {
         if self
             .persistent_archetype_map
             .contains(update.index.archetype)
@@ -128,60 +176,84 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext<C, M, 
         UpdateResult::NotFound(update)
     }
 
-    pub fn iter_ref<'a>(&'a self) -> impl Iterator<Item = ArchetypeRef<'a, C, M, E>> {
+    fn iter_ref<'a>(&'a self) -> impl Iterator<Item = ArchetypeRef<'a, Self>> {
         (&self.archetypes)
             .into_iter()
             .zip(self.persistent_archetype_map.into_iter())
             .map(|(archetype, &index)| archetype.as_ref(index))
     }
 
-    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = ArchetypeMut<'a, C, M, E>> {
+    fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = ArchetypeMut<'a, Self>> {
         (&mut self.archetypes)
             .into_iter()
             .zip(self.persistent_archetype_map.into_iter())
             .map(|(archetype, &index)| archetype.as_mut(index))
     }
 
-    pub fn query<'a, M2: Marker, N: IntoSubsetIterator<C, M2> + QueryWrite<E::Query, M2> + 'a>(
+    fn query<'a, M2: Marker, N: IntoSubsetIterator<C, M2> + QueryWrite<E::Query, M2> + 'a>(
         &'a self,
-    ) -> impl Iterator<Item = EntityRef<'a, C, M, M2, E, N>> {
+    ) -> impl Iterator<Item = EntityRef<'a, Self, M2, N>> {
         let query = N::write(E::Query::default());
         self.iter_ref()
             .filter(move |archetype| query.is_subset(&archetype.query))
             .flat_map(|archetype| archetype.sub_iter_entity())
     }
 
-    pub fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<C, M, E>) -> Option<E::Ref<'a>> {
+    fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<Self>) -> Option<E::Ref<'a>> {
         self.persistent_archetype_map
             .contains(index.archetype)
             .then_some(self.archetypes[index.archetype].try_get_entity(index))
             .flatten()
     }
 
-    pub fn get_persistent_index(
+    fn get_persistent_index(
         &self,
-        entity: EntityIndexTyped<C, M, E>,
-    ) -> PersistentIndexTyped<EntityIndexTyped<C, M, E>> {
+        entity: EntityIndexTyped<Self>,
+    ) -> PersistentIndexTyped<EntityIndexTyped<Self>> {
         self.persistent_entity_map.get_index(entity)
     }
 
-    pub fn try_map_persistent(
+    fn try_map_persistent(
         &self,
-        index: PersistentIndexTyped<EntityIndexTyped<C, M, E>>,
-    ) -> Option<EntityIndexTyped<C, M, E>> {
+        index: PersistentIndexTyped<EntityIndexTyped<Self>>,
+    ) -> Option<EntityIndexTyped<Self>> {
         self.persistent_entity_map.try_get(index)
     }
 
-    pub fn get_entity_builder(&self) -> EntityBuilder<C, M, E> {
+    fn get_entity_builder(&self) -> EntityBuilder<Self> {
         EntityBuilder::new()
     }
 
-    pub fn get_entity_update_builder<S: System<Self>>(
+    fn get_entity_update_builder<S: System<Self>>(
         &self,
         _system: &S,
-        index: EntityIndexTyped<C, M, E>,
-    ) -> EntityUpdateBuilder<C, M, E, S::WriteList> {
+        index: EntityIndexTyped<Self>,
+    ) -> EntityUpdateBuilder<Self, S::WriteList> {
         EntityUpdateBuilder::new(index)
+    }
+}
+
+pub struct EntityComponentStorage<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    archetypes: GenVec<Archetype<Self>>,
+    persistent_archetype_map: PersistentIndexMap<GenVecIndex<Archetype<Self>>>,
+    persistent_entity_map: PersistentIndexMap<EntityIndexTyped<Self>>,
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for EntityComponentStorage<C, M, E> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentStorage<C, M, E> {
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            archetypes: GenVec::new(),
+            persistent_archetype_map: PersistentIndexMap::new(),
+            persistent_entity_map: PersistentIndexMap::new(),
+        }
     }
 }
 
@@ -213,5 +285,5 @@ macro_rules! entity_type {
 
 #[macro_export]
 macro_rules! ecs_context_type {
-    [$($components:ty),*] => { EntityComponentContext<component_list_type![$($components),*], marker_type![Here, $($components),*], entity_type![$($components),*]> };
+    [$($components:ty),*] => { EntityComponentStorage<component_list_type![$($components),*], marker_type![Here, $($components),*], entity_type![$($components),*]> };
 }

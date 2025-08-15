@@ -3,10 +3,11 @@ use std::{
     fmt::{Debug, Formatter},
     hash::{Hash, Hasher},
 };
-use type_kit::{FromGuard, GenCollection, GenIndexRaw, GenVec, GenVecIndex, Marker, TypeGuard};
+use type_kit::{FromGuard, GenCollection, GenIndexRaw, GenVec, GenVecIndex, TypeGuard};
 
 use crate::{
-    archetype::Archetype, context::EntityComponentConfiguration, entity::Entity, ComponentList,
+    archetype::Archetype,
+    context::{EntityComponentContext, EntityType},
 };
 
 pub struct PersistentIndexTyped<T: Clone + Copy + Eq + Hash> {
@@ -60,9 +61,9 @@ impl<T: Clone + Copy + Eq + Hash + 'static> From<PersistentIndexTyped<T>> for Pe
 
 impl PersistentIndex {
     #[inline]
-    pub fn entity_index<C: EntityComponentConfiguration>(
+    pub fn entity_index<C: EntityComponentContext>(
         &self,
-    ) -> PersistentIndexTyped<EntityIndexTyped<C::Components, C::Marker, C::Entity>> {
+    ) -> PersistentIndexTyped<EntityIndexTyped<C>> {
         let index = GenVecIndex::try_from_guard(self.index).unwrap();
         PersistentIndexTyped { index }
     }
@@ -133,35 +134,35 @@ impl<T: Clone + Copy + Eq + Hash + 'static> PersistentIndexMap<T> {
     }
 }
 
-pub struct EntityIndexTyped<C: ComponentList, M: Marker, E: Entity<C, M>> {
-    pub archetype: GenVecIndex<Archetype<C, M, E>>,
-    pub entity: GenVecIndex<E>,
+pub struct EntityIndexTyped<E: EntityComponentContext> {
+    pub archetype: GenVecIndex<Archetype<E>>,
+    pub entity: GenVecIndex<EntityType<E>>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Hash for EntityIndexTyped<C, M, E> {
+impl<E: EntityComponentContext> Hash for EntityIndexTyped<E> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.archetype.hash(state);
         self.entity.hash(state);
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> PartialEq for EntityIndexTyped<C, M, E> {
+impl<E: EntityComponentContext> PartialEq for EntityIndexTyped<E> {
     fn eq(&self, other: &Self) -> bool {
         self.archetype == other.archetype && self.entity == other.entity
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Eq for EntityIndexTyped<C, M, E> {}
+impl<E: EntityComponentContext> Eq for EntityIndexTyped<E> {}
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Clone for EntityIndexTyped<C, M, E> {
+impl<E: EntityComponentContext> Clone for EntityIndexTyped<E> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Copy for EntityIndexTyped<C, M, E> {}
+impl<E: EntityComponentContext> Copy for EntityIndexTyped<E> {}
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> Debug for EntityIndexTyped<C, M, E> {
+impl<E: EntityComponentContext> Debug for EntityIndexTyped<E> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EntityIndexTyped")
@@ -171,8 +172,8 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> Debug for EntityIndexTyped<C,
     }
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityIndexTyped<C, M, E> {
-    pub fn new(archetype: GenVecIndex<Archetype<C, M, E>>, entity: GenVecIndex<E>) -> Self {
+impl<E: EntityComponentContext> EntityIndexTyped<E> {
+    pub fn new(archetype: GenVecIndex<Archetype<E>>, entity: GenVecIndex<EntityType<E>>) -> Self {
         Self { archetype, entity }
     }
 }
@@ -183,8 +184,8 @@ pub struct EntityIndex {
     pub entity: TypeGuard<GenIndexRaw>,
 }
 
-impl<C: ComponentList, M: Marker, E: Entity<C, M>> From<EntityIndexTyped<C, M, E>> for EntityIndex {
-    fn from(index: EntityIndexTyped<C, M, E>) -> Self {
+impl<E: EntityComponentContext> From<EntityIndexTyped<E>> for EntityIndex {
+    fn from(index: EntityIndexTyped<E>) -> Self {
         Self {
             archetype: index.archetype.into_guard(),
             entity: index.entity.into_guard(),
@@ -193,9 +194,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> From<EntityIndexTyped<C, M, E
 }
 
 impl EntityIndex {
-    pub fn in_context<C: EntityComponentConfiguration>(
-        &self,
-    ) -> EntityIndexTyped<C::Components, C::Marker, C::Entity> {
+    pub fn in_context<C: EntityComponentContext>(&self) -> EntityIndexTyped<C> {
         let archetype = GenVecIndex::try_from_guard(self.archetype).unwrap();
         let entity = GenVecIndex::try_from_guard(self.entity).unwrap();
         EntityIndexTyped { archetype, entity }

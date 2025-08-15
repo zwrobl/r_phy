@@ -1,25 +1,26 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-};
+use std::ops::{Deref, DerefMut};
 
 use type_kit::{
     GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, ListIter, MarkedItemList, Marker,
 };
 
 use crate::{
+    context::{
+        ComponentListType, EntityComponentContext, EntityMutType, EntityOwnedType, EntityQueryType,
+        EntityRefType, EntityType,
+    },
     entity::{Entity, EntityBuilder, EntityRef},
     index::EntityIndexTyped,
-    ComponentList, PersistentIndexMap,
+    PersistentIndexMap,
 };
 
-pub struct ArchetypeRef<'a, T: ComponentList, M: Marker, E: Entity<T, M>> {
-    archetype: &'a Archetype<T, M, E>,
-    index: GenVecIndex<Archetype<T, M, E>>,
+pub struct ArchetypeRef<'a, E: EntityComponentContext> {
+    archetype: &'a Archetype<E>,
+    index: GenVecIndex<Archetype<E>>,
 }
 
-impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Deref for ArchetypeRef<'a, T, M, E> {
-    type Target = Archetype<T, M, E>;
+impl<'a, E: EntityComponentContext> Deref for ArchetypeRef<'a, E> {
+    type Target = Archetype<E>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -27,11 +28,11 @@ impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Deref for ArchetypeRef<'a
     }
 }
 
-impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> ArchetypeRef<'a, T, M, E> {
+impl<'a, E: EntityComponentContext> ArchetypeRef<'a, E> {
     #[inline]
-    pub fn sub_iter_entity<M2: Marker, N: IntoSubsetIterator<T, M2> + 'a>(
+    pub fn sub_iter_entity<M2: Marker, N: IntoSubsetIterator<ComponentListType<E>, M2> + 'a>(
         self,
-    ) -> impl Iterator<Item = EntityRef<'a, T, M, M2, E, N>> {
+    ) -> impl Iterator<Item = EntityRef<'a, E, M2, N>> {
         // Entity components and its corresponding entity index are pushed/removed into the collections
         // in the same order, this should result in them being stored at the same index in GenVec internal storage
         // thus is safe to assume that zip will yield the correct pairs
@@ -42,23 +43,23 @@ impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> ArchetypeRef<'a, T, M, E>
     }
 }
 
-impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Clone for ArchetypeRef<'a, T, M, E> {
+impl<'a, E: EntityComponentContext> Clone for ArchetypeRef<'a, E> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Copy for ArchetypeRef<'a, T, M, E> {}
+impl<'a, E: EntityComponentContext> Copy for ArchetypeRef<'a, E> {}
 
-pub struct ArchetypeMut<'a, T: ComponentList, M: Marker, E: Entity<T, M>> {
-    archetype: &'a mut Archetype<T, M, E>,
-    index: GenVecIndex<Archetype<T, M, E>>,
+pub struct ArchetypeMut<'a, E: EntityComponentContext> {
+    archetype: &'a mut Archetype<E>,
+    index: GenVecIndex<Archetype<E>>,
 }
 
-impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> ArchetypeMut<'a, T, M, E> {
+impl<'a, E: EntityComponentContext> ArchetypeMut<'a, E> {
     #[inline]
-    pub fn push_entity(&mut self, entity: EntityBuilder<T, M, E>) -> EntityIndexTyped<T, M, E> {
+    pub fn push_entity(&mut self, entity: EntityBuilder<E>) -> EntityIndexTyped<E> {
         let entity = entity.build();
         let entity = entity.insert(&mut self.components).unwrap();
         let index = self.entities.push(entity).unwrap();
@@ -67,7 +68,7 @@ impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> ArchetypeMut<'a, T, M, E>
     }
 
     #[inline]
-    pub fn set_archetype(&mut self, entity: EntityBuilder<T, M, E>) -> EntityIndexTyped<T, M, E> {
+    pub fn set_archetype(&mut self, entity: EntityBuilder<E>) -> EntityIndexTyped<E> {
         if self.entities.is_empty() {
             self.query = entity.query_builder;
             self.push_entity(entity)
@@ -77,8 +78,8 @@ impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> ArchetypeMut<'a, T, M, E>
     }
 }
 
-impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Deref for ArchetypeMut<'a, T, M, E> {
-    type Target = Archetype<T, M, E>;
+impl<'a, E: EntityComponentContext> Deref for ArchetypeMut<'a, E> {
+    type Target = Archetype<E>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -86,43 +87,40 @@ impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> Deref for ArchetypeMut<'a
     }
 }
 
-impl<'a, T: ComponentList, M: Marker, E: Entity<T, M>> DerefMut for ArchetypeMut<'a, T, M, E> {
+impl<'a, E: EntityComponentContext> DerefMut for ArchetypeMut<'a, E> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.archetype
     }
 }
 
-#[derive(Debug)]
-pub struct Archetype<T: ComponentList, M: Marker, E: Entity<T, M>> {
-    pub query: E::Query,
-    entities: GenVec<E>,
-    persistent_entity_map: PersistentIndexMap<GenVecIndex<E>>,
-    components: T,
-    _marker: PhantomData<M>,
+pub struct Archetype<E: EntityComponentContext> {
+    pub query: EntityQueryType<E>,
+    entities: GenVec<EntityType<E>>,
+    persistent_entity_map: PersistentIndexMap<GenVecIndex<EntityType<E>>>,
+    components: ComponentListType<E>,
 }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> Default for Archetype<T, M, E> {
+impl<E: EntityComponentContext> Default for Archetype<E> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
+impl<E: EntityComponentContext> Archetype<E> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            query: E::Query::default(),
+            query: Default::default(),
             entities: GenVec::new(),
             persistent_entity_map: PersistentIndexMap::new(),
-            components: T::default(),
-            _marker: PhantomData,
+            components: Default::default(),
         }
     }
 
     #[inline]
-    pub fn as_ref(&self, index: GenVecIndex<Self>) -> ArchetypeRef<T, M, E> {
+    pub fn as_ref(&self, index: GenVecIndex<Self>) -> ArchetypeRef<E> {
         ArchetypeRef {
             archetype: self,
             index,
@@ -130,7 +128,7 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     }
 
     #[inline]
-    pub fn as_mut(&mut self, index: GenVecIndex<Self>) -> ArchetypeMut<T, M, E> {
+    pub fn as_mut(&mut self, index: GenVecIndex<Self>) -> ArchetypeMut<E> {
         ArchetypeMut {
             archetype: self,
             index,
@@ -138,12 +136,12 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
     }
 
     #[inline]
-    pub fn is_matching(&self, query: &E::Query) -> bool {
+    pub fn is_matching(&self, query: &EntityQueryType<E>) -> bool {
         self.query == *query
     }
 
     #[inline]
-    pub fn sub_iter<'a, M2: Marker, N: IntoSubsetIterator<T, M2> + 'a>(
+    pub fn sub_iter<'a, M2: Marker, N: IntoSubsetIterator<ComponentListType<E>, M2> + 'a>(
         &'a self,
     ) -> impl Iterator<Item = N::RefList<'a>> {
         ListIter::iter_sub::<_, _, N>(&self.components)
@@ -151,7 +149,10 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
             .map(|entity| N::unwrap_ref(entity))
     }
 
-    pub fn try_pop_entity<'a>(&'a mut self, index: EntityIndexTyped<T, M, E>) -> Option<E::Owned> {
+    pub fn try_pop_entity<'a>(
+        &'a mut self,
+        index: EntityIndexTyped<E>,
+    ) -> Option<EntityOwnedType<E>> {
         if self.persistent_entity_map.contains(index.entity) {
             let entity = self.entities.pop(index.entity).ok()?;
             let components = entity.get_owned(&mut self.components).ok()?;
@@ -162,7 +163,10 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
         }
     }
 
-    pub fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<T, M, E>) -> Option<E::Ref<'a>> {
+    pub fn try_get_entity<'a>(
+        &'a self,
+        index: EntityIndexTyped<E>,
+    ) -> Option<EntityRefType<'a, E>> {
         if self.persistent_entity_map.contains(index.entity) {
             let entity = self.entities.get(index.entity).ok()?;
             let components = entity.get_ref(&self.components).ok()?;
@@ -174,11 +178,11 @@ impl<T: ComponentList, M: Marker, E: Entity<T, M>> Archetype<T, M, E> {
 
     pub fn try_get_entity_mut<'a>(
         &'a mut self,
-        index: EntityIndexTyped<T, M, E>,
-    ) -> Option<E::Mut<'a>> {
+        index: EntityIndexTyped<E>,
+    ) -> Option<EntityMutType<'a, E>> {
         if self.persistent_entity_map.contains(index.entity) {
             let entity = self.entities.get(index.entity).ok()?;
-            let components = unsafe { entity.get_mut(&mut self.components).ok()? };
+            let components = entity.get_mut(&mut self.components).ok()?;
             Some(components)
         } else {
             None
