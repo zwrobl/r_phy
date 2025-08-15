@@ -3,6 +3,7 @@ pub mod context;
 pub mod entity;
 pub mod index;
 pub mod operation;
+pub mod stage;
 pub mod system;
 
 use std::marker::PhantomData;
@@ -14,7 +15,7 @@ use crate::{
     context::EntityComponentContext,
     entity::EntityBuilder,
     index::PersistentIndexMap,
-    system::StageList,
+    stage::StageList,
 };
 
 pub trait ExternalSystem: StaticTypeList + Sync {}
@@ -81,12 +82,12 @@ mod test_ecs {
 
     use crate::{
         component_list_type,
-        context::EntityComponentContext,
-        context::EntityComponentStorage,
+        context::{EntityComponentContext, EntityComponentStorage},
         ecs_context_type, entity_type,
         index::{EntityIndex, PersistentIndex},
         marker_type,
         operation::OperationSender,
+        stage::Builder,
         system::System,
         ComponentData, EntityComponentSystem,
     };

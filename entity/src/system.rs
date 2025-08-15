@@ -7,8 +7,8 @@ use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
     entity::{Query, QueryWrite},
     index::EntityIndex,
-    operation::{OperationChannel, OperationSender},
-    ArchetypeRef, EntityComponentSystemContext, ExternalSystem,
+    operation::OperationSender,
+    ArchetypeRef, ExternalSystem,
 };
 
 pub trait System<E: EntityComponentContext>: Sync {
@@ -170,70 +170,20 @@ where
     }
 }
 
-pub trait StageList<E: EntityComponentContext, C: TypeList> {
-    type SystemList: SystemList<E, C>;
-
-    fn execute<'a>(&self, context: &mut E, external: &C);
+pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
+    fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+        self,
+        system: SystemExecutor<E, M2, M5, C, N>,
+    ) -> impl Builder<E, C>
+    where
+        N::Components:
+            IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
+        N::External: Subset<C, M5>;
 
     fn component_write(&self) -> EntityQueryType<E>;
-}
 
-impl<E: EntityComponentContext, C: TypeList> StageList<E, C> for Nil {
-    type SystemList = Nil;
-
-    #[inline]
-    fn execute<'a>(&self, _context: &mut E, _external: &C) {}
-
-    #[inline]
-    fn component_write(&self) -> EntityQueryType<E> {
-        EntityQueryType::<E>::default()
-    }
-}
-
-pub struct Stage<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>> {
-    systems: L,
-    _phantom: PhantomData<(E, C)>,
-}
-
-impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>> Stage<E, C, L> {
-    #[inline]
-    pub fn new(systems: L) -> Self {
-        Self {
-            systems,
-            _phantom: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub fn execute<'a>(&self, context: &mut E, external: &C) {
-        let (sender, receiver) = OperationChannel::new();
-        rayon::scope(|scope| {
-            self.systems.execute(scope, &context, sender, external);
-        });
-        receiver.process(context);
-    }
-
-    #[inline]
-    pub fn component_write(&self) -> EntityQueryType<E> {
-        self.systems.component_write()
-    }
-}
-
-impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, N: StageList<E, C>>
-    StageList<E, C> for Cons<Stage<E, C, L>, N>
-{
-    type SystemList = L;
-
-    #[inline]
-    fn execute<'a>(&self, context: &mut E, external: &C) {
-        self.head.execute(context, external);
-        self.tail.execute(context, external);
-    }
-
-    #[inline]
-    fn component_write(&self) -> EntityQueryType<E> {
-        self.head.component_write()
-    }
+    fn build(self) -> impl SystemList<E, C>;
 }
 
 pub struct SystemListBuilder<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> {
@@ -250,11 +200,13 @@ impl<E: EntityComponentContext, C: ExternalSystem> SystemListBuilder<E, C, Nil> 
     }
 }
 
-impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> SystemListBuilder<E, C, S> {
-    pub fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> Builder<E, C>
+    for SystemListBuilder<E, C, S>
+{
+    fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
         self,
         system: SystemExecutor<E, M2, M5, C, N>,
-    ) -> SystemListBuilder<E, C, Cons<SystemExecutor<E, M2, M5, C, N>, S>>
+    ) -> impl Builder<E, C>
     where
         N::Components:
             IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
@@ -267,77 +219,11 @@ impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> SystemLi
         }
     }
 
-    pub fn component_write(&self) -> EntityQueryType<E> {
+    fn component_write(&self) -> EntityQueryType<E> {
         self.systems.component_write()
     }
 
-    pub fn build(self) -> S {
+    fn build(self) -> impl SystemList<E, C> {
         self.systems
-    }
-}
-
-pub struct StageListBuilder<
-    E: EntityComponentContext,
-    C: ExternalSystem,
-    L: SystemList<E, C>,
-    S: StageList<E, C>,
-> {
-    builder: SystemListBuilder<E, C, L>,
-    stages: S,
-    _marker: PhantomData<(E, C)>,
-}
-
-impl<E: EntityComponentContext, C: ExternalSystem> StageListBuilder<E, C, Nil, Nil> {
-    pub fn new() -> Self {
-        StageListBuilder {
-            builder: SystemListBuilder::new(),
-            stages: Nil::new(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, S: StageList<E, C>>
-    StageListBuilder<E, C, L, S>
-{
-    pub fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
-        self,
-        system: N,
-    ) -> StageListBuilder<E, C, Cons<SystemExecutor<E, M2, M5, C, N>, L>, S>
-    where
-        N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>,
-    {
-        let system = SystemExecutor::new(system);
-        if !system
-            .component_write()
-            .get_intersection(&self.builder.component_write())
-            .is_empty()
-        {
-            panic!("New system's write access is a subset of existing systems");
-        }
-        StageListBuilder {
-            builder: self.builder.with_system(system),
-            stages: self.stages,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn barrier(self) -> StageListBuilder<E, C, Nil, Cons<Stage<E, C, L>, S>> {
-        StageListBuilder {
-            builder: SystemListBuilder::new(),
-            stages: Cons::new(Stage::new(self.builder.build()), self.stages),
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn build(self) -> EntityComponentSystemContext<E, C, Cons<Stage<E, C, L>, S>> {
-        EntityComponentSystemContext {
-            context: E::default(),
-            stages: Cons::new(Stage::new(self.builder.build()), self.stages),
-            _marker: PhantomData,
-        }
     }
 }

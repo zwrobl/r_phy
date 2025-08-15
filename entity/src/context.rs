@@ -1,15 +1,13 @@
-use type_kit::{
-    GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedIndexList, Marker, Nil,
-};
+use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedIndexList, Marker};
 
 use crate::{
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
     entity::{
         Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateBuilder, Query, QueryWrite,
     },
-    index::EntityIndexTyped,
-    index::{PersistentIndexMap, PersistentIndexTyped},
-    system::{StageListBuilder, System},
+    index::{EntityIndexTyped, PersistentIndexMap, PersistentIndexTyped},
+    stage::{self, StageListBuilder},
+    system::System,
     ComponentList, ExternalSystem,
 };
 
@@ -59,7 +57,7 @@ pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     type Entity: Entity<Self::Components, Self::Marker>;
 
     #[inline]
-    fn with_external<E: ExternalSystem>(_: &E) -> StageListBuilder<Self, E, Nil, Nil> {
+    fn with_external<E: ExternalSystem>(_: &E) -> impl stage::Builder<Self, E> {
         StageListBuilder::new()
     }
 
