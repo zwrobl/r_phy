@@ -1,11 +1,13 @@
+use graphics::model::ModelTyped;
+use graphics::renderer::DrawMapper;
 use graphics::shader::Shader;
 use math::types::Matrix4;
 use type_kit::{Cons, Contains, Destroy, Marker, Nil};
 
 use graphics::renderer::{camera::Camera, ContextBuilder};
 use graphics::{
-    model::{Drawable, Material, MaterialHandle, Mesh, MeshHandle, Vertex},
-    shader::{ShaderHandle, ShaderType},
+    model::{Material, MaterialHandleTyped, Mesh, MeshHandleTyped, Vertex},
+    shader::{ShaderHandleTyped, ShaderType},
 };
 use std::error::Error;
 use std::marker::PhantomData;
@@ -62,7 +64,7 @@ pub struct VulkanContextBuilder<
 
 impl<
         R: Renderer,
-        P: GraphicsPipelineListBuilder,
+        P: GraphicsPipelineListBuilder + DrawMapper,
         M: MaterialPackListBuilder,
         V: MeshPackListBuilder,
     > ContextBuilder for VulkanContextBuilder<R, P, M, V>
@@ -155,28 +157,28 @@ impl<
         }
     }
 
-    fn add_material<N: Material, T: Marker>(&mut self, material: N) -> MaterialHandle<N>
+    fn add_material<N: Material, T: Marker>(&mut self, material: N) -> MaterialHandleTyped<N>
     where
         Self::Materials: Contains<Vec<N>, T>,
     {
-        MaterialHandle::new(push_and_get_index(self.materials.get_mut(), material))
+        MaterialHandleTyped::new(push_and_get_index(self.materials.get_mut(), material))
     }
 
-    fn add_mesh<N: Vertex, T: Marker>(&mut self, mesh: Mesh<N>) -> MeshHandle<N>
+    fn add_mesh<N: Vertex, T: Marker>(&mut self, mesh: Mesh<N>) -> MeshHandleTyped<N>
     where
         Self::Meshes: Contains<Vec<Mesh<N>>, T>,
     {
-        MeshHandle::new(push_and_get_index(self.meshes.get_mut(), mesh))
+        MeshHandleTyped::new(push_and_get_index(self.meshes.get_mut(), mesh))
     }
 
     fn add_shader<N: Vertex, T: Material, K: Marker>(
         &mut self,
         shader: Shader<N, T>,
-    ) -> ShaderHandle<Shader<N, T>>
+    ) -> ShaderHandleTyped<Shader<N, T>>
     where
         Self::Shaders: Contains<Vec<Shader<N, T>>, K>,
     {
-        ShaderHandle::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
+        ShaderHandleTyped::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
     }
 }
 
@@ -228,10 +230,10 @@ impl<
         Ok(())
     }
 
-    fn draw<T: ShaderType, D: Drawable<Material = T::Material, Vertex = T::Vertex>>(
+    fn draw_typed<T: ShaderType>(
         &mut self,
-        shader: ShaderHandle<T>,
-        drawable: &D,
+        shader: ShaderHandleTyped<T>,
+        model: ModelTyped<T::Material, T::Vertex>,
         transform: &Matrix4,
     ) -> Result<(), Box<dyn Error>> {
         let shader = shader.map::<R::ShaderType<T>>();
@@ -239,7 +241,7 @@ impl<
             &self.context,
             &self.resources,
             shader,
-            drawable,
+            model,
             transform,
         );
         Ok(())

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::model::{EmptyMaterial, Material, Vertex, VertexNone};
-use type_kit::{Cons, Nil};
+use type_kit::{Cons, FromGuard, Nil, TypeGuard, TypeGuardError};
 
 pub trait ShaderType: 'static {
     type Vertex: Vertex;
@@ -70,20 +70,20 @@ impl<S: ShaderType, N: ShaderTypeList> ShaderTypeList for Cons<Vec<S>, N> {
 }
 
 #[derive(Debug)]
-pub struct ShaderHandle<S: ShaderType> {
+pub struct ShaderHandleTyped<S: ShaderType> {
     index: u32,
     _phantom: PhantomData<S>,
 }
 
-impl<S: ShaderType> Clone for ShaderHandle<S> {
+impl<S: ShaderType> Clone for ShaderHandleTyped<S> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<S: ShaderType> Copy for ShaderHandle<S> {}
+impl<S: ShaderType> Copy for ShaderHandleTyped<S> {}
 
-impl<S: ShaderType> ShaderHandle<S> {
+impl<S: ShaderType> ShaderHandleTyped<S> {
     pub fn new(index: u32) -> Self {
         Self {
             index,
@@ -95,10 +95,46 @@ impl<S: ShaderType> ShaderHandle<S> {
         self.index
     }
 
-    pub fn map<T: ShaderType>(self) -> ShaderHandle<T> {
-        ShaderHandle {
+    pub fn map<T: ShaderType>(self) -> ShaderHandleTyped<T> {
+        ShaderHandleTyped {
             index: self.index,
             _phantom: PhantomData,
         }
+    }
+}
+
+impl<S: ShaderType> FromGuard for ShaderHandleTyped<S> {
+    type Inner = u32;
+
+    fn into_inner(self) -> Self::Inner {
+        self.index
+    }
+
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            index: inner,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ShaderHandle {
+    shader: TypeGuard<u32>
+}
+
+impl<S: ShaderType> From<ShaderHandleTyped<S>> for ShaderHandle {
+    fn from(handle: ShaderHandleTyped<S>) -> Self {
+        Self {
+            shader: handle.into_guard(),
+        }
+    }
+}
+
+impl<S: ShaderType> TryFrom<ShaderHandle> for ShaderHandleTyped<S> {
+    type Error = TypeGuardError;
+
+    fn try_from(handle: ShaderHandle) -> Result<Self, Self::Error> {
+        ShaderHandleTyped::try_from_guard(handle.shader).map_err(|(_, err)| err)
     }
 }

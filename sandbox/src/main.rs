@@ -1,5 +1,5 @@
 use graphics::{
-    model::{CommonVertex, EmptyMaterial, Model, PbrMaterial, SimpleVertex, UnlitMaterial},
+    model::{CommonVertex, EmptyMaterial, ModelTyped, PbrMaterial, SimpleVertex, UnlitMaterial},
     renderer::ContextBuilder,
     shader::Shader,
 };
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         checker_shader,
         vec![
             Object::new(
-                Model::new(cube_mesh, empty_material),
+                ModelTyped::new(cube_mesh, empty_material),
                 Transform::identity().translate(Vector3::new(4.0, 0.0, 0.0)),
                 Box::new(|elapsed_time, transform| {
                     Transform::identity()
@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }),
             ),
             Object::new(
-                Model::new(cube_mesh, empty_material),
+                ModelTyped::new(cube_mesh, empty_material),
                 Transform::identity().translate(Vector3::new(4.0, 2.0, 0.0)),
                 Box::new(|elapsed_time, transform| {
                     Transform::identity()

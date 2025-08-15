@@ -1,3 +1,4 @@
+use input::InputHandler;
 use type_kit::{Cons, Nil};
 use winit::{
     dpi::PhysicalPosition,
@@ -8,35 +9,33 @@ use winit::{
 };
 
 use math::{transform::Transform, types::Matrix4};
-use std::{cell::RefCell, error::Error, rc::Rc, time::Instant};
+use std::{cell::RefCell, error::Error, rc::Rc, time::Instant, vec};
 
 use graphics::{
-    model::Drawable,
-    shader::{ShaderHandle, ShaderType},
+    model::{Material, Model, ModelTyped, Vertex}, renderer::create_context, shader::{ShaderHandle, ShaderHandleTyped, ShaderType}
 };
 
 use graphics::renderer::{
     camera::{Camera, CameraBuilder, CameraNone},
-    ContextBuilder, Renderer, RendererBuilder, RendererContext,
+    ContextBuilder, Renderer, RendererBuilder,
 };
-use input::InputHandler;
 
 #[derive(Clone, Copy)]
-pub struct DrawCommand<S: ShaderType, D: Drawable<Material = S::Material, Vertex = S::Vertex>> {
-    shader: ShaderHandle<S>,
-    model: D,
+pub struct DrawCommand {
+    shader: ShaderHandle,
+    model: Model,
     transform: Matrix4,
 }
 
-pub struct Object<D: Drawable + Clone + Copy> {
-    model: D,
+pub struct Object<V: Vertex, M: Material> {
+    model: ModelTyped<M, V>,
     transform: Transform,
     update: Box<dyn Fn(f32, Transform) -> Transform>,
 }
 
-impl<D: Drawable + Clone + Copy> Object<D> {
+impl<V: Vertex, M: Material> Object<V, M> {
     pub fn new(
-        model: D,
+        model: ModelTyped<M, V>,
         transform: Transform,
         update: Box<dyn Fn(f32, Transform) -> Transform>,
     ) -> Self {
@@ -47,15 +46,15 @@ impl<D: Drawable + Clone + Copy> Object<D> {
         }
     }
 
-    fn update<S: ShaderType<Vertex = D::Vertex, Material = D::Material>>(
+    fn update<S: ShaderType<Vertex = V, Material = M>>(
         &mut self,
-        shader: ShaderHandle<S>,
+        shader: ShaderHandleTyped<S>,
         elapsed_time: f32,
-    ) -> DrawCommand<S, D> {
+    ) -> DrawCommand {
         self.transform = (self.update)(elapsed_time, self.transform);
         DrawCommand {
-            shader,
-            model: self.model,
+            shader: shader.into(),
+            model: self.model.into(),
             transform: self.transform.into(),
         }
     }
@@ -157,104 +156,51 @@ impl<R: RendererBuilder, C: CameraBuilder> LoopBuilder<R, C> {
 
 pub trait DrawableTypeList: 'static {
     const LEN: usize;
-    type Drawable: Drawable + Clone + Copy;
     type Next: DrawableTypeList;
 }
 
 impl DrawableTypeList for Nil {
     const LEN: usize = 0;
-    type Drawable = Self;
     type Next = Self;
 }
 
 pub struct DrawableContainer<
-    S: ShaderType,
-    D: Drawable<Material = S::Material, Vertex = S::Vertex> + Clone + Copy,
+    S: ShaderType
 > {
-    shader: ShaderHandle<S>,
-    objects: Vec<Object<D>>,
+    shader: ShaderHandleTyped<S>,
+    objects: Vec<Object<S::Vertex, S::Material>>,
 }
 
 impl<
         S: ShaderType,
-        D: Drawable<Material = S::Material, Vertex = S::Vertex> + Clone + Copy,
         N: DrawableTypeList,
-    > DrawableTypeList for Cons<DrawableContainer<S, D>, N>
+    > DrawableTypeList for Cons<DrawableContainer<S>, N>
 {
     const LEN: usize = N::LEN + 1;
-    type Drawable = D;
     type Next = N;
-}
-
-pub trait DrawCommandCollection: DrawableTypeList {
-    fn draw<R: RendererContext>(self, renderer: &mut R);
-}
-
-impl DrawCommandCollection for Nil {
-    fn draw<R: RendererContext>(self, _renderer: &mut R) {}
-}
-
-impl<
-        S: ShaderType,
-        D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
-        N: DrawCommandCollection,
-    > DrawableTypeList for Cons<Vec<DrawCommand<S, D>>, N>
-{
-    const LEN: usize = N::LEN + 1;
-    type Drawable = D;
-    type Next = N;
-}
-
-impl<
-        S: ShaderType,
-        D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
-        N: DrawCommandCollection,
-    > DrawCommandCollection for Cons<Vec<DrawCommand<S, D>>, N>
-{
-    fn draw<R: RendererContext>(self, renderer: &mut R) {
-        for DrawCommand {
-            shader,
-            model,
-            transform,
-        } in self.head
-        {
-            let _ = renderer.draw(shader, &model, &transform);
-        }
-        self.tail.draw(renderer);
-    }
 }
 
 pub trait DrawableCollection: DrawableTypeList {
-    type DrawCommands: DrawCommandCollection;
-    fn update(&mut self, elapsed_time: f32) -> Self::DrawCommands;
+    fn update(&mut self, elapsed_time: f32, draw_commands: &mut Vec<DrawCommand>);
 }
 
 impl DrawableCollection for Nil {
-    type DrawCommands = Self;
-    fn update(&mut self, _elapsed_time: f32) -> Self::DrawCommands {
-        Nil::new()
-    }
+    fn update(&mut self, _elapsed_time: f32, _draw_commands: &mut  Vec<DrawCommand>) {}
 }
 
 impl<
         S: ShaderType,
-        D: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
         N: DrawableCollection,
-    > DrawableCollection for Cons<DrawableContainer<S, D>, N>
+    > DrawableCollection for Cons<DrawableContainer<S>, N>
 {
-    type DrawCommands = Cons<Vec<DrawCommand<S, D>>, N::DrawCommands>;
-
-    fn update(&mut self, elapsed_time: f32) -> Self::DrawCommands {
-        let draw = self
+    fn update(&mut self, elapsed_time: f32, draw_commands: &mut Vec<DrawCommand>) {
+        draw_commands.extend(self
             .head
             .objects
             .iter_mut()
             .map(|object| object.update(self.head.shader, elapsed_time))
-            .collect();
-        Cons {
-            head: draw,
-            tail: self.tail.update(elapsed_time),
-        }
+        );
+        N::update(&mut self.tail, elapsed_time, draw_commands);
     }
 }
 
@@ -284,12 +230,11 @@ pub struct Scene<D: DrawableCollection, B: ContextBuilder> {
 impl<D: DrawableCollection, B: ContextBuilder> Scene<D, B> {
     pub fn with_objects<
         S: ShaderType,
-        T: Drawable<Vertex = S::Vertex, Material = S::Material> + Clone + Copy,
     >(
         self,
-        shader: ShaderHandle<S>,
-        objects: Vec<Object<T>>,
-    ) -> Scene<Cons<DrawableContainer<S, T>, D>, B> {
+        shader: ShaderHandleTyped<S>,
+        objects: Vec<Object<S::Vertex, S::Material>>,
+    ) -> Scene<Cons<DrawableContainer<S>, D>, B> {
         Scene {
             renderer_context: self.renderer_context,
             objects: Cons {
@@ -326,7 +271,7 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
             mut input_handler,
             camera,
         } = self;
-        let mut context = scene.renderer_context.build(&mut renderer)?;
+        let mut context = create_context(&mut renderer, scene.renderer_context)?;
         let cursor_state = Rc::new(RefCell::new(CursorState::new()));
         let shared_cursor_state = cursor_state.clone();
         let shared_window = window.clone();
@@ -343,7 +288,7 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
                 }
             }),
         );
-        let mut draw_commands = None;
+        let mut draw_commands = vec![];
         let mut previous_frame_time = Instant::now();
         event_loop.set_control_flow(ControlFlow::Poll);
         event_loop.run(|event, elwt| {
@@ -355,7 +300,7 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
                     previous_frame_time = current_frame_time;
 
                     camera.borrow_mut().update(elapsed_time);
-                    draw_commands = Some(scene.objects.update(elapsed_time));
+                    scene.objects.update(elapsed_time, &mut draw_commands);
                     if let CursorState::Locked = *(*cursor_state).borrow() {
                         let window_extent = window.inner_size();
                         let _ = window.set_cursor_position(PhysicalPosition {
@@ -373,9 +318,9 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
                 Event::AboutToWait => {
                     let camera: &C = &(*camera).borrow();
                     let _ = context.begin_frame(camera);
-                    if let Some(draw_commands) = draw_commands.take() {
-                        draw_commands.draw(&mut context);
-                    }
+                    std::mem::take(&mut draw_commands).into_iter().for_each(|command| {
+                        context.draw(command.shader, command.model, &command.transform).unwrap();
+                    });
                     let _ = context.end_frame();
                 }
                 _ => (),

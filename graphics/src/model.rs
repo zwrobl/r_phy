@@ -6,64 +6,50 @@ use std::fmt::Debug;
 
 pub use material::*;
 pub use mesh::*;
-use type_kit::Nil;
-
-pub trait DrawableType: 'static {
-    type Vertex: Vertex;
-    type Material: Material;
-}
-
-pub trait Drawable: DrawableType {
-    fn material(&self) -> MaterialHandle<Self::Material>;
-    fn mesh(&self) -> MeshHandle<Self::Vertex>;
-}
+use type_kit::{TypeGuardError};
 
 #[derive(Debug)]
-pub struct Model<M: Material, V: Vertex> {
-    pub mesh: MeshHandle<V>,
-    pub material: MaterialHandle<M>,
+pub struct ModelTyped<M: Material, V: Vertex> {
+    pub mesh: MeshHandleTyped<V>,
+    pub material: MaterialHandleTyped<M>,
 }
 
-impl<M: Material, V: Vertex> Clone for Model<M, V> {
+impl<M: Material, V: Vertex> Clone for ModelTyped<M, V> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<M: Material, V: Vertex> Copy for Model<M, V> {}
+impl<M: Material, V: Vertex> Copy for ModelTyped<M, V> {}
 
-impl<M: Material, V: Vertex> Model<M, V> {
-    pub fn new(mesh: MeshHandle<V>, material: MaterialHandle<M>) -> Self {
+impl<M: Material, V: Vertex> ModelTyped<M, V> {
+    pub fn new(mesh: MeshHandleTyped<V>, material: MaterialHandleTyped<M>) -> Self {
         Self { mesh, material }
     }
 }
 
-impl<M: Material, V: Vertex> DrawableType for Model<M, V> {
-    type Vertex = V;
-    type Material = M;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Model {
+    mesh: MeshHandle,
+    material: MaterialHandle,
 }
 
-impl<M: Material, V: Vertex> Drawable for Model<M, V> {
-    fn material(&self) -> MaterialHandle<Self::Material> {
-        self.material
-    }
-
-    fn mesh(&self) -> MeshHandle<Self::Vertex> {
-        self.mesh
+impl<V: Vertex, M: Material> From<ModelTyped<M, V>> for Model {
+    fn from(model: ModelTyped<M, V>) -> Self {
+        Self {
+            mesh: model.mesh.into(),
+            material: model.material.into(),
+        }
     }
 }
 
-impl DrawableType for Nil {
-    type Vertex = VertexNone;
-    type Material = EmptyMaterial;
-}
+impl<V: Vertex, M: Material> TryFrom<Model> for ModelTyped<M, V> {
+    type Error = TypeGuardError;
 
-impl Drawable for Nil {
-    fn material(&self) -> MaterialHandle<Self::Material> {
-        unreachable!()
-    }
-
-    fn mesh(&self) -> MeshHandle<Self::Vertex> {
-        unreachable!()
+    fn try_from(model: Model) -> Result<Self, Self::Error> {
+        Ok(ModelTyped {
+            mesh: model.mesh.try_into()?,
+            material: model.material.try_into()?,
+        })
     }
 }

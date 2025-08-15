@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use math::types::{Vector2, Vector3, Vector4};
 use physics::shape;
-use type_kit::{Cons, Nil, TypedNil};
+use type_kit::{Cons, FromGuard, Nil, TypeGuard, TypeGuardError, TypedNil};
 
 pub struct Component {
     pub size: usize,
@@ -17,20 +17,20 @@ pub trait Vertex: Pod + Zeroable {
 }
 
 #[derive(Debug)]
-pub struct MeshHandle<V: Vertex> {
+pub struct MeshHandleTyped<V: Vertex> {
     index: u32,
     _marker: PhantomData<V>,
 }
 
-impl<V: Vertex> Clone for MeshHandle<V> {
+impl<V: Vertex> Clone for MeshHandleTyped<V> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<V: Vertex> Copy for MeshHandle<V> {}
+impl<V: Vertex> Copy for MeshHandleTyped<V> {}
 
-impl<V: Vertex> MeshHandle<V> {
+impl<V: Vertex> MeshHandleTyped<V> {
     pub fn new(index: u32) -> Self {
         Self {
             index,
@@ -40,6 +40,42 @@ impl<V: Vertex> MeshHandle<V> {
 
     pub fn index(&self) -> u32 {
         self.index
+    }
+}
+
+impl<V: Vertex> FromGuard for MeshHandleTyped<V> {
+    type Inner = u32;
+    
+    fn into_inner(self) -> Self::Inner {
+        self.index
+    }
+    
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            index: inner,
+            _marker: PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MeshHandle {
+    handle: TypeGuard<u32>,
+}
+
+impl<V: Vertex> From<MeshHandleTyped<V>> for MeshHandle {
+    fn from(handle: MeshHandleTyped<V>) -> Self {
+        Self {
+            handle: handle.into_guard(),
+        }
+    }
+}
+
+impl<V: Vertex> TryFrom<MeshHandle> for MeshHandleTyped<V> {
+    type Error = TypeGuardError;
+
+    fn try_from(handle: MeshHandle) -> Result<Self, Self::Error> {
+        MeshHandleTyped::try_from_guard(handle.handle).map_err(|(_, err)| err)
     }
 }
 

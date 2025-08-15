@@ -7,8 +7,8 @@ use std::{
 };
 
 use graphics::{
-    model::{Drawable, Material, MaterialHandle, MeshHandle, Vertex},
-    shader::{ShaderHandle, ShaderType},
+    model::{Material, MaterialHandleTyped, MeshHandleTyped, ModelTyped, Vertex},
+    shader::{ShaderHandleTyped, ShaderType},
 };
 
 use math::types::Matrix4;
@@ -38,7 +38,7 @@ pub struct MeshIndex {
 }
 
 impl MeshIndex {
-    fn get<V: Vertex>(mesh: MeshHandle<V>) -> Self {
+    fn get<V: Vertex>(mesh: MeshHandleTyped<V>) -> Self {
         let mesh_index = mesh.index();
         Self { mesh_index }
     }
@@ -69,7 +69,7 @@ pub struct BufferState {
 impl BufferState {
     fn push_model_state<V: Vertex, L: MeshPackList>(
         &mut self,
-        model_index: MeshHandle<V>,
+        model_index: MeshHandleTyped<V>,
         transform: &Matrix4,
         mesh_packs: &L,
     ) -> &mut ModelState {
@@ -93,7 +93,7 @@ pub struct DescriptorSetIndex {
 }
 
 impl DescriptorSetIndex {
-    pub fn get<M: Material>(handle: MaterialHandle<M>) -> Self {
+    pub fn get<M: Material>(handle: MaterialHandleTyped<M>) -> Self {
         let material_pack_index = TypeId::of::<M>();
         let material_index = handle.index();
         Self {
@@ -128,7 +128,7 @@ pub struct PipelineIndex {
 }
 
 impl PipelineIndex {
-    pub fn get<S: ShaderType>(shader: ShaderHandle<S>) -> Self {
+    pub fn get<S: ShaderType>(shader: ShaderHandleTyped<S>) -> Self {
         let pipeline_index = shader.index() as usize;
         Self {
             vertex_type: TypeId::of::<S::Vertex>(),
@@ -154,8 +154,8 @@ impl PipelineState {
         &mut self,
         context: &Context,
         camera: Descriptor<CameraDescriptorSet>,
-        shader: ShaderHandle<S>,
-        material: MaterialHandle<M>,
+        shader: ShaderHandleTyped<S>,
+        material: MaterialHandleTyped<M>,
         material_packs: &L,
         pipelines: &P,
     ) -> &mut DescriptorState {
@@ -182,8 +182,8 @@ impl PipelineState {
         &mut self,
         context: &Context,
         camera: Descriptor<CameraDescriptorSet>,
-        shader: ShaderHandle<S>,
-        material: MaterialHandle<M>,
+        shader: ShaderHandleTyped<S>,
+        material: MaterialHandleTyped<M>,
         material_packs: &L,
         pipelines: &P,
     ) {
@@ -267,7 +267,7 @@ impl DrawStorage {
     >(
         &'a mut self,
         context: &Context,
-        shader: ShaderHandle<S>,
+        shader: ShaderHandleTyped<S>,
         pipelines: &P,
     ) -> &'a mut PipelineState {
         let pipeline_index = PipelineIndex::get(shader);
@@ -283,7 +283,7 @@ impl DrawStorage {
     >(
         &mut self,
         context: &Context,
-        shader: ShaderHandle<S>,
+        shader: ShaderHandleTyped<S>,
         pipelines: &P,
     ) {
         let pipeline = pipelines.get::<S>().get(shader.index() as usize);
@@ -355,15 +355,13 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
 
     #[inline]
     pub fn append_draw_call<
-        D: Drawable,
-        S: ShaderType<Material = D::Material, Vertex = D::Vertex>
-            + ShaderDescriptor<CameraDescriptorSet>,
+        S: ShaderType + ShaderDescriptor<CameraDescriptorSet>,
     >(
         &mut self,
         context: &Context,
         resources: &ResourcePack<R, M, V, P>,
-        shader: ShaderHandle<S>,
-        drawable: &D,
+        shader: ShaderHandleTyped<S>,
+        model: ModelTyped<S::Material, S::Vertex>,
         transform: &Matrix4,
     ) {
         let camera = self.camera.unwrap();
@@ -376,12 +374,12 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
             context,
             camera,
             shader,
-            drawable.material(),
+            model.material,
             &resources.materials,
             &resources.pipelines,
         );
-        let buffer_state = descriptor_state.get_buffer_state::<D::Vertex, _>(&resources.meshes);
-        buffer_state.push_model_state(drawable.mesh(), transform, &resources.meshes);
+        let buffer_state = descriptor_state.get_buffer_state::<S::Vertex, _>(&resources.meshes);
+        buffer_state.push_model_state(model.mesh, transform, &resources.meshes);
     }
 
     #[inline]

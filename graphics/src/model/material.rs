@@ -6,7 +6,7 @@ use std::{
 use bytemuck::AnyBitPattern;
 
 use math::types::{Vector3, Vector4};
-use type_kit::{Cons, Nil, TypedNil};
+use type_kit::{Cons, FromGuard, Nil, TypeGuard, TypeGuardError, TypedNil};
 
 #[allow(dead_code)]
 pub const fn has_data<T: Material>() -> bool {
@@ -28,20 +28,20 @@ pub enum Image {
 }
 
 #[derive(Debug)]
-pub struct MaterialHandle<M: Material> {
+pub struct MaterialHandleTyped<M: Material> {
     index: u32,
     _phantom: PhantomData<M>,
 }
 
-impl<M: Material> Clone for MaterialHandle<M> {
+impl<M: Material> Clone for MaterialHandleTyped<M> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<M: Material> Copy for MaterialHandle<M> {}
+impl<M: Material> Copy for MaterialHandleTyped<M> {}
 
-impl<M: Material> MaterialHandle<M> {
+impl<M: Material> MaterialHandleTyped<M> {
     pub fn new(index: u32) -> Self {
         Self {
             index,
@@ -51,6 +51,42 @@ impl<M: Material> MaterialHandle<M> {
 
     pub fn index(&self) -> u32 {
         self.index
+    }
+}
+
+impl<M: Material> FromGuard for MaterialHandleTyped<M> {
+    type Inner = u32;
+    
+    fn into_inner(self) -> Self::Inner {
+        self.index
+    }
+    
+    unsafe fn from_inner(inner: Self::Inner) -> Self {
+        Self {
+            index: inner,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MaterialHandle {
+    handle: TypeGuard<u32>,
+}
+
+impl<M: Material> From<MaterialHandleTyped<M>> for MaterialHandle {
+    fn from(handle: MaterialHandleTyped<M>) -> Self {
+        MaterialHandle {
+            handle: handle.into_guard(),
+        }
+    }
+}
+
+impl<M: Material> TryFrom<MaterialHandle> for MaterialHandleTyped<M> {
+    type Error = TypeGuardError;
+
+    fn try_from(handle: MaterialHandle) -> Result<Self, Self::Error> {
+        MaterialHandleTyped::try_from_guard(handle.handle).map_err(|(_, err)| err)
     }
 }
 
