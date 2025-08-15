@@ -6,7 +6,10 @@ use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
     entity::{Query, QueryWrite},
     operation::OperationChannel,
-    system::{self, System, SystemExecutor, SystemList, SystemListBuilder},
+    system::{
+        self, GlobalSystem, GlobalSystemExecutor, System, SystemExecutor, SystemList,
+        SystemListBuilder,
+    },
     EntityComponentSystem, EntityComponentSystemContext, ExternalSystem,
 };
 
@@ -66,8 +69,8 @@ impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, N: Stage
 
     #[inline]
     fn execute<'a>(&self, context: &mut E, external: &C) {
-        self.head.execute(context, external);
         self.tail.execute(context, external);
+        self.head.execute(context, external);
     }
 
     #[inline]
@@ -84,6 +87,14 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
     where
         N::Components:
             IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
+        N::External: Subset<C, M5>;
+
+    fn with_global_system<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+        self,
+        system: N,
+    ) -> impl Builder<E, C>
+    where
         N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
         N::External: Subset<C, M5>;
 
@@ -142,6 +153,29 @@ impl<
         }
         StageListBuilder {
             builder: system::Builder::with_executor(self.builder, system),
+            stages: self.stages,
+            _marker: PhantomData,
+        }
+    }
+
+    fn with_global_system<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+        self,
+        system: N,
+    ) -> impl Builder<E, C>
+    where
+        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
+        N::External: Subset<C, M5>,
+    {
+        let system = GlobalSystemExecutor::new(system);
+        if !system
+            .component_write()
+            .get_intersection(&system::Builder::component_write(&self.builder))
+            .is_empty()
+        {
+            panic!("New system's write access is a subset of existing systems");
+        }
+        StageListBuilder {
+            builder: system::Builder::with_global_executor(self.builder, system),
             stages: self.stages,
             _marker: PhantomData,
         }

@@ -5,8 +5,8 @@ use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, RefList, Subset, TypeList}
 
 use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
-    entity::{Query, QueryWrite},
-    index::EntityIndex,
+    entity::{EntityUpdateBuilder, Query, QueryWrite},
+    index::{EntityIndex, EntityIndexTyped},
     operation::OperationSender,
     ArchetypeRef, ExternalSystem,
 };
@@ -24,6 +24,13 @@ pub trait System<E: EntityComponentContext>: Sync {
         queue: &OperationSender<E>,
         external: RefList<'a, Self::External>,
     );
+
+    fn get_entity_update_builder<'a>(
+        &self,
+        index: EntityIndexTyped<E>,
+    ) -> EntityUpdateBuilder<E, Self::WriteList> {
+        EntityUpdateBuilder::new(index)
+    }
 }
 
 pub struct SystemExecutor<
@@ -151,16 +158,49 @@ where
     ) where
         'a: 'b,
     {
-        {
-            let operation_queue = operation_queue.clone();
-            scope.spawn(move |_| {
-                context.iter_ref().for_each(|archetype| {
-                    self.head
-                        .execute(archetype, context, &operation_queue, external);
-                })
-            });
-        }
-        self.tail.execute(scope, context, operation_queue, external);
+        self.tail
+            .execute(scope, context, operation_queue.clone(), external);
+
+        scope.spawn(move |_| {
+            context.iter_ref().for_each(|archetype| {
+                self.head
+                    .execute(archetype, context, &operation_queue, external);
+            })
+        });
+    }
+
+    fn component_write(&self) -> EntityQueryType<E> {
+        let head = self.head.component_write();
+        let tail = self.tail.component_write();
+        head.get_union(&tail)
+    }
+}
+
+impl<
+        E: EntityComponentContext,
+        M2: Marker,
+        C: ExternalSystem,
+        S: GlobalSystem<E>,
+        N: SystemList<E, C>,
+    > SystemList<E, C> for Cons<GlobalSystemExecutor<E, M2, C, S>, N>
+where
+    S::External: Subset<C, M2>,
+{
+    fn execute<'a, 'b>(
+        &'a self,
+        scope: &'b Scope<'a>,
+        context: &'a E,
+        operation_queue: OperationSender<E>,
+        external: &'a C,
+    ) where
+        'a: 'b,
+    {
+        self.tail
+            .execute(scope, context, operation_queue.clone(), external);
+        let operation_queue = operation_queue.clone();
+        scope.spawn(move |_| {
+            self.head.execute(context, &operation_queue, external);
+        });
     }
 
     fn component_write(&self) -> EntityQueryType<E> {
@@ -178,6 +218,14 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
     where
         N::Components:
             IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
+        N::External: Subset<C, M5>;
+
+    fn with_global_executor<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+        self,
+        system: GlobalSystemExecutor<E, M5, C, N>,
+    ) -> impl Builder<E, C>
+    where
         N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
         N::External: Subset<C, M5>;
 
@@ -219,11 +267,93 @@ impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> Builder<
         }
     }
 
+    fn with_global_executor<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+        self,
+        system: GlobalSystemExecutor<E, M5, C, N>,
+    ) -> impl Builder<E, C>
+    where
+        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
+        N::External: Subset<C, M5>,
+    {
+        SystemListBuilder {
+            systems: Cons::new(system, self.systems),
+            _marker: PhantomData,
+        }
+    }
+
     fn component_write(&self) -> EntityQueryType<E> {
         self.systems.component_write()
     }
 
     fn build(self) -> impl SystemList<E, C> {
         self.systems
+    }
+}
+
+pub trait GlobalSystem<E: EntityComponentContext>: Sync {
+    type External: TypeList;
+    type WriteList: TypeList;
+
+    fn execute<'a>(
+        &self,
+        context: &E,
+        queue: &OperationSender<E>,
+        external: RefList<'a, Self::External>,
+    );
+
+    fn get_entity_update_builder<'a>(
+        &self,
+        index: EntityIndexTyped<E>,
+    ) -> EntityUpdateBuilder<E, Self::WriteList> {
+        EntityUpdateBuilder::new(index)
+    }
+}
+
+pub struct GlobalSystemExecutor<
+    E: EntityComponentContext,
+    M3: Marker,
+    C: TypeList,
+    S: GlobalSystem<E>,
+> where
+    S::External: Subset<C, M3>,
+{
+    write: EntityQueryType<E>,
+    system: S,
+    _phantom: std::marker::PhantomData<(C, M3)>,
+}
+
+impl<E: EntityComponentContext, M3: Marker, C: TypeList, S: GlobalSystem<E>>
+    GlobalSystemExecutor<E, M3, C, S>
+where
+    S::External: Subset<C, M3>,
+{
+    #[inline]
+    pub fn new<M5: Marker>(system: S) -> Self
+    where
+        S::WriteList: QueryWrite<EntityQueryType<E>, M5>,
+    {
+        Self {
+            write: <S::WriteList as QueryWrite<EntityQueryType<E>, M5>>::write(
+                EntityQueryType::<E>::default(),
+            ),
+            system,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn execute<'a, 'b>(
+        &'a self,
+        context: &E,
+        operation_queue: &OperationSender<E>,
+        external: &C,
+    ) {
+        self.system
+            .execute(context, operation_queue, S::External::sub_get(external));
+    }
+
+    #[inline]
+    pub fn component_write(&self) -> EntityQueryType<E> {
+        self.write
     }
 }

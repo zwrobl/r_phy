@@ -88,7 +88,7 @@ mod test_ecs {
         marker_type,
         operation::OperationSender,
         stage::Builder,
-        system::System,
+        system::{GlobalSystem, System},
         ComponentData, EntityComponentSystem,
     };
 
@@ -202,8 +202,7 @@ mod test_ecs {
                     queue.push_entity(context.get_entity_builder().with_component(Some(index)));
                 });
             queue.update_entity(
-                context
-                    .get_entity_update_builder(self, entity.in_context::<EscContextType>())
+                self.get_entity_update_builder(entity.in_context::<EscContextType>())
                     .update("UpdatedQueryEntity".to_string())
                     .remove::<u16, _, _>(),
             );
@@ -264,8 +263,7 @@ mod test_ecs {
                     .next()
                     .map(|entity_ref| context.get_persistent_index(entity_ref.index).into());
                 queue.update_entity(
-                    context
-                        .get_entity_update_builder(self, entity.in_context::<EscContextType>())
+                    self.get_entity_update_builder(entity.in_context::<EscContextType>())
                         .update(persistent),
                 );
                 println!(
@@ -435,5 +433,102 @@ mod test_ecs {
         assert_eq!(messages[0], "ExternalSystem received component: Hello");
         assert_eq!(messages[1], "ExternalSystem received component: World");
         assert_eq!(messages[2], "ExternalSystem received component: TheAnswer");
+    }
+
+    pub struct TestGlobalSystem;
+
+    impl GlobalSystem<EscContextType> for TestGlobalSystem {
+        type External = Nil;
+        type WriteList = list_type![Option<PersistentIndex>, Nil];
+
+        fn execute<'a>(
+            &self,
+            context: &EscContextType,
+            queue: &OperationSender<EscContextType>,
+            _external: RefList<'a, Self::External>,
+        ) {
+            println!("Executing TestGlobalSystem");
+            let string_entity_query = context.query::<_, list_type![String, Nil]>();
+            let tracking_entity_query =
+                context.query::<_, list_type![Option<PersistentIndex>, Nil]>();
+
+            string_entity_query.zip(tracking_entity_query).for_each(
+                |(string_entity_ref, tracking_entity_ref)| {
+                    let index: EntityIndex = string_entity_ref.index.into();
+                    println!(
+                        "TestGlobalSystem found entity with components: {:?}",
+                        string_entity_ref.components
+                    );
+                    if tracking_entity_ref
+                        .components
+                        .get::<&Option<PersistentIndex>, _>()
+                        .is_none()
+                    {
+                        println!("Tracking entity is not tracking another entity, updating...");
+                        let persistent_index: PersistentIndex =
+                            context.get_persistent_index(index.in_context()).into();
+                        let update = self
+                            .get_entity_update_builder(tracking_entity_ref.index)
+                            .update(Some(persistent_index));
+                        queue.update_entity(update);
+                    } else {
+                        println!("Tracking entity is already tracking another entity.");
+                    }
+                },
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "New system's write access is a subset of existing systems")]
+    fn test_global_system_write_conflict() {
+        let _ = EscContextType::with_external::<Nil>()
+            .with_global_system(TestGlobalSystem)
+            .with_system(TestEntityPersistentIndex)
+            .build();
+    }
+
+    #[test]
+    fn test_global_system_write_conflict_barrier() {
+        let _ = EscContextType::with_external::<Nil>()
+            .with_global_system(TestGlobalSystem)
+            .barrier()
+            .with_system(TestEntityPersistentIndex)
+            .build();
+    }
+
+    #[test]
+    fn test_global_system_executed_once() {
+        let external = Nil::new();
+        let mut ecs = EscContextType::with_external::<Nil>()
+            .with_system(TestSystem::<String>::new())
+            .with_system(TestSystem::<Option<PersistentIndex>>::new())
+            .with_global_system(TestGlobalSystem)
+            .barrier()
+            .with_system(TestSystem::<Option<PersistentIndex>>::new())
+            .build();
+        let entity = ecs.get_entity_builder().with_component("Hello".to_string());
+        ecs.add_entity(entity);
+        let entity = ecs.get_entity_builder().with_component("World".to_string());
+        ecs.add_entity(entity);
+        let entity = ecs
+            .get_entity_builder()
+            .with_component("TheAnswer".to_string());
+        ecs.add_entity(entity);
+
+        let entity = ecs
+            .get_entity_builder()
+            .with_component::<Option<PersistentIndex>, _>(None);
+        ecs.add_entity(entity);
+        let entity = ecs
+            .get_entity_builder()
+            .with_component::<Option<PersistentIndex>, _>(None);
+        ecs.add_entity(entity);
+        let entity = ecs
+            .get_entity_builder()
+            .with_component::<Option<PersistentIndex>, _>(None);
+        ecs.add_entity(entity);
+
+        ecs.execute_systems(&external);
     }
 }

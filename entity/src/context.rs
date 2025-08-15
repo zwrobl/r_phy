@@ -2,12 +2,9 @@ use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedInd
 
 use crate::{
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
-    entity::{
-        Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateBuilder, Query, QueryWrite,
-    },
+    entity::{Entity, EntityBuilder, EntityRef, EntityUpdate, Query, QueryWrite},
     index::{EntityIndexTyped, PersistentIndexMap, PersistentIndexTyped},
     stage::{self, StageListBuilder},
-    system::System,
     ComponentList, ExternalSystem,
 };
 
@@ -99,12 +96,6 @@ pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     ) -> Option<EntityIndexTyped<Self>>;
 
     fn get_entity_builder(&self) -> EntityBuilder<Self>;
-
-    fn get_entity_update_builder<S: System<Self>>(
-        &self,
-        _system: &S,
-        index: EntityIndexTyped<Self>,
-    ) -> EntityUpdateBuilder<Self, S::WriteList>;
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
@@ -220,14 +211,6 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
 
     fn get_entity_builder(&self) -> EntityBuilder<Self> {
         EntityBuilder::new()
-    }
-
-    fn get_entity_update_builder<S: System<Self>>(
-        &self,
-        _system: &S,
-        index: EntityIndexTyped<Self>,
-    ) -> EntityUpdateBuilder<Self, S::WriteList> {
-        EntityUpdateBuilder::new(index)
     }
 }
 
