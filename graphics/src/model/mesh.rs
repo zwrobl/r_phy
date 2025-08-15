@@ -45,11 +45,11 @@ impl<V: Vertex> MeshHandleTyped<V> {
 
 impl<V: Vertex> FromGuard for MeshHandleTyped<V> {
     type Inner = u32;
-    
+
     fn into_inner(self) -> Self::Inner {
         self.index
     }
-    
+
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
             index: inner,

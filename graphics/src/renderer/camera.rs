@@ -1,9 +1,7 @@
 pub mod first_person;
 
-use std::{cell::RefCell, rc::Rc};
-
 use bytemuck::{Pod, Zeroable};
-use input::InputHandler;
+use input::InputSystem;
 use math::types::{Matrix4, Vector3};
 
 pub const UP: Vector3 = Vector3::z();
@@ -18,15 +16,9 @@ pub struct CameraMatrices {
 pub trait Camera: 'static {
     fn get_position(&self) -> Vector3;
     fn get_matrices(&self) -> CameraMatrices;
-    fn update(&mut self, elapsed_time: f32);
+    fn update(&mut self, elapsed_time: f32, input_system: &InputSystem);
     fn set_active(&mut self, active: bool);
 }
-
-pub trait CameraBuilder: 'static {
-    type Camera: Camera;
-    fn build(self, input_handler: &mut InputHandler) -> Rc<RefCell<Self::Camera>>;
-}
-
 pub struct CameraNone;
 
 impl Camera for CameraNone {
@@ -38,18 +30,11 @@ impl Camera for CameraNone {
         unimplemented!()
     }
 
-    fn update(&mut self, _elapsed_time: f32) {
+    fn update(&mut self, _elapsed_time: f32, _input_system: &InputSystem) {
         unimplemented!()
     }
 
     fn set_active(&mut self, _active: bool) {
         unimplemented!()
-    }
-}
-
-impl CameraBuilder for CameraNone {
-    type Camera = CameraNone;
-    fn build(self, _input_handler: &mut InputHandler) -> Rc<RefCell<Self::Camera>> {
-        panic!("Camera Type not provided!")
     }
 }

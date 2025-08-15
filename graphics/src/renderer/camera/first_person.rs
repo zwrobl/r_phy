@@ -1,16 +1,11 @@
-use std::{
-    cell::RefCell,
-    f32::consts::{FRAC_PI_2, PI},
-    rc::Rc,
-};
+use std::f32::consts::{FRAC_PI_2, PI};
 
-use math::types::{Matrix4, Vector3};
-use winit::{dpi::PhysicalPosition, keyboard::KeyCode};
+use math::types::{Matrix4, Vector2, Vector3};
 
 use crate::renderer::camera::UP;
-use input::InputHandler;
+use input::{InputSystem, Key};
 
-use super::{Camera, CameraBuilder, CameraMatrices};
+use super::{Camera, CameraMatrices};
 
 impl Camera for FirstPersonCamera {
     fn get_position(&self) -> Vector3 {
@@ -21,41 +16,51 @@ impl Camera for FirstPersonCamera {
         self.into()
     }
 
-    fn update(&mut self, elapsed_time: f32) {
+    fn update(&mut self, elapsed_time: f32, input_system: &InputSystem) {
+        const MOUSE_SENSITIVITY: f32 = 0.5;
         const MOVEMENT_SPEED: f32 = 4.0;
-        if self.active {
-            if self.move_direction.length_square() > 0.0 {
-                self.position =
-                    self.position + elapsed_time * MOVEMENT_SPEED * self.move_direction.norm();
-            }
-            self.forward = Vector3::from_euler(self.euler.x, self.euler.y, self.euler.z);
-            self.right = self.forward.cross(UP).norm();
-            self.move_direction = Vector3::zero();
+
+        if !self.active {
+            return;
         }
+
+        let cursor = input_system.get_cursor_position();
+        let delta_x = cursor.x - self.screen_center.x;
+        let delta_y = cursor.y - self.screen_center.y;
+        let delta_yaw = (delta_x / self.screen_center.x) as f32 * MOUSE_SENSITIVITY;
+        let delta_pitch = (delta_y / self.screen_center.y) as f32 * MOUSE_SENSITIVITY;
+        self.euler.y = (self.euler.y + delta_pitch).clamp(-FRAC_PI_2 + 1e-4, FRAC_PI_2 - 1e-4);
+        self.euler.x = ((self.euler.x - delta_yaw) / (2.0 * PI)).fract() * (2.0 * PI);
+        self.forward = Vector3::from_euler(self.euler.x, self.euler.y, self.euler.z);
+        self.right = self.forward.cross(UP).norm();
+
+        if input_system.get_key_state(Key::W).is_pressed() {
+            self.move_direction = self.move_direction + self.forward;
+        }
+
+        if input_system.get_key_state(Key::S).is_pressed() {
+            self.move_direction = self.move_direction - self.forward;
+        }
+
+        if input_system.get_key_state(Key::D).is_pressed() {
+            self.move_direction = self.move_direction + self.right;
+        }
+
+        if input_system.get_key_state(Key::A).is_pressed() {
+            self.move_direction = self.move_direction - self.right;
+        }
+
+        if self.move_direction.length_square() > 0.0 {
+            self.position =
+                self.position + elapsed_time * MOVEMENT_SPEED * self.move_direction.norm();
+        }
+        self.forward = Vector3::from_euler(self.euler.x, self.euler.y, self.euler.z);
+        self.right = self.forward.cross(UP).norm();
+        self.move_direction = Vector3::zero();
     }
 
     fn set_active(&mut self, active: bool) {
         self.active = active;
-    }
-}
-
-pub struct FirstPersonCameraBuilder {
-    proj: Matrix4,
-}
-
-impl FirstPersonCameraBuilder {
-    pub fn new(proj: Matrix4) -> Self {
-        Self { proj }
-    }
-}
-
-impl CameraBuilder for FirstPersonCameraBuilder {
-    type Camera = FirstPersonCamera;
-
-    fn build(self, input_handler: &mut InputHandler) -> Rc<RefCell<Self::Camera>> {
-        let camera = Rc::new(RefCell::new(FirstPersonCamera::new(self.proj)));
-        FirstPersonCamera::register_callbacks(camera.clone(), input_handler);
-        camera
     }
 }
 
@@ -76,10 +81,11 @@ pub struct FirstPersonCamera {
     euler: Vector3,
     move_direction: Vector3,
     active: bool,
+    screen_center: Vector2,
 }
 
 impl FirstPersonCamera {
-    pub fn new(proj: Matrix4) -> Self {
+    pub fn new(proj: Matrix4, resolution: Vector2) -> Self {
         Self {
             proj,
             position: Vector3::zero(),
@@ -88,67 +94,7 @@ impl FirstPersonCamera {
             euler: Vector3::zero(),
             move_direction: Vector3::zero(),
             active: false,
+            screen_center: resolution / 2.0,
         }
-    }
-
-    pub fn register_callbacks(camera: Rc<RefCell<Self>>, input_handler: &mut InputHandler) {
-        let shared_camera = camera.clone();
-        input_handler.register_cursor_callback(Box::new(move |position| {
-            let mut camera = shared_camera.borrow_mut();
-            if camera.active {
-                let PhysicalPosition { x, y } = position;
-                const MOUSE_SENSITIVITY: f32 = 0.5;
-                let delta_x = x - 400.0;
-                let delta_y = y - 300.0;
-                let delta_yaw = (delta_x / 400.0) as f32 * MOUSE_SENSITIVITY;
-                let delta_pitch = (delta_y / 300.0) as f32 * MOUSE_SENSITIVITY;
-                camera.euler.y =
-                    (camera.euler.y + delta_pitch).clamp(-FRAC_PI_2 + 1e-4, FRAC_PI_2 - 1e-4);
-                camera.euler.x = ((camera.euler.x - delta_yaw) / (2.0 * PI)).fract() * (2.0 * PI);
-                camera.forward =
-                    Vector3::from_euler(camera.euler.x, camera.euler.y, camera.euler.z);
-                camera.right = camera.forward.cross(UP).norm();
-            }
-        }));
-        let shared_camera = camera.clone();
-        input_handler.register_key_pressed_callback(
-            KeyCode::KeyW,
-            Box::new(move |()| {
-                let mut camera = shared_camera.borrow_mut();
-                if camera.active {
-                    camera.move_direction = camera.move_direction + camera.forward;
-                }
-            }),
-        );
-        let shared_camera = camera.clone();
-        input_handler.register_key_pressed_callback(
-            KeyCode::KeyS,
-            Box::new(move |()| {
-                let mut camera = shared_camera.borrow_mut();
-                if camera.active {
-                    camera.move_direction = camera.move_direction - camera.forward;
-                }
-            }),
-        );
-        let shared_camera = camera.clone();
-        input_handler.register_key_pressed_callback(
-            KeyCode::KeyD,
-            Box::new(move |()| {
-                let mut camera = shared_camera.borrow_mut();
-                if camera.active {
-                    camera.move_direction = camera.move_direction + camera.right;
-                }
-            }),
-        );
-        let shared_camera = camera.clone();
-        input_handler.register_key_pressed_callback(
-            KeyCode::KeyA,
-            Box::new(move |()| {
-                let mut camera = shared_camera.borrow_mut();
-                if camera.active {
-                    camera.move_direction = camera.move_direction - camera.right;
-                }
-            }),
-        );
     }
 }

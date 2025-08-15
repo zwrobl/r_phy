@@ -56,11 +56,11 @@ impl<M: Material> MaterialHandleTyped<M> {
 
 impl<M: Material> FromGuard for MaterialHandleTyped<M> {
     type Inner = u32;
-    
+
     fn into_inner(self) -> Self::Inner {
         self.index
     }
-    
+
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
             index: inner,

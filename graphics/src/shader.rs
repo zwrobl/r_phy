@@ -120,7 +120,7 @@ impl<S: ShaderType> FromGuard for ShaderHandleTyped<S> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShaderHandle {
-    shader: TypeGuard<u32>
+    shader: TypeGuard<u32>,
 }
 
 impl<S: ShaderType> From<ShaderHandleTyped<S>> for ShaderHandle {

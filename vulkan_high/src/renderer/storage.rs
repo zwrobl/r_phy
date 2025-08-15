@@ -354,9 +354,7 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
     }
 
     #[inline]
-    pub fn append_draw_call<
-        S: ShaderType + ShaderDescriptor<CameraDescriptorSet>,
-    >(
+    pub fn append_draw_call<S: ShaderType + ShaderDescriptor<CameraDescriptorSet>>(
         &mut self,
         context: &Context,
         resources: &ResourcePack<R, M, V, P>,

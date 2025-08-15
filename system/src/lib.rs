@@ -1,64 +1,26 @@
-use input::InputHandler;
-use type_kit::{Cons, Nil};
+pub mod system;
+
+use entity::{context::EntityComponentContext, entity::EntityBuilder, EntityComponentSystem};
+use input::{InputSystem, Key, KeyState};
+use math::types::Vector2;
+use type_kit::{list_type, list_value, Cons, Nil};
 use winit::{
     dpi::PhysicalPosition,
-    event::{ElementState, Event, StartCause, WindowEvent},
+    event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    keyboard::KeyCode,
     window::{Window, WindowBuilder},
 };
 
-use math::{transform::Transform, types::Matrix4};
-use std::{cell::RefCell, error::Error, rc::Rc, time::Instant, vec};
+use std::{error::Error, marker::PhantomData, time::Instant};
 
-use graphics::{
-    model::{Material, Model, ModelTyped, Vertex}, renderer::create_context, shader::{ShaderHandle, ShaderHandleTyped, ShaderType}
+use graphics::renderer::{camera::CameraNone, create_context};
+
+use graphics::renderer::{camera::Camera, ContextBuilder, Renderer, RendererBuilder};
+
+use crate::system::{
+    frame::FrameData,
+    renderer::{DrawCommandChannel, DrawQueue},
 };
-
-use graphics::renderer::{
-    camera::{Camera, CameraBuilder, CameraNone},
-    ContextBuilder, Renderer, RendererBuilder,
-};
-
-#[derive(Clone, Copy)]
-pub struct DrawCommand {
-    shader: ShaderHandle,
-    model: Model,
-    transform: Matrix4,
-}
-
-pub struct Object<V: Vertex, M: Material> {
-    model: ModelTyped<M, V>,
-    transform: Transform,
-    update: Box<dyn Fn(f32, Transform) -> Transform>,
-}
-
-impl<V: Vertex, M: Material> Object<V, M> {
-    pub fn new(
-        model: ModelTyped<M, V>,
-        transform: Transform,
-        update: Box<dyn Fn(f32, Transform) -> Transform>,
-    ) -> Self {
-        Self {
-            model,
-            transform,
-            update,
-        }
-    }
-
-    fn update<S: ShaderType<Vertex = V, Material = M>>(
-        &mut self,
-        shader: ShaderHandleTyped<S>,
-        elapsed_time: f32,
-    ) -> DrawCommand {
-        self.transform = (self.update)(elapsed_time, self.transform);
-        DrawCommand {
-            shader: shader.into(),
-            model: self.model.into(),
-            transform: self.transform.into(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 enum CursorState {
@@ -92,7 +54,7 @@ impl CursorState {
     }
 }
 
-pub struct LoopBuilder<R: RendererBuilder, C: CameraBuilder> {
+pub struct LoopBuilder<R: RendererBuilder, C: Camera> {
     renderer: R,
     camera: Option<C>,
     window: Option<WindowBuilder>,
@@ -108,7 +70,7 @@ impl<N: RendererBuilder> LoopBuilder<N, CameraNone> {
     }
 }
 
-impl<R: RendererBuilder, C: CameraBuilder> LoopBuilder<R, C> {
+impl<R: RendererBuilder, C: Camera> LoopBuilder<R, C> {
     pub fn with_window(self, window: WindowBuilder) -> Self {
         Self {
             window: Some(window),
@@ -116,7 +78,7 @@ impl<R: RendererBuilder, C: CameraBuilder> LoopBuilder<R, C> {
         }
     }
 
-    pub fn with_camera<N: CameraBuilder>(self, camera: N) -> LoopBuilder<R, N> {
+    pub fn with_camera<N: Camera>(self, camera: N) -> LoopBuilder<R, N> {
         let Self {
             window, renderer, ..
         } = self;
@@ -127,89 +89,43 @@ impl<R: RendererBuilder, C: CameraBuilder> LoopBuilder<R, C> {
         }
     }
 
-    pub fn build(self) -> Result<Loop<impl Renderer, C::Camera>, Box<dyn Error>> {
+    pub fn build(self) -> Result<Loop<impl Renderer, C>, Box<dyn Error>> {
         let Self {
             window,
             renderer,
             camera,
         } = self;
-        let mut input_handler = InputHandler::new();
         let event_loop = EventLoop::new()?;
-        let window = Rc::new(
-            window
-                .ok_or("Window configuration not provided for Loop!")?
-                .build(&event_loop)?,
-        );
-        let renderer = renderer.build(window.clone())?;
-        let camera = camera
-            .ok_or("Camera not selected for Loop!")?
-            .build(&mut input_handler);
+        let window = window
+            .ok_or("Window configuration not provided for Loop!")?
+            .build(&event_loop)?;
+        let renderer = renderer.build(&window)?;
+        let camera = camera.ok_or("Camera not selected for Loop!")?;
+        let (draw_queue, draw_storage) = DrawCommandChannel::new();
+        let external = list_value![
+            InputSystem::new(),
+            draw_queue,
+            FrameData::new(0.0),
+            Nil::new()
+        ];
         Ok(Loop {
             event_loop,
             window,
             renderer,
-            input_handler,
             camera,
+            external,
+            draw_storage,
         })
-    }
-}
-
-pub trait DrawableTypeList: 'static {
-    const LEN: usize;
-    type Next: DrawableTypeList;
-}
-
-impl DrawableTypeList for Nil {
-    const LEN: usize = 0;
-    type Next = Self;
-}
-
-pub struct DrawableContainer<
-    S: ShaderType
-> {
-    shader: ShaderHandleTyped<S>,
-    objects: Vec<Object<S::Vertex, S::Material>>,
-}
-
-impl<
-        S: ShaderType,
-        N: DrawableTypeList,
-    > DrawableTypeList for Cons<DrawableContainer<S>, N>
-{
-    const LEN: usize = N::LEN + 1;
-    type Next = N;
-}
-
-pub trait DrawableCollection: DrawableTypeList {
-    fn update(&mut self, elapsed_time: f32, draw_commands: &mut Vec<DrawCommand>);
-}
-
-impl DrawableCollection for Nil {
-    fn update(&mut self, _elapsed_time: f32, _draw_commands: &mut  Vec<DrawCommand>) {}
-}
-
-impl<
-        S: ShaderType,
-        N: DrawableCollection,
-    > DrawableCollection for Cons<DrawableContainer<S>, N>
-{
-    fn update(&mut self, elapsed_time: f32, draw_commands: &mut Vec<DrawCommand>) {
-        draw_commands.extend(self
-            .head
-            .objects
-            .iter_mut()
-            .map(|object| object.update(self.head.shader, elapsed_time))
-        );
-        N::update(&mut self.tail, elapsed_time, draw_commands);
     }
 }
 
 pub struct Loop<R: Renderer, C: Camera> {
     renderer: R,
-    window: Rc<Window>,
+    window: Window,
     event_loop: EventLoop<()>,
-    input_handler: InputHandler,
-    camera: Rc<RefCell<C>>,
+    external: ExternalSystems,
+    draw_storage: DrawCommandChannel,
+    camera: C,
 }
 
 pub trait LoopTypes {
@@ -222,26 +138,31 @@ impl<R: Renderer, C: Camera> LoopTypes for Loop<R, C> {
     type Camera = C;
 }
 
-pub struct Scene<D: DrawableCollection, B: ContextBuilder> {
+pub type ExternalSystems = list_type![InputSystem, DrawQueue, FrameData, Nil];
+
+pub struct Scene<
+    E: EntityComponentContext,
+    D: EntityComponentSystem<E, ExternalSystems>,
+    B: ContextBuilder,
+> {
     renderer_context: B,
-    objects: D,
+    entity_context: D,
+    _phantom: PhantomData<E>,
 }
 
-impl<D: DrawableCollection, B: ContextBuilder> Scene<D, B> {
-    pub fn with_objects<
-        S: ShaderType,
-    >(
-        self,
-        shader: ShaderHandleTyped<S>,
-        objects: Vec<Object<S::Vertex, S::Material>>,
-    ) -> Scene<Cons<DrawableContainer<S>, D>, B> {
-        Scene {
-            renderer_context: self.renderer_context,
-            objects: Cons {
-                head: DrawableContainer { shader, objects },
-                tail: self.objects,
-            },
-        }
+impl<
+        E: EntityComponentContext,
+        D: EntityComponentSystem<E, ExternalSystems>,
+        B: ContextBuilder,
+    > Scene<E, D, B>
+{
+    pub fn get_entity_builder(&self) -> EntityBuilder<E> {
+        self.entity_context.get_entity_builder()
+    }
+
+    pub fn with_entity(&mut self, entity: EntityBuilder<E>) -> &mut Self {
+        self.entity_context.add_entity(entity);
+        self
     }
 }
 
@@ -250,81 +171,121 @@ impl<R: Renderer, C: Camera> Loop<R, C> {
         R::context_builder()
     }
 
-    pub fn scene<B: ContextBuilder<Renderer = R>>(
-        &self,
-        builder: B,
-    ) -> Result<Scene<Nil, B>, Box<dyn Error>> {
-        Ok(Scene {
-            renderer_context: builder,
-            objects: Nil::new(),
-        })
+    pub fn system_builder<'a, E: EntityComponentContext>(
+        &'a self,
+    ) -> impl entity::stage::Builder<E, ExternalSystems> {
+        E::with_external()
     }
 
-    pub fn run<D: DrawableCollection, B: ContextBuilder<Renderer = R>>(
+    pub fn scene<
+        E: EntityComponentContext,
+        S: entity::stage::Builder<E, ExternalSystems>,
+        B: ContextBuilder<Renderer = R>,
+    >(
+        &self,
+        builder: B,
+        systems: S,
+    ) -> Scene<E, impl EntityComponentSystem<E, ExternalSystems>, B> {
+        Scene {
+            renderer_context: builder,
+            entity_context: systems.build(),
+            _phantom: PhantomData::<E>,
+        }
+    }
+
+    pub fn run<
+        E: EntityComponentContext,
+        D: EntityComponentSystem<E, ExternalSystems>,
+        B: ContextBuilder<Renderer = R>,
+    >(
         self,
-        mut scene: Scene<D, B>,
+        scene: Scene<E, D, B>,
     ) -> Result<(), Box<dyn Error>> {
         let Self {
             window,
             event_loop,
             mut renderer,
-            mut input_handler,
-            camera,
+            mut camera,
+            mut external,
+            draw_storage,
         } = self;
-        let mut context = create_context(&mut renderer, scene.renderer_context)?;
-        let cursor_state = Rc::new(RefCell::new(CursorState::new()));
-        let shared_cursor_state = cursor_state.clone();
-        let shared_window = window.clone();
-        let shared_camera = camera.clone();
-        input_handler.register_key_state_callback(
-            KeyCode::KeyG,
-            Box::new(move |state| {
-                if let ElementState::Pressed = state {
-                    let _ = shared_cursor_state.borrow_mut().switch(&shared_window);
-                    match *(*shared_cursor_state).borrow() {
-                        CursorState::Free => shared_camera.borrow_mut().set_active(false),
-                        CursorState::Locked => shared_camera.borrow_mut().set_active(true),
-                    }
-                }
-            }),
-        );
-        let mut draw_commands = vec![];
+        let Scene {
+            renderer_context,
+            mut entity_context,
+            ..
+        } = scene;
+        let mut renderer_context = create_context(&mut renderer, renderer_context)?;
+        let mut cursor_state = CursorState::new();
+        let mut window_events = vec![];
         let mut previous_frame_time = Instant::now();
         event_loop.set_control_flow(ControlFlow::Poll);
-        event_loop.run(|event, elwt| {
-            input_handler.handle_event(event.clone());
-            match event {
-                Event::NewEvents(StartCause::Poll) => {
-                    let current_frame_time = Instant::now();
-                    let elapsed_time = (current_frame_time - previous_frame_time).as_secs_f32();
-                    previous_frame_time = current_frame_time;
-
-                    camera.borrow_mut().update(elapsed_time);
-                    scene.objects.update(elapsed_time, &mut draw_commands);
-                    if let CursorState::Locked = *(*cursor_state).borrow() {
-                        let window_extent = window.inner_size();
-                        let _ = window.set_cursor_position(PhysicalPosition {
-                            x: window_extent.width / 2,
-                            y: window_extent.height / 2,
-                        });
+        event_loop.run(|event, elwt| match event {
+            Event::NewEvents(StartCause::Poll) => {
+                let current_frame_time = Instant::now();
+                let elapsed_time = (current_frame_time - previous_frame_time).as_secs_f32();
+                previous_frame_time = current_frame_time;
+                external
+                    .get_mut::<FrameData, _>()
+                    .set_delta_time(elapsed_time);
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                elwt.exit();
+            }
+            Event::WindowEvent { event, .. } => {
+                window_events.push(event);
+            }
+            Event::AboutToWait => {
+                external
+                    .get_mut::<InputSystem, _>()
+                    .register_events(&std::mem::take(&mut window_events));
+                camera.update(
+                    external.get::<FrameData, _>().delta_time(),
+                    external.get::<InputSystem, _>(),
+                );
+                entity_context.execute_systems(&external);
+                let _ = renderer_context.begin_frame(&camera);
+                draw_storage.receive().into_iter().for_each(|command| {
+                    renderer_context
+                        .draw(command.shader, command.model, &command.transform)
+                        .unwrap();
+                });
+                let _ = renderer_context.end_frame();
+                if external
+                    .get::<InputSystem, _>()
+                    .get_key_state(Key::G)
+                    .matches_state(KeyState::Pressed)
+                {
+                    let _ = cursor_state.switch(&window);
+                    match cursor_state {
+                        CursorState::Free => camera.set_active(false),
+                        CursorState::Locked => camera.set_active(true),
                     }
                 }
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
+                if external
+                    .get::<InputSystem, _>()
+                    .get_key_state(Key::Q)
+                    .matches_state(KeyState::Pressed)
+                {
                     elwt.exit();
                 }
-                Event::AboutToWait => {
-                    let camera: &C = &(*camera).borrow();
-                    let _ = context.begin_frame(camera);
-                    std::mem::take(&mut draw_commands).into_iter().for_each(|command| {
-                        context.draw(command.shader, command.model, &command.transform).unwrap();
+                if let CursorState::Locked = cursor_state {
+                    let window_extent = window.inner_size();
+                    let _ = window.set_cursor_position(PhysicalPosition {
+                        x: window_extent.width / 2,
+                        y: window_extent.height / 2,
                     });
-                    let _ = context.end_frame();
+                    external
+                        .get_mut::<InputSystem, _>()
+                        .set_cursor_position(Vector2::new(
+                            window_extent.width as f32 / 2.0,
+                            window_extent.height as f32 / 2.0,
+                        ));
                 }
-                _ => (),
             }
+            _ => (),
         })?;
         Ok(())
     }

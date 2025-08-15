@@ -19,3 +19,4 @@ winit = "0.29.10"
 colored = "2.1.0"
 ash = "0.37.3"
 rayon = "1.11.0"
+strum = { version = "0.26.1", features = ["derive"] }

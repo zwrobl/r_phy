@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 winit = { workspace = true }
+strum = { workspace = true }
+math = { path = "../math" }

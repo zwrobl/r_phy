@@ -35,7 +35,7 @@ impl<C: ComponentData, N: ComponentList> ComponentList for Cons<GenVec<C>, N> {}
 pub trait EntityComponentSystem<E: EntityComponentContext, C: ExternalSystem> {
     fn get_entity_builder(&self) -> EntityBuilder<E>;
 
-    fn push_entity(&mut self, entity: EntityBuilder<E>);
+    fn add_entity(&mut self, entity: EntityBuilder<E>);
 
     fn execute_systems(&mut self, external: &C);
 }
@@ -58,7 +58,7 @@ impl<E: EntityComponentContext, C: ExternalSystem, S: StageList<E, C>> EntityCom
         EntityBuilder::new()
     }
 
-    fn push_entity(&mut self, entity: EntityBuilder<E>) {
+    fn add_entity(&mut self, entity: EntityBuilder<E>) {
         self.context.push_entity(entity, None);
     }
 
@@ -293,7 +293,7 @@ mod test_ecs {
     #[test]
     fn test_ecs_execution() {
         let external = Nil::new();
-        let mut ecs = EscContextType::with_external(&external)
+        let mut ecs = EscContextType::with_external::<Nil>()
             .with_system(TestSystem::<String>::new())
             .with_system(TestSystem::<u32>::new())
             .with_system(TestSystem::<u16>::new())
@@ -303,21 +303,21 @@ mod test_ecs {
             .with_system(TestEntityPersistentIndex)
             .build();
         let entity = ecs.get_entity_builder().with_component("Hello".to_string());
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
         let entity = ecs
             .get_entity_builder()
             .with_component("World".to_string())
             .with_component::<Option<PersistentIndex>, _>(None);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
         let entity = ecs
             .get_entity_builder()
             .with_component("The Answer".to_string())
             .with_component(42u32);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
         let entity = ecs.get_entity_builder().with_component(2u32);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
         let entity = ecs.get_entity_builder().with_component(1u16);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
         ecs.execute_systems(&external);
 
         println!("\n\tECS executed successfully first!\n");
@@ -334,8 +334,7 @@ mod test_ecs {
     #[test]
     #[should_panic(expected = "New system's write access is a subset of existing systems")]
     fn test_ecs_stage_write_conflict() {
-        let external = Nil::new();
-        let _ = EscContextType::with_external(&external)
+        let _ = EscContextType::with_external::<Nil>()
             .with_system(TestEntityQuery)
             .with_system(TestEntityQuery)
             .build();
@@ -343,8 +342,7 @@ mod test_ecs {
 
     #[test]
     fn test_ecs_stage_write_conflict_barier() {
-        let external = Nil::new();
-        let _ = EscContextType::with_external(&external)
+        let _ = EscContextType::with_external::<Nil>()
             .with_system(TestEntityQuery)
             .barrier()
             .with_system(TestEntityQuery)
@@ -354,18 +352,18 @@ mod test_ecs {
     #[test]
     fn test_component_update_on_barrier() {
         let external = Nil::new();
-        let mut ecs = EscContextType::with_external(&external)
+        let mut ecs = EscContextType::with_external::<Nil>()
             .with_system(TestEntityPersistentIndex)
             .barrier()
             .with_system(TestEntityPersistentIndex)
             .build();
 
         let entity = ecs.get_entity_builder().with_component(1u16);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
         let entity = ecs
             .get_entity_builder()
             .with_component::<Option<PersistentIndex>, _>(None);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
         ecs.execute_systems(&external);
     }
 
@@ -408,24 +406,24 @@ mod test_ecs {
     #[test]
     fn test_external_system_access() {
         let external = list_value![ExternalSystem::new(), Nil::new()];
-        let mut ecs = EscContextType::with_external(&external)
+        let mut ecs = EscContextType::with_external::<list_type![ExternalSystem, Nil]>()
             .with_system(TestExternalSystemAcces)
             .build();
 
         let entity = ecs.get_entity_builder().with_component("Hello".to_string());
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
 
         let entity = ecs
             .get_entity_builder()
             .with_component("World".to_string())
             .with_component(1u32);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
 
         let entity = ecs
             .get_entity_builder()
             .with_component("TheAnswer".to_string())
             .with_component(2u16);
-        ecs.push_entity(entity);
+        ecs.add_entity(entity);
 
         ecs.execute_systems(&external);
 

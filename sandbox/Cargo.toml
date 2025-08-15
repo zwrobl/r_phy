@@ -11,3 +11,5 @@ winit = { workspace = true }
 physics = { path = "../physics" }
 graphics = { path = "../graphics" }
 vulkan_high = { path = "../vulkan_high" }
+entity = { path = "../entity" }
+type_kit = { path = "../type_kit" }

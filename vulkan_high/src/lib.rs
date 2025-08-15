@@ -108,8 +108,8 @@ impl Drop for VulkanContext {
 impl<R: RendererBuilder> graphics::renderer::RendererBuilder for VulkanRendererBuilder<R> {
     fn build(
         self,
-        window: Rc<Window>,
-    ) -> Result<impl graphics::renderer::Renderer, Box<dyn Error>> {
+        window: &Window,
+    ) -> Result<impl graphics::renderer::Renderer + use<R>, Box<dyn Error>> {
         let Self { config, renderer } = self;
         let context = VulkanContext::new(&window, config.unwrap())?;
         let mut allocator = StaticConfig::new();
@@ -118,7 +118,6 @@ impl<R: RendererBuilder> graphics::renderer::RendererBuilder for VulkanRendererB
         let allocator = context.create_allocator(allocator)?;
         let renderer = renderer.with_allocator(allocator).build()?;
         Ok(VulkanRenderer {
-            _window: window,
             context,
             allocator,
             renderer,
@@ -127,7 +126,6 @@ impl<R: RendererBuilder> graphics::renderer::RendererBuilder for VulkanRendererB
 }
 
 pub struct VulkanRenderer<R: Renderer> {
-    _window: Rc<Window>,
     allocator: AllocatorIndexTyped<Static>,
     context: Rc<VulkanContext>,
     renderer: R,

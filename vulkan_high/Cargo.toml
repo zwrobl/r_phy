@@ -9,7 +9,7 @@ colored = { workspace = true }
 bytemuck = { workspace = true }
 math = { path = "../math" }
 type_kit= { path = "../type_kit" }
-strum = { version = "0.26.1", features = ["derive"] }
+strum = { workspace = true }
 png = "0.17.13"
 physics = { path = "../physics" } 
 graphics = {path = "../graphics" }

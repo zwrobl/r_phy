@@ -1,7 +1,7 @@
 pub mod camera;
 
 use math::types::Matrix4;
-use std::{error::Error, marker::PhantomData, rc::Rc};
+use std::{error::Error, marker::PhantomData};
 use type_kit::{Cons, Contains, Marker, Nil};
 use winit::window::Window;
 
@@ -12,7 +12,7 @@ use crate::{
 
 use self::camera::Camera;
 
-pub trait Renderer {
+pub trait Renderer: 'static {
     fn context_builder() -> impl ContextBuilder<Renderer = Self>;
 }
 
@@ -94,7 +94,7 @@ impl<R: RendererContext, M: DrawMapper> Context<R, M> {
 pub fn create_context<B: ContextBuilder>(
     renderer: &mut B::Renderer,
     builder: B,
-) -> Result<Context<impl RendererContext + use<'_, B>, B::Shaders>, Box<dyn Error>>  {
+) -> Result<Context<impl RendererContext + use<'_, B>, B::Shaders>, Box<dyn Error>> {
     Ok(Context {
         context: builder.build(renderer)?,
         _phantom: PhantomData,
@@ -108,10 +108,7 @@ pub trait ContextBuilder {
 
     type Renderer: Renderer;
 
-    fn build(
-        self,
-        renderer: &mut Self::Renderer,
-    ) -> Result<impl RendererContext, Box<dyn Error>>;
+    fn build(self, renderer: &mut Self::Renderer) -> Result<impl RendererContext, Box<dyn Error>>;
 
     fn with_material_type<N: Material>(
         self,
@@ -172,5 +169,5 @@ pub trait RendererContext {
 }
 
 pub trait RendererBuilder {
-    fn build(self, window: Rc<Window>) -> Result<impl Renderer, Box<dyn Error>>;
+    fn build(self, window: &Window) -> Result<impl Renderer + use<Self>, Box<dyn Error>>;
 }

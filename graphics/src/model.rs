@@ -6,7 +6,7 @@ use std::fmt::Debug;
 
 pub use material::*;
 pub use mesh::*;
-use type_kit::{TypeGuardError};
+use type_kit::TypeGuardError;
 
 #[derive(Debug)]
 pub struct ModelTyped<M: Material, V: Vertex> {

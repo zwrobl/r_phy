@@ -141,7 +141,7 @@ impl<
             panic!("New system's write access is a subset of existing systems");
         }
         StageListBuilder {
-            builder: system::Builder::with_system(self.builder, system),
+            builder: system::Builder::with_executor(self.builder, system),
             stages: self.stages,
             _marker: PhantomData,
         }

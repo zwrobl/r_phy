@@ -171,7 +171,7 @@ where
 }
 
 pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
-    fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+    fn with_executor<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
         self,
         system: SystemExecutor<E, M2, M5, C, N>,
     ) -> impl Builder<E, C>
@@ -203,7 +203,7 @@ impl<E: EntityComponentContext, C: ExternalSystem> SystemListBuilder<E, C, Nil> 
 impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> Builder<E, C>
     for SystemListBuilder<E, C, S>
 {
-    fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+    fn with_executor<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
         self,
         system: SystemExecutor<E, M2, M5, C, N>,
     ) -> impl Builder<E, C>

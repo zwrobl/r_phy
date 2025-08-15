@@ -57,7 +57,7 @@ pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     type Entity: Entity<Self::Components, Self::Marker>;
 
     #[inline]
-    fn with_external<E: ExternalSystem>(_: &E) -> impl stage::Builder<Self, E> {
+    fn with_external<E: ExternalSystem>() -> impl stage::Builder<Self, E> {
         StageListBuilder::new()
     }
 
