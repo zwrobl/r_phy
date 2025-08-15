@@ -97,4 +97,16 @@ impl FirstPersonCamera {
             screen_center: resolution / 2.0,
         }
     }
+
+    pub fn with_position(mut self, position: Vector3) -> Self {
+        self.position = position;
+        self
+    }
+
+    pub fn look_at(mut self, target: Vector3) -> Self {
+        self.forward = (target - self.position).norm();
+        self.right = self.forward.cross(UP).norm();
+        self.euler = Vector3::from_euler(self.forward.x, self.forward.y, 0.0);
+        self
+    }
 }

@@ -78,8 +78,13 @@ impl System<EntityComponent> for SpinningSystem {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let resolution = Vector2::new(800.0, 600.0);
-    let proj = Matrix4::perspective(std::f32::consts::FRAC_PI_3, 600.0 / 800.0, 1e-3, 1e3);
+    let resolution = Vector2::new(1920.0, 1080.0);
+    let proj = Matrix4::perspective(
+        std::f32::consts::FRAC_PI_3,
+        resolution.y / resolution.x,
+        1e-3,
+        1e3,
+    );
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize {
             width: resolution.x as u32,
@@ -96,7 +101,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_config(VulkanRendererConfig::builder().build()?),
     )
     .with_window(window_builder)
-    .with_camera(FirstPersonCamera::new(proj, resolution))
+    .with_camera(
+        FirstPersonCamera::new(proj, resolution)
+            .with_position(Vector3::new(60.0, 60.0, 60.0))
+            .look_at(Vector3::zero()),
+    )
     .build()?;
     let mut renderer_context = game_loop
         .renderer_context_builder()
@@ -120,30 +129,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_system(RenderingSystem)
         .with_system(SpinningSystem);
     let mut scene = game_loop.scene(renderer_context, systems_context);
-    let entity = scene
-        .get_entity_builder()
-        .with_component::<ShaderHandle, _>(checker_shader.into())
-        .with_component::<Model, _>(model.into())
-        .with_component::<Transform, _>(
-            Transform::identity().translate(Vector3::new(4.0, 0.0, 0.0)),
-        )
-        .with_component::<SpinningData, _>(SpinningData::new(
-            Vector3::z(),
-            std::f32::consts::FRAC_PI_2,
-        ));
-    scene.with_entity(entity);
-    let entity = scene
-        .get_entity_builder()
-        .with_component::<ShaderHandle, _>(checker_shader.into())
-        .with_component::<Model, _>(model.into())
-        .with_component::<Transform, _>(
-            Transform::identity().translate(Vector3::new(4.0, 2.0, 0.0)),
-        )
-        .with_component::<SpinningData, _>(SpinningData::new(
-            Vector3::y(),
-            std::f32::consts::FRAC_PI_2,
-        ));
-    scene.with_entity(entity);
+
+    (0..10).for_each(|x| {
+        (0..10).for_each(|y| {
+            (0..10).for_each(|z| {
+                let entity =
+                    scene
+                        .get_entity_builder()
+                        .with_component::<ShaderHandle, _>(checker_shader.into())
+                        .with_component::<Model, _>(model.clone().into())
+                        .with_component::<Transform, _>(Transform::identity().translate(
+                            Vector3::new(x as f32 * 3.0, y as f32 * 3.0, z as f32 * 3.0),
+                        ))
+                        .with_component::<SpinningData, _>(SpinningData::new(
+                            Vector3::new(x as f32, y as f32, z as f32).norm(),
+                            std::f32::consts::FRAC_PI_2,
+                        ));
+                scene.with_entity(entity);
+            })
+        })
+    });
     game_loop.run(scene)?;
     Ok(())
 }
