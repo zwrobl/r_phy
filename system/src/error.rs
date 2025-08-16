@@ -11,7 +11,6 @@ pub enum SystemError {
     ExternalError(winit::error::ExternalError),
     OsError(winit::error::OsError),
     MissingWindowConfiguration,
-    MissingCameraConfiguration,
     GraphicsError(GraphicsError),
 }
 
@@ -22,7 +21,6 @@ impl Display for SystemError {
             SystemError::ExternalError(err) => write!(f, "External error: {}", err),
             SystemError::OsError(err) => write!(f, "OS error: {}", err),
             SystemError::MissingWindowConfiguration => write!(f, "Missing window configuration"),
-            SystemError::MissingCameraConfiguration => write!(f, "Missing camera configuration"),
             SystemError::GraphicsError(err) => write!(f, "Graphics error: {}", err),
         }
     }

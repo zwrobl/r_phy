@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use std::ops::Mul;
+use std::{f32::consts::FRAC_PI_2, ops::Mul};
 
 use super::{Matrix3, Vector3};
 
@@ -229,5 +229,43 @@ impl Quat {
     #[inline]
     pub fn is_valid(self) -> bool {
         self.r.is_finite() && self.i.is_finite() && self.j.is_finite() && self.k.is_finite()
+    }
+
+    #[inline]
+    pub fn to_euler(self) -> Vector3 {
+        let sinr_cosp = 2.0 * (self.r * self.i + self.j * self.k);
+        let cosr_cosp = 1.0 - 2.0 * (self.i * self.i + self.j * self.j);
+        let roll = sinr_cosp.atan2(cosr_cosp);
+
+        let sinp = (1.0 + 2.0 * (self.r * self.j - self.k * self.i)).sqrt();
+        let cosp = (1.0 - 2.0 * (self.r * self.j - self.k * self.i)).sqrt();
+        let pitch = 2.0 * sinp.atan2(cosp) - FRAC_PI_2;
+
+        let siny_cosp = 2.0 * (self.r * self.k + self.i * self.j);
+        let cosy_cosp = 1.0 - 2.0 * (self.j * self.j + self.k * self.k);
+        let yaw = siny_cosp.atan2(cosy_cosp);
+
+        Vector3::new(roll, pitch, yaw)
+    }
+
+    #[inline]
+    pub fn from_euler(euler: Vector3) -> Self {
+        let half_roll = 0.5 * euler.x;
+        let half_pitch = 0.5 * euler.y;
+        let half_yaw = 0.5 * euler.z;
+
+        let sin_roll = half_roll.sin();
+        let cos_roll = half_roll.cos();
+        let sin_pitch = half_pitch.sin();
+        let cos_pitch = half_pitch.cos();
+        let sin_yaw = half_yaw.sin();
+        let cos_yaw = half_yaw.cos();
+
+        Self {
+            r: cos_roll * cos_pitch * cos_yaw + sin_roll * sin_pitch * sin_yaw,
+            i: sin_roll * cos_pitch * cos_yaw - cos_roll * sin_pitch * sin_yaw,
+            j: cos_roll * sin_pitch * cos_yaw + sin_roll * cos_pitch * sin_yaw,
+            k: cos_roll * cos_pitch * sin_yaw - sin_roll * sin_pitch * cos_yaw,
+        }
     }
 }

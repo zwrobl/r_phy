@@ -537,6 +537,15 @@ impl Matrix3 {
         }
         m
     }
+
+    #[inline]
+    pub fn euler(&self) -> Vector3 {
+        Vector3::new(
+            self.i.x.atan2(self.i.y),
+            self.j.x.atan2(self.j.y),
+            self.k.x.atan2(self.k.y),
+        )
+    }
 }
 
 #[cfg(test)]

@@ -13,7 +13,6 @@ gltf = "1.4.0"
 serde = "1.0.197"
 winit = { workspace = true }
 math = { path = "../math" }
-input = { path = "../input" }
 type_kit= { path = "../type_kit" }
 physics = { path = "../physics" }
 colored = { workspace = true }

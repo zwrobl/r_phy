@@ -1,8 +1,8 @@
-pub mod first_person;
-
 use bytemuck::{Pod, Zeroable};
-use input::InputSystem;
-use math::types::{Matrix4, Vector3};
+use math::{
+    transform::Transform,
+    types::{Matrix3, Matrix4, Vector3},
+};
 
 pub const UP: Vector3 = Vector3::z();
 
@@ -13,28 +13,37 @@ pub struct CameraMatrices {
     pub proj: Matrix4,
 }
 
-pub trait Camera: 'static {
-    fn get_position(&self) -> Vector3;
-    fn get_matrices(&self) -> CameraMatrices;
-    fn update(&mut self, elapsed_time: f32, input_system: &InputSystem);
-    fn set_active(&mut self, active: bool);
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
+pub struct ViewMatrix {
+    pub view: Matrix4,
 }
-pub struct CameraNone;
 
-impl Camera for CameraNone {
-    fn get_position(&self) -> Vector3 {
-        unimplemented!()
+impl From<Transform> for ViewMatrix {
+    fn from(value: Transform) -> Self {
+        let mat: Matrix3 = value.q.into();
+        let forward = mat.i.norm();
+        let view = Matrix4::look_at(value.t, value.t + forward, UP);
+        Self { view }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
+pub struct ProjectionMatrix {
+    pub proj: Matrix4,
+}
+
+impl ProjectionMatrix {
+    pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) -> Self {
+        let proj = Matrix4::perspective(fov, aspect, near, far);
+        Self { proj }
     }
 
-    fn get_matrices(&self) -> CameraMatrices {
-        unimplemented!()
-    }
-
-    fn update(&mut self, _elapsed_time: f32, _input_system: &InputSystem) {
-        unimplemented!()
-    }
-
-    fn set_active(&mut self, _active: bool) {
-        unimplemented!()
+    pub fn with_view(&self, view: ViewMatrix) -> CameraMatrices {
+        CameraMatrices {
+            view: view.view,
+            proj: self.proj,
+        }
     }
 }

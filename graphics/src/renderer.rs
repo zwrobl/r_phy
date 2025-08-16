@@ -8,10 +8,9 @@ use winit::window::Window;
 use crate::{
     error::{GraphicsError, GraphicsResult},
     model::{Material, MaterialHandleTyped, Mesh, MeshHandleTyped, Model, ModelTyped, Vertex},
+    renderer::camera::CameraMatrices,
     shader::{Shader, ShaderHandle, ShaderHandleTyped, ShaderType},
 };
-
-use self::camera::Camera;
 
 pub trait Renderer: 'static {
     fn context_builder() -> impl ContextBuilder<Renderer = Self>;
@@ -62,7 +61,7 @@ pub struct Context<R: RendererContext, M: DrawMapper> {
 
 impl<R: RendererContext, M: DrawMapper> Context<R, M> {
     #[inline]
-    pub fn begin_frame<C: Camera>(&mut self, camera: &C) -> GraphicsResult<()> {
+    pub fn begin_frame(&mut self, camera: &CameraMatrices) -> GraphicsResult<()> {
         self.context.begin_frame(camera)
     }
 
@@ -159,7 +158,7 @@ pub trait RendererContext {
     type Materials;
     type Meshes;
 
-    fn begin_frame<C: Camera>(&mut self, camera: &C) -> GraphicsResult<()>;
+    fn begin_frame(&mut self, camera: &CameraMatrices) -> GraphicsResult<()>;
     fn end_frame(&mut self) -> GraphicsResult<()>;
     fn draw_typed<S: ShaderType>(
         &mut self,

@@ -1,8 +1,9 @@
 use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
 use type_kit::{
-    CollectionType, Cons, Contains, GenCollectionResult, GenVec, GenVecIndex, IntoSubsetIterator,
-    MarkedIndexList, MarkedItemList, Marker, Nil, OptionalList, StaticTypeList, TypeList,
+    CollectionType, Cons, Contains, Fin, GenCollectionResult, GenVec, GenVecIndex,
+    IntoSubsetIterator, MarkedIndexList, MarkedItemList, Marker, Nil, OptionalList, StaticTypeList,
+    TypeList,
 };
 
 use crate::{
@@ -222,6 +223,17 @@ where
     Q: Contains<Nil, M>,
 {
     fn write(query: Q) -> Q {
+        query
+    }
+}
+
+impl<C: ComponentData, Q: TypeList, M: Marker> QueryWrite<Q, M> for Fin<C>
+where
+    Q: Contains<Expected<C>, M>,
+    C: 'static,
+{
+    fn write(mut query: Q) -> Q {
+        *query.get_mut() = Expected::<C>::new(true);
         query
     }
 }

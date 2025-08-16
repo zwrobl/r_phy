@@ -7,7 +7,7 @@ use graphics::{
         CommonVertex, EmptyMaterial, MeshHandleTyped, Model, ModelTyped, PbrMaterial, SimpleVertex,
         UnlitMaterial,
     },
-    renderer::{camera::first_person::FirstPersonCamera, ContextBuilder},
+    renderer::{camera::ProjectionMatrix, ContextBuilder},
     shader::{Shader, ShaderHandle},
 };
 use std::{error::Error, path::Path, result::Result};
@@ -24,11 +24,17 @@ use winit::{
 use entity::system::System;
 use math::{
     transform::Transform,
-    types::{Matrix4, Vector2, Vector3},
+    types::{Vector2, Vector3},
 };
 use physics::shape::Cube;
 use system::{
-    system::{frame::FrameData, renderer::RenderingSystem},
+    system::{
+        command::{Command, CommandQueue},
+        control::{FirstPerson, FirstPersonController, KeyBindings},
+        frame::FrameData,
+        input::{GlobalInput, InputSystem, Key, KeyState},
+        renderer::{CameraSelector, DrawCommandSystem},
+    },
     LoopBuilder,
 };
 
@@ -44,7 +50,15 @@ impl SpinningData {
     }
 }
 
-type EntityComponent = ecs_context_type![Model, ShaderHandle, Transform, SpinningData, Nil];
+type EntityComponent = ecs_context_type![
+    Model,
+    ShaderHandle,
+    Transform,
+    SpinningData,
+    ProjectionMatrix,
+    FirstPersonController,
+    Nil
+];
 
 struct SpinningSystem;
 
@@ -72,14 +86,22 @@ impl System<EntityComponent> for SpinningSystem {
     }
 }
 
+fn handle_input(
+    _context: &EntityComponent,
+    _queue: &OperationSender<EntityComponent>,
+    input_system: &InputSystem,
+    command_queue: &CommandQueue,
+) {
+    if input_system
+        .get_key_state(Key::Q)
+        .matches_state(KeyState::Pressed)
+    {
+        command_queue.send(Command::Quit);
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let resolution = Vector2::new(1920.0, 1080.0);
-    let proj = Matrix4::perspective(
-        std::f32::consts::FRAC_PI_3,
-        resolution.y / resolution.x,
-        1e-3,
-        1e3,
-    );
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize {
             width: resolution.x as u32,
@@ -96,11 +118,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_config(VulkanRendererConfig::builder().build()?),
     )
     .with_window(window_builder)
-    .with_camera(
-        FirstPersonCamera::new(proj, resolution)
-            .with_position(Vector3::new(60.0, 60.0, 60.0))
-            .look_at(Vector3::zero()),
-    )
     .build()?;
     let mut renderer_context = game_loop
         .renderer_context_builder()
@@ -121,9 +138,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     let model = ModelTyped::new(cube_mesh, empty_material);
     let systems_context = game_loop
         .system_builder()
-        .with_system(RenderingSystem)
-        .with_system(SpinningSystem);
+        .with_system(DrawCommandSystem)
+        .with_system(SpinningSystem)
+        .barrier()
+        .with_system(FirstPerson::new::<EntityComponent>())
+        .with_global_system(CameraSelector::new::<EntityComponent>())
+        .with_global_system(GlobalInput::<EntityComponent, _>::new(handle_input));
     let mut scene = game_loop.scene(renderer_context, systems_context);
+
+    let camera = scene
+        .get_entity_builder()
+        .with_component(Transform::identity())
+        .with_component(FirstPersonController::new(KeyBindings::default(), 4.0, 0.5))
+        .with_component(ProjectionMatrix::perspective(
+            std::f32::consts::FRAC_PI_3,
+            resolution.y / resolution.x,
+            1e-1,
+            1e4,
+        ));
+    scene.with_entity(camera);
 
     (0..10).for_each(|x| {
         (0..10).for_each(|y| {

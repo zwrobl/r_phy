@@ -1,3 +1,10 @@
+use std::marker::PhantomData;
+
+use entity::{context::EntityComponentContext, operation::OperationSender, system::GlobalSystem};
+use type_kit::{list_type, unpack_list, Cons, Nil};
+
+use crate::system::command::CommandQueue;
+
 use math::types::Vector2;
 use strum::EnumCount;
 use winit::{
@@ -302,5 +309,54 @@ impl InputSystem {
         self.key_state.iter_mut().for_each(|event| {
             event.next_state();
         })
+    }
+}
+
+pub struct GlobalInput<
+    E: EntityComponentContext,
+    F: Fn(&E, &OperationSender<E>, &InputSystem, &CommandQueue) + Send + Sync,
+> {
+    pub update_fn: F,
+    _phantom: PhantomData<E>,
+}
+
+impl<
+        E: EntityComponentContext,
+        F: Fn(&E, &OperationSender<E>, &InputSystem, &CommandQueue) + Send + Sync,
+    > GlobalInput<E, F>
+{
+    pub fn new(update_fn: F) -> Self {
+        Self {
+            update_fn,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn update(
+        &self,
+        context: &E,
+        queue: &OperationSender<E>,
+        input_system: &InputSystem,
+        command_queue: &CommandQueue,
+    ) {
+        (self.update_fn)(context, queue, input_system, command_queue)
+    }
+}
+
+impl<
+        E: EntityComponentContext,
+        F: Fn(&E, &OperationSender<E>, &InputSystem, &CommandQueue) + Send + Sync,
+    > GlobalSystem<E> for GlobalInput<E, F>
+{
+    type External = list_type![InputSystem, CommandQueue, Nil];
+    type WriteList = Nil;
+
+    fn execute<'a>(
+        &self,
+        context: &E,
+        queue: &OperationSender<E>,
+        unpack_list![input_system, command_queue]: type_kit::RefList<'a, Self::External>,
+    ) {
+        self.update(context, queue, input_system, command_queue);
     }
 }

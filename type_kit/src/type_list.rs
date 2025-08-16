@@ -329,7 +329,7 @@ pub trait TypeList: Sized {
     type MutListOpt<'a>
     where
         Self: 'a;
-    type OptList: TypeList;
+    type OptList;
 
     #[inline]
     fn len(&self) -> usize {
@@ -420,11 +420,11 @@ impl<T: 'static> TypeList for Fin<T> {
     const LEN: usize = 1;
     type Item = T;
     type Next = Nil;
-    type RefList<'a> = &'a Self;
-    type RefListOpt<'a> = Option<&'a Self>;
-    type MutList<'a> = &'a mut Self;
-    type MutListOpt<'a> = Option<&'a mut Self>;
-    type OptList = Self;
+    type RefList<'a> = &'a T;
+    type RefListOpt<'a> = Option<&'a T>;
+    type MutList<'a> = &'a mut T;
+    type MutListOpt<'a> = Option<&'a mut T>;
+    type OptList = Option<T>;
 
     fn as_ref(&self) -> Self::RefList<'_> {
         self
@@ -443,7 +443,7 @@ impl<T: 'static> TypeList for Fin<T> {
     }
 
     fn unwrap_owned<'a>(opt: Self::OptList) -> Self {
-        opt
+        Fin::new(opt.unwrap())
     }
 }
 
@@ -993,6 +993,23 @@ impl<T: 'static> BoolList for TypedNil<T> {
     #[inline]
     fn none(&self) -> bool {
         true
+    }
+}
+
+impl<T> BoolList for Option<T> {
+    #[inline]
+    fn all(&self) -> bool {
+        self.is_some()
+    }
+
+    #[inline]
+    fn any(&self) -> bool {
+        self.is_some()
+    }
+
+    #[inline]
+    fn none(&self) -> bool {
+        self.is_none()
     }
 }
 

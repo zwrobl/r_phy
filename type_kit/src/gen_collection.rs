@@ -587,7 +587,7 @@ use std::{
 };
 
 use crate::{
-    BoolList, Cons, Contains, Destroy, DestroyResult, DropGuard, FromGuard, Guard, IntoOuter,
+    BoolList, Cons, Contains, Destroy, DestroyResult, DropGuard, Fin, FromGuard, Guard, IntoOuter,
     Marked, Marker, MutListOpt, Nil, OptList, RefListOpt, TypeGuard, TypeGuardError, TypeList,
     TypedNil, ValidMut, ValidRef,
 };
@@ -1611,7 +1611,7 @@ impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionRefIter
 
     #[inline]
     fn next(&mut self) -> Self::IteratorItem {
-        let item = self.head.next();
+        let item = <GenCollectionRefIter<_> as Iterator>::next(&mut self.head);
         Cons::new(item, self.tail.next())
     }
 }
@@ -1621,7 +1621,7 @@ impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionMutIter
 
     #[inline]
     fn next(&mut self) -> Self::IteratorItem {
-        let item = self.head.next();
+        let item = <GenCollectionMutIter<_> as Iterator>::next(&mut self.head);
         Cons::new(item, self.tail.next())
     }
 }
@@ -1631,8 +1631,35 @@ impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionIntoIte
 
     #[inline]
     fn next(&mut self) -> Self::IteratorItem {
-        let item = self.head.next();
+        let item = <GenCollectionIntoIter<_> as Iterator>::next(&mut self.head);
         Cons::new(item, self.tail.next())
+    }
+}
+
+impl<'a, T: 'static> ListIterator for GenCollectionRefIter<'a, T> {
+    type IteratorItem = Option<&'a T>;
+
+    #[inline]
+    fn next(&mut self) -> Self::IteratorItem {
+        <GenCollectionRefIter<_> as Iterator>::next(self)
+    }
+}
+
+impl<'a, T: 'static> ListIterator for GenCollectionMutIter<'a, T> {
+    type IteratorItem = Option<&'a mut T>;
+
+    #[inline]
+    fn next(&mut self) -> Self::IteratorItem {
+        <GenCollectionMutIter<_> as Iterator>::next(self)
+    }
+}
+
+impl<'a, T: 'static> ListIterator for GenCollectionIntoIter<T> {
+    type IteratorItem = Option<T>;
+
+    #[inline]
+    fn next(&mut self) -> Self::IteratorItem {
+        <GenCollectionIntoIter<_> as Iterator>::next(self)
     }
 }
 
@@ -3374,6 +3401,31 @@ where
             collection.get_mut().into_iter(),
             N::sub_iter_mut(reborrow.as_mut()),
         )
+    }
+}
+
+impl<C: 'static, T: TypeList, M: Marker> IntoSubsetIterator<T, M> for Fin<C>
+where
+    T: Contains<GenVec<C>, M>,
+{
+    type RefIterator<'a>
+        = GenCollectionRefIter<'a, C>
+    where
+        T: 'a,
+        Self: 'a;
+
+    type MutIterator<'a>
+        = GenCollectionMutIter<'a, C>
+    where
+        T: 'a,
+        Self: 'a;
+
+    fn sub_iter<'a>(collection: &'a T) -> Self::RefIterator<'a> {
+        collection.get().into_iter()
+    }
+
+    unsafe fn sub_iter_mut<'a>(collection: &'a mut T) -> Self::MutIterator<'a> {
+        collection.get_mut().into_iter()
     }
 }
 

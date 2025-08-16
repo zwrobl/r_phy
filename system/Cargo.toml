@@ -7,6 +7,6 @@ edition = "2021"
 type_kit= { path = "../type_kit" }
 math = { path = "../math" }
 winit = { workspace = true }
-input = { path = "../input" }
 entity = { path = "../entity" }
 graphics = { path = "../graphics" }
+strum = { workspace = true }

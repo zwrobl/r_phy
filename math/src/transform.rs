@@ -149,6 +149,15 @@ impl Transform {
     }
 
     #[inline]
+    pub fn rotate_local(self, axis: Vector3, rad: f32) -> Self {
+        let q = Quat::axis_angle(axis, rad);
+        Self {
+            q: q * self.q,
+            t: self.t,
+        }
+    }
+
+    #[inline]
     pub fn translate(self, t: Vector3) -> Self {
         Self {
             q: self.q,

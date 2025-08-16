@@ -5,7 +5,6 @@ members = [
     "math",
     "system",
     "graphics",
-    "input",
     "sandbox",
     "physics",
     "vulkan_low",

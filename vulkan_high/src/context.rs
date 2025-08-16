@@ -1,11 +1,12 @@
 use graphics::error::GraphicsResult;
 use graphics::model::ModelTyped;
+use graphics::renderer::camera::CameraMatrices;
 use graphics::renderer::DrawMapper;
 use graphics::shader::Shader;
 use math::types::Matrix4;
 use type_kit::{Cons, Contains, Destroy, Marker, Nil};
 
-use graphics::renderer::{camera::Camera, ContextBuilder};
+use graphics::renderer::ContextBuilder;
 use graphics::{
     model::{Material, MaterialHandleTyped, Mesh, MeshHandleTyped, Vertex},
     shader::{ShaderHandleTyped, ShaderType},
@@ -217,9 +218,8 @@ impl<
     type Materials = M;
     type Meshes = V;
 
-    fn begin_frame<C: Camera>(&mut self, camera: &C) -> GraphicsResult<()> {
-        let camera_matrices = camera.get_matrices();
-        let camera_descriptor = self.renderer.begin_frame(&self.context, camera_matrices)?;
+    fn begin_frame(&mut self, camera: &CameraMatrices) -> GraphicsResult<()> {
+        let camera_descriptor = self.renderer.begin_frame(&self.context, *camera)?;
         self.draw_recorder.begin_frame(camera_descriptor);
         Ok(())
     }
