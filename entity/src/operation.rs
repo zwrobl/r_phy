@@ -9,20 +9,18 @@ use crate::{
     index::EntityIndexTyped,
 };
 
-pub enum Operation<E: EntityComponentContext> {
-    Push(EntityBuilder<E>),
-    Pop(EntityIndexTyped<E>),
-    Update(EntityUpdate<E>),
-}
-
 pub struct OperationSender<E: EntityComponentContext> {
-    sender: Sender<Operation<E>>,
+    push: Sender<EntityBuilder<E>>,
+    pop: Sender<EntityIndexTyped<E>>,
+    update: Sender<EntityUpdate<E>>,
 }
 
 impl<E: EntityComponentContext> Clone for OperationSender<E> {
     fn clone(&self) -> Self {
         Self {
-            sender: self.sender.clone(),
+            push: self.push.clone(),
+            pop: self.pop.clone(),
+            update: self.update.clone(),
         }
     }
 }
@@ -30,60 +28,61 @@ impl<E: EntityComponentContext> Clone for OperationSender<E> {
 impl<E: EntityComponentContext> OperationSender<E> {
     #[inline]
     pub fn push_entity(&self, entity: EntityBuilder<E>) {
-        self.sender.send(Operation::Push(entity)).unwrap();
+        self.push.send(entity).unwrap();
     }
 
     #[inline]
     pub fn pop_entity(&self, entity: EntityIndexTyped<E>) {
-        self.sender.send(Operation::Pop(entity)).unwrap();
+        self.pop.send(entity).unwrap();
     }
 
     #[inline]
     pub fn update_entity(&self, update: EntityUpdate<E>) {
-        self.sender.send(Operation::Update(update)).unwrap();
+        self.update.send(update).unwrap();
     }
 }
 
 pub struct OperationReceiver<E: EntityComponentContext> {
-    receiver: Receiver<Operation<E>>,
+    push: Receiver<EntityBuilder<E>>,
+    pop: Receiver<EntityIndexTyped<E>>,
+    update: Receiver<EntityUpdate<E>>,
 }
 
 impl<E: EntityComponentContext> OperationReceiver<E> {
     pub fn process(self, world: &mut E) {
-        let operations: Vec<_> = self.receiver.into_iter().collect();
+        let pop: Vec<_> = self.pop.into_iter().collect();
+        let mut removed = HashSet::with_capacity(pop.len());
 
-        let mut updated = HashMap::with_capacity(operations.len());
-        let mut removed = HashSet::with_capacity(operations.len());
-        operations
-            .into_iter()
-            .for_each(|operation| match operation {
-                Operation::Push(entity) => world.push_entity(entity, None),
+        pop.into_iter().for_each(|index| {
+            if world.pop_entity(index).is_some() {
+                removed.insert(index);
+            }
+        });
 
-                Operation::Pop(index) => {
-                    if world.pop_entity(index).is_some() {
-                        removed.insert(index);
-                    } else if updated.contains_key(&index) {
-                        updated.remove(&index);
-                        removed.insert(index);
+        let update: Vec<_> = self.update.into_iter().collect();
+        let mut updated = HashMap::with_capacity(update.len());
+
+        update.into_iter().for_each(|update| {
+            let index = update.index;
+            if !removed.contains(&index) {
+                match world.update_entity(update) {
+                    UpdateResult::ArchetypeChanged(builder) => {
+                        updated.insert(index, builder);
                     }
-                }
-                Operation::Update(update) => {
-                    let index = update.index;
-                    if !removed.contains(&index) {
-                        match world.update_entity(update) {
-                            UpdateResult::ArchetypeChanged(builder) => {
-                                updated.insert(index, builder);
-                            }
-                            UpdateResult::NotFound(update) => {
-                                if let Some((builder, ..)) = updated.get_mut(&index) {
-                                    world.update_entity_builder(builder, update);
-                                }
-                            }
-                            _ => (),
+                    UpdateResult::NotFound(update) => {
+                        if let Some((builder, ..)) = updated.get_mut(&index) {
+                            world.update_entity_builder(builder, update);
                         }
                     }
+                    _ => (),
                 }
-            });
+            }
+        });
+
+        self.push
+            .into_iter()
+            .for_each(|entity| world.push_entity(entity, None));
+
         updated
             .into_iter()
             .for_each(|(_, (builder, persistent_index))| {
@@ -96,7 +95,20 @@ pub struct OperationChannel {}
 
 impl OperationChannel {
     pub fn new<E: EntityComponentContext>() -> (OperationSender<E>, OperationReceiver<E>) {
-        let (sender, receiver) = channel();
-        (OperationSender { sender }, OperationReceiver { receiver })
+        let (push_sender, push_receiver) = channel();
+        let (pop_sender, pop_receiver) = channel();
+        let (update_sender, update_receiver) = channel();
+        (
+            OperationSender {
+                push: push_sender,
+                pop: pop_sender,
+                update: update_sender,
+            },
+            OperationReceiver {
+                push: push_receiver,
+                pop: pop_receiver,
+                update: update_receiver,
+            },
+        )
     }
 }
