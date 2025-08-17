@@ -16,12 +16,12 @@ use entity::{
 use graphics::{
     model::Model,
     renderer::{
-        camera::{CameraMatrices, ProjectionMatrix, ViewMatrix},
+        camera::{Camera, ProjectionMatrix},
         Context, DrawMapper, RendererContext,
     },
     shader::ShaderHandle,
 };
-use math::{transform::Transform, types::Matrix4};
+use math::transform::Transform;
 use type_kit::{
     list_type, unpack_any, unpack_list, Cons, Contains, Fin, GenVec, Marker, Nil, RefList,
 };
@@ -30,11 +30,11 @@ use type_kit::{
 pub struct DrawCommand {
     pub shader: ShaderHandle,
     pub model: Model,
-    pub transform: Matrix4,
+    pub transform: Transform,
 }
 
 impl DrawCommand {
-    pub fn new(shader: ShaderHandle, model: Model, transform: Matrix4) -> Self {
+    pub fn new(shader: ShaderHandle, model: Model, transform: Transform) -> Self {
         Self {
             shader,
             model,
@@ -65,11 +65,11 @@ impl<R: RendererContext, M: DrawMapper> RenderingSystem<R, M> {
 
     pub fn process(&mut self, camera: &CameraCell) {
         let commands: Vec<_> = self.receiver.try_iter().collect();
-        if let Some(camera) = camera.get_matrices() {
-            let _ = self.renderer.begin_frame(&camera);
+        if let Some(camera) = camera.take() {
+            let _ = self.renderer.begin_frame(&camera.into());
             commands.iter().for_each(|command| {
                 self.renderer
-                    .draw(command.shader, command.model, &command.transform)
+                    .draw(command.shader, command.model, &command.transform.into())
                     .unwrap();
             });
             let _ = self.renderer.end_frame();
@@ -92,12 +92,12 @@ impl<E: EntityComponentContext> System<E> for DrawCommandSystem {
         _queue: &OperationSender<E>,
         unpack_list![draw_queue]: RefList<'a, Self::External>,
     ) {
-        draw_queue.push(DrawCommand::new(*shader, *model, (*transform).into()));
+        draw_queue.push(DrawCommand::new(*shader, *model, *transform));
     }
 }
 
 pub struct CameraCell {
-    matrices: Mutex<Option<CameraMatrices>>,
+    matrices: Mutex<Option<Camera>>,
 }
 
 impl CameraCell {
@@ -107,12 +107,12 @@ impl CameraCell {
         }
     }
 
-    pub fn set_matrices(&self, matrices: CameraMatrices) {
-        *self.matrices.lock().unwrap() = Some(matrices);
+    pub fn insert(&self, camera: Camera) {
+        *self.matrices.lock().unwrap() = Some(camera);
     }
 
-    pub fn get_matrices(&self) -> Option<CameraMatrices> {
-        self.matrices.lock().unwrap().clone()
+    pub fn take(&self) -> Option<Camera> {
+        self.matrices.lock().unwrap().take()
     }
 }
 
@@ -156,8 +156,7 @@ where
             .next()
         {
             let unpack_any![camera, transform] = entity.components;
-            let view: ViewMatrix = (*transform).into();
-            camera_cell.set_matrices(camera.with_view(view));
+            camera_cell.insert(camera.with_view(*transform));
         }
     }
 }
