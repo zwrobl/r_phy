@@ -88,7 +88,7 @@ mod test_ecs {
         entity_type,
         index::{EntityIndex, PersistentIndex},
         marker_type,
-        operation::OperationSender,
+        operation::{AddComponent, OperationChannel},
         stage::{Builder, Parallel},
         system::{GlobalSystem, System},
         ComponentData, EntityComponentSystem,
@@ -124,8 +124,8 @@ mod test_ecs {
             &self,
             _entity: EntityIndex,
             unpack_list![borrowed_value]: RefList<'a, Self::Components>,
-            context: &EscContextType,
-            queue: &OperationSender<EscContextType>,
+            _context: &EscContextType,
+            queue: &OperationChannel<'_, EscContextType>,
             _external: RefList<'a, Self::External>,
         ) {
             println!(
@@ -133,11 +133,11 @@ mod test_ecs {
                 std::any::type_name::<T>(),
                 borrowed_value
             );
-            queue.push_entity(
-                context
-                    .get_entity_builder()
-                    .with_component("GeneratedComponent".to_string()),
-            );
+            let new_entity = queue.create_entity();
+            queue.add_component(AddComponent::component(
+                new_entity,
+                "GeneratedComponent".to_string(),
+            ));
         }
     }
 
@@ -165,7 +165,7 @@ mod test_ecs {
             _entity: EntityIndex,
             unpack_list![borrowed_first, borrowed_second]: RefList<'a, Self::Components>,
             _context: &EscContextType,
-            _queue: &OperationSender<EscContextType>,
+            _queue: &OperationChannel<'_, EscContextType>,
             _external: RefList<'a, Self::External>,
         ) {
             println!(
@@ -190,18 +190,21 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![_borrow_u16]: RefList<'a, Self::Components>,
             context: &EscContextType,
-            queue: &OperationSender<EscContextType>,
+            queue: &OperationChannel<'_, EscContextType>,
             _external: RefList<'a, Self::External>,
         ) {
             let _ = context
                 .query::<_, list_type![String, Nil]>()
                 .for_each(|entity_ref| {
-                    let index: EntityIndex = entity_ref.index.into();
                     println!(
                         "Executing TestEntityQuery with entity components: {:?}",
                         entity_ref.components
                     );
-                    queue.push_entity(context.get_entity_builder().with_component(Some(index)));
+                    let new_entity = queue.create_entity();
+                    queue.add_component(AddComponent::component(
+                        new_entity,
+                        "UpdatedQueryEntity".to_string(),
+                    ));
                 });
             let entity = entity.in_context::<EscContextType>();
             queue.update_entity(self.get_entity_update(
@@ -224,7 +227,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![entity_index]: RefList<'a, Self::Components>,
             context: &EscContextType,
-            queue: &OperationSender<EscContextType>,
+            queue: &OperationChannel<'_, EscContextType>,
             _external: RefList<'a, Self::External>,
         ) {
             if let Some(index) = entity_index {
@@ -257,7 +260,7 @@ mod test_ecs {
             entity: EntityIndex,
             unpack_list![persistent_index]: RefList<'a, Self::Components>,
             context: &EscContextType,
-            queue: &OperationSender<EscContextType>,
+            queue: &OperationChannel<'_, EscContextType>,
             _external: RefList<'a, Self::External>,
         ) {
             if persistent_index.is_none() {
@@ -394,7 +397,7 @@ mod test_ecs {
             _entity: EntityIndex,
             unpack_list![component]: RefList<'a, Self::Components>,
             _context: &EscContextType,
-            _queue: &OperationSender<EscContextType>,
+            _queue: &OperationChannel<'_, EscContextType>,
             unpack_list![external]: RefList<'a, Self::External>,
         ) {
             println!("TestExternalSystemAcces received component: {}", component);
@@ -452,7 +455,7 @@ mod test_ecs {
         fn execute<'a>(
             &self,
             context: &EscContextType,
-            queue: &OperationSender<EscContextType>,
+            queue: &OperationChannel<'_, EscContextType>,
             _external: RefList<'a, Self::External>,
         ) {
             println!("Executing TestGlobalSystem");

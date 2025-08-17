@@ -10,7 +10,7 @@ use entity::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
     entity::Expected,
     index::EntityIndex,
-    operation::OperationSender,
+    operation::OperationChannel,
     system::{GlobalSystem, System},
 };
 use graphics::{
@@ -89,7 +89,7 @@ impl<E: EntityComponentContext> System<E> for DrawCommandSystem {
         _entity: EntityIndex,
         unpack_list![model, shader, transform]: RefList<'a, Self::Components>,
         _context: &E,
-        _queue: &OperationSender<E>,
+        _queue: &OperationChannel<'_, E>,
         unpack_list![draw_queue]: RefList<'a, Self::External>,
     ) {
         draw_queue.push(DrawCommand::new(*shader, *model, *transform));
@@ -148,7 +148,7 @@ where
     fn execute<'a>(
         &self,
         context: &E,
-        _queue: &OperationSender<E>,
+        _queue: &OperationChannel<'_, E>,
         unpack_list![camera_cell]: RefList<'a, Self::External>,
     ) {
         if let Some(entity) = context

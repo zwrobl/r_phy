@@ -9,7 +9,7 @@ use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType, EntityUpdateType},
     entity::{ComponentUpdate, EntityUpdate, Query, QueryWrite},
     index::{EntityIndex, EntityIndexTyped},
-    operation::OperationSender,
+    operation::OperationChannel,
     ArchetypeRef, ComponentData, ExternalSystem,
 };
 
@@ -23,7 +23,7 @@ pub trait System<E: EntityComponentContext>: Sync {
         entity: EntityIndex,
         components: RefList<'a, Self::Components>,
         context: &E,
-        queue: &OperationSender<E>,
+        queue: &OperationChannel<'_, E>,
         external: RefList<'a, Self::External>,
     );
 
@@ -124,7 +124,7 @@ where
         &'a self,
         archetype: ArchetypeRef<'b, E>,
         context: &E,
-        operation_queue: &OperationSender<E>,
+        operation_queue: &OperationChannel<'_, E>,
         external: &C,
     ) {
         if self.is_matching(archetype) {
@@ -158,7 +158,7 @@ pub trait SystemList<E: EntityComponentContext, C: ExternalSystem>: Sync {
         &'a self,
         excutor: T,
         context: &'a E,
-        operation_queue: OperationSender<E>,
+        operation_queue: OperationChannel<'a, E>,
         external: &'a C,
     );
 
@@ -170,7 +170,7 @@ impl<E: EntityComponentContext, C: ExternalSystem> SystemList<E, C> for Nil {
         &'a self,
         _executor: T,
         _context: &'a E,
-        _operation_queue: OperationSender<E>,
+        _operation_queue: OperationChannel<'a, E>,
         _external: &'a C,
     ) {
     }
@@ -196,7 +196,7 @@ where
         &'a self,
         executor: T,
         context: &'a E,
-        operation_queue: OperationSender<E>,
+        operation_queue: OperationChannel<'a, E>,
         external: &'a C,
     ) {
         self.tail
@@ -231,7 +231,7 @@ where
         &'a self,
         executor: T,
         context: &'a E,
-        operation_queue: OperationSender<E>,
+        operation_queue: OperationChannel<'a, E>,
         external: &'a C,
     ) {
         self.tail
@@ -335,7 +335,7 @@ pub trait GlobalSystem<E: EntityComponentContext>: Sync {
     fn execute<'a>(
         &self,
         context: &E,
-        queue: &OperationSender<E>,
+        queue: &OperationChannel<'_, E>,
         external: RefList<'a, Self::External>,
     );
 
@@ -387,7 +387,7 @@ where
     pub fn execute<'a, 'b>(
         &'a self,
         context: &E,
-        operation_queue: &OperationSender<E>,
+        operation_queue: &OperationChannel<'a, E>,
         external: &C,
     ) {
         self.system

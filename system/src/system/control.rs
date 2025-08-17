@@ -3,6 +3,7 @@ use std::{f32::consts::FRAC_PI_2, marker::PhantomData, sync::Mutex};
 use entity::{
     context::{EntityComponentContext, EntityUpdateType},
     entity::ComponentUpdate,
+    operation::OperationChannel,
     system::System,
 };
 use graphics::renderer::camera::UP;
@@ -177,7 +178,7 @@ where
         entity: entity::index::EntityIndex,
         unpack_list![transform, controller]: RefList<'a, Self::Components>,
         _context: &E,
-        queue: &entity::operation::OperationSender<E>,
+        queue: &OperationChannel<'_, E>,
         unpack_list![input_system, frame_data, command_queue]: RefList<'a, Self::External>,
     ) {
         if self.update(input_system, &controller.key_bindings, command_queue) {

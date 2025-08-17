@@ -6,7 +6,7 @@ use crate::{
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
     entity::{
         Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateMapper, Query, QueryWrite,
-        UpdateMapWriter,
+        UpdateMapWriter, UpdateMapperRef,
     },
     index::{EntityIndexTyped, PersistentIndexMap, PersistentIndexTyped},
     stage::{self, StageListBuilder, Strategy},
@@ -118,11 +118,16 @@ pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
 
     fn get_entity_builder(&self) -> EntityBuilder<Self>;
 
-    fn update_entity_builder(&self, builder: &mut EntityBuilder<Self>, update: EntityUpdate<Self>);
-
     fn write_update_map<M1: Marker>(&mut self)
     where
         Self::Components: UpdateMapWriter<Self, M1>;
+
+    /// #Safety
+    /// Function returns reference to context update mapper without borrowing the context
+    /// This can be safely done as long as the owning context is not moved or dropped
+    /// because the update mapper is immutable and does not change during the lifetime of the context.
+    /// User must ensure that the context outlives the reference,
+    unsafe fn get_update_mapper<'a>(&'a self) -> UpdateMapperRef<Self>;
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
@@ -176,21 +181,17 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
             .contains(update.index.archetype)
         {
             let archetype = &mut self.archetypes[update.index.archetype];
-            let archetype_changed = self.update_mapper.archetype_changed(
-                update.component,
-                archetype.query(),
-                &update.update,
-            );
+            let archetype_changed = self
+                .update_mapper
+                .archetype_changed(archetype.query(), &update.payload);
             if !archetype_changed {
                 if let Some(entity) = archetype.try_get_entity_mut(update.index) {
-                    self.update_mapper
-                        .update_in_place(update.component, entity, update.update);
+                    self.update_mapper.update_in_place(entity, update.payload);
                     return UpdateResult::InPlace;
                 }
             } else {
                 if let Some(mut entity) = archetype.try_pop_entity(update.index) {
-                    self.update_mapper
-                        .update_owned(update.component, &mut entity, update.update);
+                    self.update_mapper.update_owned(&mut entity, update.payload);
                     let builder = EntityBuilder::from_owned(entity);
                     let persistent_index = self.persistent_entity_map.get_index(update.index);
                     return UpdateResult::ArchetypeChanged((builder, persistent_index));
@@ -255,12 +256,8 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
         Self::Components::write_update_map(&mut self.update_mapper);
     }
 
-    fn update_entity_builder(&self, builder: &mut EntityBuilder<Self>, update: EntityUpdate<Self>) {
-        self.update_mapper.update_builder(
-            update.component,
-            &mut builder.entity_builder,
-            update.update,
-        );
+    unsafe fn get_update_mapper<'a>(&'a self) -> UpdateMapperRef<Self> {
+        UpdateMapperRef::new(&self.update_mapper)
     }
 }
 

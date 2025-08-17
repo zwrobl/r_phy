@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use entity::{context::EntityComponentContext, operation::OperationSender, system::GlobalSystem};
+use entity::{context::EntityComponentContext, operation::OperationChannel, system::GlobalSystem};
 use type_kit::{list_type, unpack_list, Cons, Nil};
 
 use crate::system::command::CommandQueue;
@@ -314,7 +314,7 @@ impl InputSystem {
 
 pub struct GlobalInput<
     E: EntityComponentContext,
-    F: Fn(&E, &OperationSender<E>, &InputSystem, &CommandQueue) + Send + Sync,
+    F: Fn(&E, &OperationChannel<'_, E>, &InputSystem, &CommandQueue) + Send + Sync,
 > {
     pub update_fn: F,
     _phantom: PhantomData<E>,
@@ -322,7 +322,7 @@ pub struct GlobalInput<
 
 impl<
         E: EntityComponentContext,
-        F: Fn(&E, &OperationSender<E>, &InputSystem, &CommandQueue) + Send + Sync,
+        F: Fn(&E, &OperationChannel<'_, E>, &InputSystem, &CommandQueue) + Send + Sync,
     > GlobalInput<E, F>
 {
     pub fn new(update_fn: F) -> Self {
@@ -335,7 +335,7 @@ impl<
     pub fn update(
         &self,
         context: &E,
-        queue: &OperationSender<E>,
+        queue: &OperationChannel<'_, E>,
         input_system: &InputSystem,
         command_queue: &CommandQueue,
     ) {
@@ -345,7 +345,7 @@ impl<
 
 impl<
         E: EntityComponentContext,
-        F: Fn(&E, &OperationSender<E>, &InputSystem, &CommandQueue) + Send + Sync,
+        F: Fn(&E, &OperationChannel<'_, E>, &InputSystem, &CommandQueue) + Send + Sync,
     > GlobalSystem<E> for GlobalInput<E, F>
 {
     type External = list_type![InputSystem, CommandQueue, Nil];
@@ -354,7 +354,7 @@ impl<
     fn execute<'a>(
         &self,
         context: &E,
-        queue: &OperationSender<E>,
+        queue: &OperationChannel<'_, E>,
         unpack_list![input_system, command_queue]: type_kit::RefList<'a, Self::External>,
     ) {
         self.update(context, queue, input_system, command_queue);

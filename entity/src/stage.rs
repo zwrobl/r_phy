@@ -5,7 +5,7 @@ use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset};
 use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
     entity::{Query, QueryWrite, UpdateMapWriter},
-    operation::{OperationChannel, OperationSender},
+    operation::{OperationChannel, OperationQueue},
     system::{
         self, GlobalSystem, GlobalSystemExecutor, System, SystemExecutor, SystemList,
         SystemListBuilder,
@@ -37,7 +37,7 @@ pub trait Strategy<E: EntityComponentContext, C: ExternalSystem> {
     fn execute<T: SystemList<E, C>>(
         context: &E,
         external: &C,
-        queue: OperationSender<E>,
+        queue: OperationChannel<'_, E>,
         systems: &T,
     );
 }
@@ -48,7 +48,7 @@ impl<E: EntityComponentContext, C: ExternalSystem> Strategy<E, C> for Parallel {
     fn execute<T: SystemList<E, C>>(
         context: &E,
         external: &C,
-        queue: OperationSender<E>,
+        queue: OperationChannel<'_, E>,
         systems: &T,
     ) {
         rayon::scope(|scope| {
@@ -64,7 +64,7 @@ impl<E: EntityComponentContext, C: ExternalSystem> Strategy<E, C> for Synchronou
     fn execute<T: SystemList<E, C>>(
         context: &E,
         external: &C,
-        queue: OperationSender<E>,
+        queue: OperationChannel<'_, E>,
         systems: &T,
     ) {
         let executor = system::Synchronous::new();
@@ -95,9 +95,9 @@ impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, S: Strat
 
     #[inline]
     pub fn execute<'a>(&self, context: &mut E, external: &C) {
-        let (sender, receiver) = OperationChannel::new();
-        S::execute(context, external, sender, &self.systems);
-        receiver.process(context);
+        let mut queue = OperationQueue::new();
+        S::execute(context, external, queue.take_channel(), &self.systems);
+        queue.process(context);
     }
 
     #[inline]

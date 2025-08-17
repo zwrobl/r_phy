@@ -6,7 +6,7 @@ use entity::{
     entity_type,
     index::EntityIndex,
     marker_type,
-    operation::OperationSender,
+    operation::OperationChannel,
     stage::{Builder, Parallel, Synchronous},
 };
 use graphics::{
@@ -79,7 +79,7 @@ impl System<EntityComponent> for SpinningSystem {
         entity: EntityIndex,
         unpack_list![transform, spinning_data]: RefList<'a, Self::Components>,
         _context: &EntityComponent,
-        queue: &OperationSender<EntityComponent>,
+        queue: &OperationChannel<'_, EntityComponent>,
         unpack_list![frame_data]: RefList<'a, Self::External>,
     ) {
         let transform = Transform::identity().rotate(
@@ -94,7 +94,7 @@ impl System<EntityComponent> for SpinningSystem {
 
 fn handle_input(
     _context: &EntityComponent,
-    _queue: &OperationSender<EntityComponent>,
+    _queue: &OperationChannel<'_, EntityComponent>,
     input_system: &InputSystem,
     command_queue: &CommandQueue,
 ) {

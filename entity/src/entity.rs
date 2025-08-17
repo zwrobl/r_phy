@@ -1,4 +1,4 @@
-use std::{any::TypeId, collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{any::TypeId, collections::HashMap, fmt::Debug, marker::PhantomData, ops::Deref};
 
 use type_kit::{
     CollectionType, Cons, Contains, Fin, GenCollectionResult, GenVec, GenVecIndex,
@@ -172,6 +172,28 @@ pub struct EntityUpdateMapper<E: EntityComponentContext> {
     update_owned: HashMap<TypeId, fn(&mut EntityOwnedType<E>, EntityUpdateType<E>)>,
 }
 
+pub struct UpdateMapperRef<E: EntityComponentContext> {
+    update_mapper: *const EntityUpdateMapper<E>,
+}
+
+unsafe impl<E: EntityComponentContext> Send for UpdateMapperRef<E> {}
+
+unsafe impl<E: EntityComponentContext> Sync for UpdateMapperRef<E> {}
+
+impl<'a, E: EntityComponentContext> Deref for UpdateMapperRef<E> {
+    type Target = EntityUpdateMapper<E>;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.update_mapper }
+    }
+}
+
+impl<'a, E: EntityComponentContext> UpdateMapperRef<E> {
+    pub fn new(update_mapper: &EntityUpdateMapper<E>) -> Self {
+        Self { update_mapper }
+    }
+}
+
 impl<E: EntityComponentContext> Default for EntityUpdateMapper<E> {
     fn default() -> Self {
         Self::new()
@@ -190,53 +212,49 @@ impl<E: EntityComponentContext> EntityUpdateMapper<E> {
 
     pub fn archetype_changed(
         &self,
-        component: TypeId,
         archetype: &EntityQueryType<E>,
-        update: &EntityUpdateType<E>,
+        update: &UpdatePayload<E>,
     ) -> bool {
-        if let Some(&func) = self.archetype_changed.get(&component) {
-            func(archetype, update)
+        if let Some(&func) = self.archetype_changed.get(&update.component) {
+            func(archetype, &update.update)
         } else {
-            panic!("No function registered for component: {:?}", component);
+            panic!(
+                "No function registered for component: {:?}",
+                update.component
+            );
         }
     }
 
-    pub fn update_in_place(
-        &self,
-        component: TypeId,
-        entity: EntityMutType<'_, E>,
-        update: EntityUpdateType<E>,
-    ) {
-        if let Some(&func) = self.update_in_place.get(&component) {
-            func(entity, update);
+    pub fn update_in_place(&self, entity: EntityMutType<'_, E>, update: UpdatePayload<E>) {
+        if let Some(&func) = self.update_in_place.get(&update.component) {
+            func(entity, update.update);
         } else {
-            panic!("No function registered for component: {:?}", component);
+            panic!(
+                "No function registered for component: {:?}",
+                update.component
+            );
         }
     }
 
-    pub fn update_builder(
-        &self,
-        component: TypeId,
-        entity: &mut EntityBuilderType<E>,
-        update: EntityUpdateType<E>,
-    ) {
-        if let Some(&func) = self.update_builder.get(&component) {
-            func(entity, update);
+    pub fn update_builder(&self, entity: &mut EntityBuilder<E>, update: UpdatePayload<E>) {
+        if let Some(&func) = self.update_builder.get(&update.component) {
+            func(&mut entity.entity_builder, update.update);
         } else {
-            panic!("No function registered for component: {:?}", component);
+            panic!(
+                "No function registered for component: {:?}",
+                update.component
+            );
         }
     }
 
-    pub fn update_owned(
-        &self,
-        component: TypeId,
-        entity: &mut EntityOwnedType<E>,
-        update: EntityUpdateType<E>,
-    ) {
-        if let Some(&func) = self.update_owned.get(&component) {
-            func(entity, update);
+    pub fn update_owned(&self, entity: &mut EntityOwnedType<E>, update: UpdatePayload<E>) {
+        if let Some(&func) = self.update_owned.get(&update.component) {
+            func(entity, update.update);
         } else {
-            panic!("No function registered for component: {:?}", component);
+            panic!(
+                "No function registered for component: {:?}",
+                update.component
+            );
         }
     }
 
@@ -482,10 +500,14 @@ impl<'a, C: ComponentData> From<&'a ComponentUpdate<C>> for Expected<C> {
     }
 }
 
-pub struct EntityUpdate<E: EntityComponentContext> {
-    pub index: EntityIndexTyped<E>,
+pub struct UpdatePayload<E: EntityComponentContext> {
     pub update: EntityUpdateType<E>,
     pub component: TypeId,
+}
+
+pub struct EntityUpdate<E: EntityComponentContext> {
+    pub index: EntityIndexTyped<E>,
+    pub payload: UpdatePayload<E>,
 }
 
 impl<E: EntityComponentContext> EntityUpdate<E> {
@@ -499,8 +521,10 @@ impl<E: EntityComponentContext> EntityUpdate<E> {
     {
         Self {
             index,
-            update: EntityUpdateType::<E>::new(component),
-            component: TypeId::of::<C>(),
+            payload: UpdatePayload {
+                update: EntityUpdateType::<E>::new(component),
+                component: TypeId::of::<C>(),
+            },
         }
     }
 }
@@ -537,17 +561,8 @@ impl<
 }
 
 pub struct EntityBuilder<E: EntityComponentContext> {
-    // pub query_builder: EntityQueryType<E>,
     pub entity_builder: EntityBuilderType<E>,
 }
-
-// impl<E: EntityComponentContext> Deref for EntityBuilder<E> {
-//     type Target = EntityQueryType<E>;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.query_builder
-//     }
-// }
 
 impl<E: EntityComponentContext> EntityBuilder<E> {
     #[inline]
