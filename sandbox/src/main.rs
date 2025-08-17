@@ -1,12 +1,13 @@
 use entity::{
     component_list_type,
     context::EntityComponentStorage,
-    ecs_context_type, entity_type,
+    ecs_context_type,
+    entity::ComponentUpdate,
+    entity_type,
     index::EntityIndex,
     marker_type,
     operation::OperationSender,
-    stage::Builder,
-    stage::{Parallel, Synchronous},
+    stage::{Builder, Parallel, Synchronous},
 };
 use graphics::{
     model::{
@@ -85,9 +86,8 @@ impl System<EntityComponent> for SpinningSystem {
             spinning_data.axis,
             frame_data.delta_time() * spinning_data.speed,
         ) * *transform;
-        let update = self
-            .get_entity_update_builder(entity.in_context())
-            .update(transform);
+        let update =
+            self.get_entity_update(entity.in_context(), ComponentUpdate::update(transform));
         queue.update_entity(update);
     }
 }

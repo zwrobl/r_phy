@@ -1,14 +1,16 @@
 use std::marker::PhantomData;
 
 use rayon::Scope;
-use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, NonEmptyList, RefList, Subset, TypeList};
+use type_kit::{
+    Cons, IntoSubsetIterator, Marker, Nil, NonEmptyList, RefList, Subset, TypeList, UContains,
+};
 
 use crate::{
-    context::{ComponentListType, EntityComponentContext, EntityQueryType},
-    entity::{EntityUpdateBuilder, Query, QueryWrite},
+    context::{ComponentListType, EntityComponentContext, EntityQueryType, EntityUpdateType},
+    entity::{ComponentUpdate, EntityUpdate, Query, QueryWrite},
     index::{EntityIndex, EntityIndexTyped},
     operation::OperationSender,
-    ArchetypeRef, ExternalSystem,
+    ArchetypeRef, ComponentData, ExternalSystem,
 };
 
 pub trait System<E: EntityComponentContext>: Sync {
@@ -25,11 +27,15 @@ pub trait System<E: EntityComponentContext>: Sync {
         external: RefList<'a, Self::External>,
     );
 
-    fn get_entity_update_builder<'a>(
+    fn get_entity_update<'a, C: ComponentData, M: Marker>(
         &self,
         index: EntityIndexTyped<E>,
-    ) -> EntityUpdateBuilder<E, Self::WriteList> {
-        EntityUpdateBuilder::new(index)
+        component: ComponentUpdate<C>,
+    ) -> EntityUpdate<E>
+    where
+        EntityUpdateType<E>: UContains<ComponentUpdate<C>, M>,
+    {
+        EntityUpdate::new(index, component)
     }
 }
 
@@ -333,11 +339,15 @@ pub trait GlobalSystem<E: EntityComponentContext>: Sync {
         external: RefList<'a, Self::External>,
     );
 
-    fn get_entity_update_builder<'a>(
+    fn get_entity_update<'a, C: ComponentData, M: Marker>(
         &self,
         index: EntityIndexTyped<E>,
-    ) -> EntityUpdateBuilder<E, Self::WriteList> {
-        EntityUpdateBuilder::new(index)
+        component: ComponentUpdate<C>,
+    ) -> EntityUpdate<E>
+    where
+        EntityUpdateType<E>: UContains<ComponentUpdate<C>, M>,
+    {
+        EntityUpdate::new(index, component)
     }
 }
 

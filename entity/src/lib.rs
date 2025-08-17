@@ -83,7 +83,9 @@ mod test_ecs {
     use crate::{
         component_list_type,
         context::{EntityComponentContext, EntityComponentStorage},
-        ecs_context_type, entity_type,
+        ecs_context_type,
+        entity::ComponentUpdate,
+        entity_type,
         index::{EntityIndex, PersistentIndex},
         marker_type,
         operation::OperationSender,
@@ -201,11 +203,12 @@ mod test_ecs {
                     );
                     queue.push_entity(context.get_entity_builder().with_component(Some(index)));
                 });
-            queue.update_entity(
-                self.get_entity_update_builder(entity.in_context::<EscContextType>())
-                    .update("UpdatedQueryEntity".to_string())
-                    .remove::<u16, _, _>(),
-            );
+            let entity = entity.in_context::<EscContextType>();
+            queue.update_entity(self.get_entity_update(
+                entity,
+                ComponentUpdate::update("UpdatedQueryEntity".to_string()),
+            ));
+            queue.update_entity(self.get_entity_update(entity, ComponentUpdate::<u16>::remove()));
         }
     }
 
@@ -262,9 +265,9 @@ mod test_ecs {
                     .query::<_, list_type![u16, Nil]>()
                     .next()
                     .map(|entity_ref| context.get_persistent_index(entity_ref.index).into());
+                let entity = entity.in_context::<EscContextType>();
                 queue.update_entity(
-                    self.get_entity_update_builder(entity.in_context::<EscContextType>())
-                        .update(persistent),
+                    self.get_entity_update(entity, ComponentUpdate::update(persistent)),
                 );
                 println!(
                     "TestEntityPersistentIndex starts tracking new persistent index: {:?}",
@@ -472,10 +475,11 @@ mod test_ecs {
                         println!("Tracking entity is not tracking another entity, updating...");
                         let persistent_index: PersistentIndex =
                             context.get_persistent_index(index.in_context()).into();
-                        let update = self
-                            .get_entity_update_builder(tracking_entity_ref.index)
-                            .update(Some(persistent_index));
-                        queue.update_entity(update);
+
+                        queue.update_entity(self.get_entity_update(
+                            tracking_entity_ref.index,
+                            ComponentUpdate::update(Some(persistent_index)),
+                        ));
                     } else {
                         println!("Tracking entity is already tracking another entity.");
                     }

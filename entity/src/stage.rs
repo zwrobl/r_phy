@@ -4,7 +4,7 @@ use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset};
 
 use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
-    entity::{Query, QueryWrite},
+    entity::{Query, QueryWrite, UpdateMapWriter},
     operation::{OperationChannel, OperationSender},
     system::{
         self, GlobalSystem, GlobalSystemExecutor, System, SystemExecutor, SystemList,
@@ -149,7 +149,9 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
 
     fn next_stage<T: Strategy<E, C>>(self) -> impl Builder<E, C>;
 
-    fn build(self) -> impl EntityComponentSystem<E, C>;
+    fn build<M2: Marker>(self) -> impl EntityComponentSystem<E, C>
+    where
+        ComponentListType<E>: UpdateMapWriter<E, M2>;
 }
 
 pub struct StageListBuilder<
@@ -243,9 +245,14 @@ impl<
         }
     }
 
-    fn build(self) -> impl EntityComponentSystem<E, C> {
+    fn build<M2: Marker>(self) -> impl EntityComponentSystem<E, C>
+    where
+        ComponentListType<E>: UpdateMapWriter<E, M2>,
+    {
+        let mut context = E::default();
+        context.write_update_map::<M2>();
         EntityComponentSystemContext {
-            context: E::default(),
+            context,
             stages: Cons::new(
                 Stage::<_, _, _, T>::new(system::Builder::build(self.builder)),
                 self.stages,

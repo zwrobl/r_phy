@@ -3,11 +3,9 @@ use std::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 
-use type_kit::TypeList;
-
 use crate::{
     context::{EntityComponentContext, UpdateResult},
-    entity::{EntityBuilder, EntityUpdate, EntityUpdateBuilder},
+    entity::{EntityBuilder, EntityUpdate},
     index::EntityIndexTyped,
 };
 
@@ -41,8 +39,8 @@ impl<E: EntityComponentContext> OperationSender<E> {
     }
 
     #[inline]
-    pub fn update_entity<W: TypeList>(&self, entity: EntityUpdateBuilder<E, W>) {
-        self.sender.send(Operation::Update(entity.build())).unwrap();
+    pub fn update_entity(&self, update: EntityUpdate<E>) {
+        self.sender.send(Operation::Update(update)).unwrap();
     }
 }
 
@@ -78,7 +76,7 @@ impl<E: EntityComponentContext> OperationReceiver<E> {
                             }
                             UpdateResult::NotFound(update) => {
                                 if let Some((builder, ..)) = updated.get_mut(&index) {
-                                    builder.update_components(update.components);
+                                    world.update_entity_builder(builder, update);
                                 }
                             }
                             _ => (),

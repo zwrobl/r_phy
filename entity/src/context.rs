@@ -4,7 +4,10 @@ use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedInd
 
 use crate::{
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
-    entity::{Entity, EntityBuilder, EntityRef, EntityUpdate, Query, QueryWrite},
+    entity::{
+        Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateMapper, Query, QueryWrite,
+        UpdateMapWriter,
+    },
     index::{EntityIndexTyped, PersistentIndexMap, PersistentIndexTyped},
     stage::{self, StageListBuilder, Strategy},
     ComponentList, ExternalSystem,
@@ -114,6 +117,12 @@ pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     ) -> Option<EntityIndexTyped<Self>>;
 
     fn get_entity_builder(&self) -> EntityBuilder<Self>;
+
+    fn update_entity_builder(&self, builder: &mut EntityBuilder<Self>, update: EntityUpdate<Self>);
+
+    fn write_update_map<M1: Marker>(&mut self)
+    where
+        Self::Components: UpdateMapWriter<Self, M1>;
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
@@ -128,9 +137,10 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
         entity: EntityBuilder<Self>,
         persistent_index: Option<PersistentIndexTyped<EntityIndexTyped<Self>>>,
     ) {
+        let query = entity.query();
         let archetype = self
             .iter_mut()
-            .find(|archetype| archetype.is_matching(&entity));
+            .find(|archetype| archetype.is_matching(&query));
         let entity = match archetype {
             Some(mut archetype) => archetype.push_entity(entity),
             None => {
@@ -166,14 +176,21 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
             .contains(update.index.archetype)
         {
             let archetype = &mut self.archetypes[update.index.archetype];
-            if !E::archetype_changed(&update.components, archetype.query()) {
+            let archetype_changed = self.update_mapper.archetype_changed(
+                update.component,
+                archetype.query(),
+                &update.update,
+            );
+            if !archetype_changed {
                 if let Some(entity) = archetype.try_get_entity_mut(update.index) {
-                    E::update_in_place(entity, update.components);
+                    self.update_mapper
+                        .update_in_place(update.component, entity, update.update);
                     return UpdateResult::InPlace;
                 }
             } else {
                 if let Some(mut entity) = archetype.try_pop_entity(update.index) {
-                    E::update_owned(&mut entity, update.components);
+                    self.update_mapper
+                        .update_owned(update.component, &mut entity, update.update);
                     let builder = EntityBuilder::from_owned(entity);
                     let persistent_index = self.persistent_entity_map.get_index(update.index);
                     return UpdateResult::ArchetypeChanged((builder, persistent_index));
@@ -230,12 +247,28 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
     fn get_entity_builder(&self) -> EntityBuilder<Self> {
         EntityBuilder::new()
     }
+
+    fn write_update_map<M1: Marker>(&mut self)
+    where
+        Self::Components: UpdateMapWriter<Self, M1>,
+    {
+        Self::Components::write_update_map(&mut self.update_mapper);
+    }
+
+    fn update_entity_builder(&self, builder: &mut EntityBuilder<Self>, update: EntityUpdate<Self>) {
+        self.update_mapper.update_builder(
+            update.component,
+            &mut builder.entity_builder,
+            update.update,
+        );
+    }
 }
 
 pub struct EntityComponentStorage<C: ComponentList, M: Marker, E: Entity<C, M>> {
     archetypes: GenVec<Archetype<Self>>,
     persistent_archetype_map: PersistentIndexMap<GenVecIndex<Archetype<Self>>>,
     persistent_entity_map: PersistentIndexMap<EntityIndexTyped<Self>>,
+    update_mapper: EntityUpdateMapper<Self>,
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> Default for EntityComponentStorage<C, M, E> {
@@ -252,6 +285,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentStorage<C, M, 
             archetypes: GenVec::new(),
             persistent_archetype_map: PersistentIndexMap::new(),
             persistent_entity_map: PersistentIndexMap::new(),
+            update_mapper: EntityUpdateMapper::default(),
         }
     }
 }

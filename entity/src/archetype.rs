@@ -70,7 +70,7 @@ impl<'a, E: EntityComponentContext> ArchetypeMut<'a, E> {
     #[inline]
     pub fn set_archetype(&mut self, entity: EntityBuilder<E>) -> EntityIndexTyped<E> {
         if self.entities.is_empty() {
-            self.query = entity.query_builder;
+            self.query = entity.query();
             self.push_entity(entity)
         } else {
             panic!("Cannot set archetype for non-empty archetype");

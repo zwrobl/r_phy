@@ -2,10 +2,11 @@ pub mod error;
 pub mod system;
 
 use entity::{
-    context::{EntityComponentContext, ExternalSystemsSelector},
-    entity::EntityBuilder,
+    context::{ComponentListType, EntityComponentContext, ExternalSystemsSelector},
+    entity::{EntityBuilder, UpdateMapWriter},
     EntityComponentSystem,
 };
+use type_kit::Marker;
 use winit::{
     event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -105,11 +106,15 @@ impl<R: Renderer> Loop<R> {
         E: EntityComponentContext,
         S: entity::stage::Builder<E, SharedSystemsList>,
         B: ContextBuilder<Renderer = R>,
+        M: Marker,
     >(
         &self,
         builder: B,
         systems: S,
-    ) -> Scene<E, impl EntityComponentSystem<E, SharedSystemsList>, B> {
+    ) -> Scene<E, impl EntityComponentSystem<E, SharedSystemsList>, B>
+    where
+        ComponentListType<E>: UpdateMapWriter<E, M>,
+    {
         Scene {
             renderer_context: builder,
             entity_context: systems.build(),

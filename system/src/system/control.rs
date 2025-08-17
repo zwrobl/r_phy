@@ -11,7 +11,7 @@ use math::{
     types::{Matrix3, Quat, Vector3},
 };
 
-use type_kit::{list_type, unpack_list, Cons, Contains, Marker, Nil, RefList};
+use type_kit::{list_type, unpack_list, Cons, Marker, Nil, RefList, UContains};
 
 use crate::system::{
     command::{self, CommandQueue},
@@ -155,7 +155,7 @@ impl FirstPersonController {
 impl<M: Marker> FirstPerson<M> {
     pub fn new<E: EntityComponentContext>() -> Self
     where
-        EntityUpdateType<E>: Contains<ComponentUpdate<Transform>, M>,
+        EntityUpdateType<E>: UContains<ComponentUpdate<Transform>, M>,
     {
         Self {
             is_active: Mutex::new(false),
@@ -166,7 +166,7 @@ impl<M: Marker> FirstPerson<M> {
 
 impl<E: EntityComponentContext, M: Marker> System<E> for FirstPerson<M>
 where
-    EntityUpdateType<E>: Contains<ComponentUpdate<Transform>, M>,
+    EntityUpdateType<E>: UContains<ComponentUpdate<Transform>, M>,
 {
     type External = list_type![InputSystem, FrameData, CommandQueue, Nil];
     type WriteList = list_type![Transform, Nil];
@@ -190,10 +190,8 @@ where
             let q = Quat::from_euler(euler);
 
             let transform = Transform::new(q, transform.t + translation_delta);
-
-            let update = self
-                .get_entity_update_builder(entity.in_context::<E>())
-                .update(transform);
+            let entity = entity.in_context::<E>();
+            let update = self.get_entity_update(entity, ComponentUpdate::update(transform));
             queue.update_entity(update);
         }
     }

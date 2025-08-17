@@ -1,6 +1,6 @@
 use std::{any::type_name, marker::PhantomData, mem::ManuallyDrop};
 
-use crate::{Here, Marker, There};
+use crate::{Here, Marker, There, TypedNil};
 
 #[derive(Clone, Copy)]
 pub union UCons<T, U: UnionList> {
@@ -25,6 +25,12 @@ impl<T> UnionList for UFin<T> {
     type Next = Self;
 }
 
+impl<T> UnionList for TypedNil<T> {
+    const LEN: usize = 0;
+    type Item = T;
+    type Next = Self;
+}
+
 impl<T, U: UnionList> UnionList for UCons<T, U> {
     const LEN: usize = 1 + U::LEN;
     type Item = T;
@@ -33,6 +39,7 @@ impl<T, U: UnionList> UnionList for UCons<T, U> {
 
 pub trait UContains<C, M: Marker>: UnionList {
     fn new(value: C) -> Self;
+    unsafe fn take(self) -> C;
     unsafe fn get(&self) -> &C;
     unsafe fn get_mut(&mut self) -> &mut C;
     unsafe fn drop(&mut self);
@@ -42,6 +49,10 @@ impl<C> UContains<C, Here> for UFin<C> {
     fn new(value: C) -> Self {
         let head = ManuallyDrop::new(value);
         Self { head }
+    }
+
+    unsafe fn take(mut self) -> C {
+        ManuallyDrop::take(&mut self.head)
     }
 
     unsafe fn get(&self) -> &C {
@@ -63,6 +74,10 @@ impl<C, N: UnionList> UContains<C, Here> for UCons<C, N> {
         Self { head }
     }
 
+    unsafe fn take(mut self) -> C {
+        ManuallyDrop::take(&mut self.head)
+    }
+
     unsafe fn get(&self) -> &C {
         &self.head
     }
@@ -80,6 +95,10 @@ impl<T, C, M: Marker, N: UContains<C, M>> UContains<C, There<M>> for UCons<T, N>
     fn new(value: C) -> Self {
         let tail = ManuallyDrop::new(N::new(value));
         Self { tail }
+    }
+
+    unsafe fn take(mut self) -> C {
+        ManuallyDrop::take(&mut self.tail).take()
     }
 
     unsafe fn get(&self) -> &C {
