@@ -6,7 +6,7 @@ use entity::{
     entity_type,
     index::EntityIndex,
     marker_type,
-    operation::OperationChannel,
+    operation::{AddComponent, OperationChannel},
     stage::{Builder, Parallel, Synchronous},
 };
 use graphics::{
@@ -46,15 +46,67 @@ use system::{
 };
 
 #[derive(Debug, Clone, Copy)]
+pub struct SpawnerData {
+    shader: ShaderHandle,
+    mesh: Model,
+}
+
+impl SpawnerData {
+    pub fn new(shader: ShaderHandle, mesh: Model) -> Self {
+        Self { shader, mesh }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct SpinningData {
     axis: Vector3,
     speed: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DestroyCountdown {
+    pub remaining: f32,
+}
+
+pub struct Destroy;
+
+impl System<EntityComponent> for Destroy {
+    type External = list_type![FrameData, Nil];
+    type WriteList = list_type![DestroyCountdown, Nil];
+    type Components = list_type![DestroyCountdown, Nil];
+
+    fn execute<'a>(
+        &self,
+        entity: EntityIndex,
+        unpack_list![countdown]: RefList<'a, Self::Components>,
+        _context: &EntityComponent,
+        queue: &OperationChannel<'_, EntityComponent>,
+        unpack_list![frame_data]: RefList<'a, Self::External>,
+    ) {
+        if countdown.remaining <= 0.0 {
+            queue.pop_entity(entity.in_context());
+        } else {
+            let update = self.get_entity_update(
+                entity.in_context(),
+                ComponentUpdate::update(DestroyCountdown {
+                    remaining: countdown.remaining - frame_data.delta_time(),
+                }),
+            );
+            queue.update_entity(update);
+        }
+    }
 }
 
 impl SpinningData {
     fn new(axis: Vector3, speed: f32) -> Self {
         Self { axis, speed }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MoveData {
+    pub direction: Vector3,
+    pub speed: f32,
 }
 
 type EntityComponent = ecs_context_type![
@@ -64,8 +116,35 @@ type EntityComponent = ecs_context_type![
     SpinningData,
     ProjectionMatrix,
     FirstPersonController,
+    SpawnerData,
+    MoveData,
+    DestroyCountdown,
     Nil
 ];
+
+struct MoveSystem;
+
+impl System<EntityComponent> for MoveSystem {
+    type External = list_type![FrameData, Nil];
+    type WriteList = list_type![Transform, Nil];
+    type Components = list_type![Transform, MoveData, Nil];
+
+    fn execute<'a>(
+        &self,
+        entity: EntityIndex,
+        unpack_list![transform, move_data]: RefList<'a, Self::Components>,
+        _context: &EntityComponent,
+        queue: &OperationChannel<'_, EntityComponent>,
+        unpack_list![frame_data]: RefList<'a, Self::External>,
+    ) {
+        let transform = Transform::identity()
+            .translate(frame_data.delta_time() * move_data.speed * move_data.direction)
+            * *transform;
+        let update =
+            self.get_entity_update(entity.in_context(), ComponentUpdate::update(transform));
+        queue.update_entity(update);
+    }
+}
 
 struct SpinningSystem;
 
@@ -89,6 +168,49 @@ impl System<EntityComponent> for SpinningSystem {
         let update =
             self.get_entity_update(entity.in_context(), ComponentUpdate::update(transform));
         queue.update_entity(update);
+    }
+}
+
+struct SpawnCube;
+
+impl System<EntityComponent> for SpawnCube {
+    type External = list_type![InputSystem, Nil];
+    type WriteList = Nil;
+    type Components = list_type![Transform, SpawnerData, Nil];
+
+    fn execute<'a>(
+        &self,
+        _entity: EntityIndex,
+        unpack_list![transform, spawner]: RefList<'a, Self::Components>,
+        _context: &EntityComponent,
+        queue: &OperationChannel<'_, EntityComponent>,
+        unpack_list![input_system]: RefList<'a, Self::External>,
+    ) {
+        if input_system
+            .get_key_state(Key::Space)
+            .matches_state(KeyState::Pressed)
+        {
+            let new_entity = queue.create_entity();
+            queue.add_component(AddComponent::component(new_entity, spawner.mesh));
+            queue.add_component(AddComponent::component(new_entity, spawner.shader));
+            queue.add_component(AddComponent::component(new_entity, *transform));
+            queue.add_component(AddComponent::component(
+                new_entity,
+                DestroyCountdown { remaining: 5.0 },
+            ));
+            queue.add_component(AddComponent::component(
+                new_entity,
+                SpinningData::new(Vector3::new(1.0, 0.0, 0.0), 1.0),
+            ));
+            let forward = (transform.q * Vector3::x()).norm();
+            queue.add_component(AddComponent::component(
+                new_entity,
+                MoveData {
+                    direction: forward,
+                    speed: 15.0,
+                },
+            ));
+        }
     }
 }
 
@@ -147,6 +269,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .next_stage::<Parallel>()
         .with_system(DrawCommandSystem)
         .with_system(SpinningSystem)
+        .with_system(SpawnCube)
+        .next_stage::<Parallel>()
+        .with_system(Destroy)
+        .with_system(MoveSystem)
         .next_stage::<Synchronous>()
         .with_system(FirstPerson::new::<EntityComponent>())
         .with_global_system(CameraSelector::new::<EntityComponent>())
@@ -162,7 +288,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             resolution.y / resolution.x,
             1e-1,
             1e4,
-        ));
+        ))
+        .with_component(SpawnerData::new(checker_shader.into(), model.into()));
     scene.with_entity(camera);
 
     (0..10).for_each(|x| {
