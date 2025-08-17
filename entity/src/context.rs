@@ -148,7 +148,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
             .contains(update.index.archetype)
         {
             let archetype = &mut self.archetypes[update.index.archetype];
-            if archetype.is_matching(&E::query_from_update(&update.components)) {
+            if !E::archetype_changed(&update.components, archetype.query()) {
                 if let Some(entity) = archetype.try_get_entity_mut(update.index) {
                     E::update_in_place(entity, update.components);
                     return UpdateResult::InPlace;

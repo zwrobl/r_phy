@@ -38,7 +38,7 @@ impl<'a, E: EntityComponentContext> ArchetypeRef<'a, E> {
         // thus is safe to assume that zip will yield the correct pairs
         self.archetype
             .sub_iter::<_, N>()
-            .zip((self.archetype.persistent_entity_map.into_iter()).into_iter())
+            .zip(self.archetype.persistent_entity_map.into_iter())
             .map(move |(components, &entity)| EntityRef::new(self.index, entity, components))
     }
 }
@@ -138,6 +138,11 @@ impl<E: EntityComponentContext> Archetype<E> {
     #[inline]
     pub fn is_matching(&self, query: &EntityQueryType<E>) -> bool {
         self.query == *query
+    }
+
+    #[inline]
+    pub fn query(&self) -> &EntityQueryType<E> {
+        &self.query
     }
 
     #[inline]

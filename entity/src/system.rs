@@ -197,7 +197,6 @@ where
     {
         self.tail
             .execute(scope, context, operation_queue.clone(), external);
-        let operation_queue = operation_queue.clone();
         scope.spawn(move |_| {
             self.head.execute(context, &operation_queue, external);
         });

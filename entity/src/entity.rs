@@ -30,7 +30,7 @@ pub trait Entity<C: ComponentList, M: Marker>:
 
     fn query_from_builder(value: &Self::Builder) -> Self::Query;
 
-    fn query_from_update(value: &Self::Update) -> Self::Query;
+    fn archetype_changed(value: &Self::Update, archetype: &Self::Query) -> bool;
 
     fn update_owned(value: &mut Self::Owned, update: Self::Update);
 
@@ -80,8 +80,8 @@ where
     }
 
     #[inline]
-    fn query_from_update(value: &Self::Update) -> Self::Query {
-        *value
+    fn archetype_changed(_value: &Self::Update, _archetype: &Self::Query) -> bool {
+        false
     }
 
     #[inline]
@@ -134,9 +134,13 @@ where
     }
 
     #[inline]
-    fn query_from_update(value: &Self::Update) -> Self::Query {
-        let Cons { head, tail } = value;
-        Cons::new(head.into(), N::query_from_update(tail))
+    fn archetype_changed(value: &Self::Update, archetype: &Self::Query) -> bool {
+        let changed = match value.head {
+            ComponentUpdate::Update(_) => !archetype.head.is_expected(),
+            ComponentUpdate::Remove => archetype.head.is_expected(),
+            ComponentUpdate::Keep => false,
+        };
+        changed || N::archetype_changed(&value.tail, &archetype.tail)
     }
 
     #[inline]
