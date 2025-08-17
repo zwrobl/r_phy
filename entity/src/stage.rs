@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset, TypeList};
+use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset};
 
 use crate::{
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
     entity::{Query, QueryWrite},
-    operation::OperationChannel,
+    operation::{OperationChannel, OperationSender},
     system::{
         self, GlobalSystem, GlobalSystemExecutor, System, SystemExecutor, SystemList,
         SystemListBuilder,
@@ -13,7 +13,7 @@ use crate::{
     EntityComponentSystem, EntityComponentSystemContext, ExternalSystem,
 };
 
-pub trait StageList<E: EntityComponentContext, C: TypeList> {
+pub trait StageList<E: EntityComponentContext, C: ExternalSystem> {
     type SystemList: SystemList<E, C>;
 
     fn execute<'a>(&self, context: &mut E, external: &C);
@@ -21,7 +21,7 @@ pub trait StageList<E: EntityComponentContext, C: TypeList> {
     fn component_write(&self) -> EntityQueryType<E>;
 }
 
-impl<E: EntityComponentContext, C: TypeList> StageList<E, C> for Nil {
+impl<E: EntityComponentContext, C: ExternalSystem> StageList<E, C> for Nil {
     type SystemList = Nil;
 
     #[inline]
@@ -33,12 +33,58 @@ impl<E: EntityComponentContext, C: TypeList> StageList<E, C> for Nil {
     }
 }
 
-pub struct Stage<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>> {
-    systems: L,
-    _phantom: PhantomData<(E, C)>,
+pub trait Strategy<E: EntityComponentContext, C: ExternalSystem> {
+    fn execute<T: SystemList<E, C>>(
+        context: &E,
+        external: &C,
+        queue: OperationSender<E>,
+        systems: &T,
+    );
 }
 
-impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>> Stage<E, C, L> {
+pub struct Parallel;
+
+impl<E: EntityComponentContext, C: ExternalSystem> Strategy<E, C> for Parallel {
+    fn execute<T: SystemList<E, C>>(
+        context: &E,
+        external: &C,
+        queue: OperationSender<E>,
+        systems: &T,
+    ) {
+        rayon::scope(|scope| {
+            let executor = system::Parallel::new(scope);
+            systems.execute(executor, context, queue, external);
+        });
+    }
+}
+
+pub struct Synchronous;
+
+impl<E: EntityComponentContext, C: ExternalSystem> Strategy<E, C> for Synchronous {
+    fn execute<T: SystemList<E, C>>(
+        context: &E,
+        external: &C,
+        queue: OperationSender<E>,
+        systems: &T,
+    ) {
+        let executor = system::Synchronous::new();
+        systems.execute(executor, context, queue, external);
+    }
+}
+
+pub struct Stage<
+    E: EntityComponentContext,
+    C: ExternalSystem,
+    L: SystemList<E, C>,
+    S: Strategy<E, C>,
+> {
+    systems: L,
+    _phantom: PhantomData<(E, C, S)>,
+}
+
+impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, S: Strategy<E, C>>
+    Stage<E, C, L, S>
+{
     #[inline]
     pub fn new(systems: L) -> Self {
         Self {
@@ -50,9 +96,7 @@ impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>> Stage<E,
     #[inline]
     pub fn execute<'a>(&self, context: &mut E, external: &C) {
         let (sender, receiver) = OperationChannel::new();
-        rayon::scope(|scope| {
-            self.systems.execute(scope, &context, sender, external);
-        });
+        S::execute(context, external, sender, &self.systems);
         receiver.process(context);
     }
 
@@ -62,8 +106,13 @@ impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>> Stage<E,
     }
 }
 
-impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, N: StageList<E, C>>
-    StageList<E, C> for Cons<Stage<E, C, L>, N>
+impl<
+        E: EntityComponentContext,
+        C: ExternalSystem,
+        L: SystemList<E, C>,
+        N: StageList<E, C>,
+        S: Strategy<E, C>,
+    > StageList<E, C> for Cons<Stage<E, C, L, S>, N>
 {
     type SystemList = L;
 
@@ -98,7 +147,7 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
         N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
         N::External: Subset<C, M5>;
 
-    fn barrier(self) -> impl Builder<E, C>;
+    fn next_stage<T: Strategy<E, C>>(self) -> impl Builder<E, C>;
 
     fn build(self) -> impl EntityComponentSystem<E, C>;
 }
@@ -106,16 +155,17 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
 pub struct StageListBuilder<
     E: EntityComponentContext,
     C: ExternalSystem,
+    T: Strategy<E, C>,
     L: system::Builder<E, C>,
     S: StageList<E, C>,
 > {
     builder: L,
     stages: S,
-    _marker: PhantomData<(E, C)>,
+    _marker: PhantomData<(E, C, T)>,
 }
 
-impl<E: EntityComponentContext, C: ExternalSystem>
-    StageListBuilder<E, C, SystemListBuilder<E, C, Nil>, Nil>
+impl<E: EntityComponentContext, C: ExternalSystem, T: Strategy<E, C>>
+    StageListBuilder<E, C, T, SystemListBuilder<E, C, Nil>, Nil>
 {
     pub fn new() -> Self {
         StageListBuilder {
@@ -129,9 +179,10 @@ impl<E: EntityComponentContext, C: ExternalSystem>
 impl<
         E: EntityComponentContext,
         C: ExternalSystem,
+        T: Strategy<E, C>,
         L: system::Builder<E, C>,
         S: StageList<E, C>,
-    > Builder<E, C> for StageListBuilder<E, C, L, S>
+    > Builder<E, C> for StageListBuilder<E, C, T, L, S>
 {
     fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
         self,
@@ -154,7 +205,7 @@ impl<
         StageListBuilder {
             builder: system::Builder::with_executor(self.builder, system),
             stages: self.stages,
-            _marker: PhantomData,
+            _marker: PhantomData::<(E, C, T)>,
         }
     }
 
@@ -177,18 +228,18 @@ impl<
         StageListBuilder {
             builder: system::Builder::with_global_executor(self.builder, system),
             stages: self.stages,
-            _marker: PhantomData,
+            _marker: PhantomData::<(E, C, T)>,
         }
     }
 
-    fn barrier(self) -> impl Builder<E, C> {
+    fn next_stage<N: Strategy<E, C>>(self) -> impl Builder<E, C> {
         StageListBuilder {
             builder: SystemListBuilder::new(),
             stages: Cons::new(
-                Stage::new(system::Builder::build(self.builder)),
+                Stage::<_, _, _, T>::new(system::Builder::build(self.builder)),
                 self.stages,
             ),
-            _marker: PhantomData,
+            _marker: PhantomData::<(E, C, N)>,
         }
     }
 
@@ -196,7 +247,7 @@ impl<
         EntityComponentSystemContext {
             context: E::default(),
             stages: Cons::new(
-                Stage::new(system::Builder::build(self.builder)),
+                Stage::<_, _, _, T>::new(system::Builder::build(self.builder)),
                 self.stages,
             ),
             _marker: PhantomData,

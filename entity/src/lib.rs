@@ -87,7 +87,7 @@ mod test_ecs {
         index::{EntityIndex, PersistentIndex},
         marker_type,
         operation::OperationSender,
-        stage::Builder,
+        stage::{Builder, Parallel},
         system::{GlobalSystem, System},
         ComponentData, EntityComponentSystem,
     };
@@ -290,6 +290,7 @@ mod test_ecs {
     fn test_ecs_execution() {
         let external = Nil::new();
         let mut ecs = EscContextType::with_external::<Nil>()
+            .next_stage::<Parallel>()
             .with_system(TestSystem::<String>::new())
             .with_system(TestSystem::<u32>::new())
             .with_system(TestSystem::<u16>::new())
@@ -331,16 +332,18 @@ mod test_ecs {
     #[should_panic(expected = "New system's write access is a subset of existing systems")]
     fn test_ecs_stage_write_conflict() {
         let _ = EscContextType::with_external::<Nil>()
+            .next_stage::<Parallel>()
             .with_system(TestEntityQuery)
             .with_system(TestEntityQuery)
             .build();
     }
 
     #[test]
-    fn test_ecs_stage_write_conflict_barier() {
+    fn test_ecs_stage_write_conflict_barrier() {
         let _ = EscContextType::with_external::<Nil>()
+            .next_stage::<Parallel>()
             .with_system(TestEntityQuery)
-            .barrier()
+            .next_stage::<Parallel>()
             .with_system(TestEntityQuery)
             .build();
     }
@@ -349,8 +352,9 @@ mod test_ecs {
     fn test_component_update_on_barrier() {
         let external = Nil::new();
         let mut ecs = EscContextType::with_external::<Nil>()
+            .next_stage::<Parallel>()
             .with_system(TestEntityPersistentIndex)
-            .barrier()
+            .next_stage::<Parallel>()
             .with_system(TestEntityPersistentIndex)
             .build();
 
@@ -403,6 +407,7 @@ mod test_ecs {
     fn test_external_system_access() {
         let external = list_value![ExternalSystem::new(), Nil::new()];
         let mut ecs = EscContextType::with_external::<list_type![ExternalSystem, Nil]>()
+            .next_stage::<Parallel>()
             .with_system(TestExternalSystemAcces)
             .build();
 
@@ -483,6 +488,7 @@ mod test_ecs {
     #[should_panic(expected = "New system's write access is a subset of existing systems")]
     fn test_global_system_write_conflict() {
         let _ = EscContextType::with_external::<Nil>()
+            .next_stage::<Parallel>()
             .with_global_system(TestGlobalSystem)
             .with_system(TestEntityPersistentIndex)
             .build();
@@ -491,8 +497,9 @@ mod test_ecs {
     #[test]
     fn test_global_system_write_conflict_barrier() {
         let _ = EscContextType::with_external::<Nil>()
+            .next_stage::<Parallel>()
             .with_global_system(TestGlobalSystem)
-            .barrier()
+            .next_stage::<Parallel>()
             .with_system(TestEntityPersistentIndex)
             .build();
     }
@@ -501,10 +508,11 @@ mod test_ecs {
     fn test_global_system_executed_once() {
         let external = Nil::new();
         let mut ecs = EscContextType::with_external::<Nil>()
+            .next_stage::<Parallel>()
             .with_system(TestSystem::<String>::new())
             .with_system(TestSystem::<Option<PersistentIndex>>::new())
             .with_global_system(TestGlobalSystem)
-            .barrier()
+            .next_stage::<Parallel>()
             .with_system(TestSystem::<Option<PersistentIndex>>::new())
             .build();
         let entity = ecs.get_entity_builder().with_component("Hello".to_string());

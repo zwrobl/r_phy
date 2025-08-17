@@ -1,10 +1,12 @@
+use std::marker::PhantomData;
+
 use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedIndexList, Marker};
 
 use crate::{
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
     entity::{Entity, EntityBuilder, EntityRef, EntityUpdate, Query, QueryWrite},
     index::{EntityIndexTyped, PersistentIndexMap, PersistentIndexTyped},
-    stage::{self, StageListBuilder},
+    stage::{self, StageListBuilder, Strategy},
     ComponentList, ExternalSystem,
 };
 
@@ -48,14 +50,30 @@ pub type EntityMutType<'a, E> = <EntityType<E> as MarkedIndexList<
     <E as EntityComponentContext>::Marker,
 >>::Mut<'a>;
 
+pub struct ExternalSystemsSelector<E: EntityComponentContext, C: ExternalSystem> {
+    _phantom: PhantomData<(E, C)>,
+}
+
+impl<E: EntityComponentContext, C: ExternalSystem> ExternalSystemsSelector<E, C> {
+    pub fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn next_stage<T: Strategy<E, C>>(&self) -> impl stage::Builder<E, C> {
+        StageListBuilder::<E, C, T, _, _>::new()
+    }
+}
+
 pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     type Components: ComponentList;
     type Marker: Marker;
     type Entity: Entity<Self::Components, Self::Marker>;
 
     #[inline]
-    fn with_external<E: ExternalSystem>() -> impl stage::Builder<Self, E> {
-        StageListBuilder::new()
+    fn with_external<E: ExternalSystem>() -> ExternalSystemsSelector<Self, E> {
+        ExternalSystemsSelector::new()
     }
 
     fn push_entity(

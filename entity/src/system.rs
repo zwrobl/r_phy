@@ -33,11 +33,51 @@ pub trait System<E: EntityComponentContext>: Sync {
     }
 }
 
+pub trait Executor<'a, E: EntityComponentContext, C: ExternalSystem>:
+    Copy + Clone + Send + Sync
+{
+    fn execute<F: Fn() + Send + 'a>(&self, executor: F);
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Parallel<'a, 'b> {
+    scope: &'b Scope<'a>,
+}
+
+impl<'a, 'b> Parallel<'a, 'b> {
+    pub fn new(scope: &'b Scope<'a>) -> Self {
+        Self { scope }
+    }
+}
+
+impl<'a, 'b, E: EntityComponentContext, C: ExternalSystem> Executor<'a, E, C> for Parallel<'a, 'b> {
+    fn execute<F: Fn() + Send + 'a>(&self, executor: F) {
+        self.scope.spawn(move |_| {
+            (executor)();
+        });
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Synchronous {}
+
+impl Synchronous {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl<'a, E: EntityComponentContext, C: ExternalSystem> Executor<'a, E, C> for Synchronous {
+    fn execute<F: Fn() + Send + 'a>(&self, executor: F) {
+        (executor)();
+    }
+}
+
 pub struct SystemExecutor<
     E: EntityComponentContext,
     M2: Marker,
     M3: Marker,
-    C: TypeList,
+    C: ExternalSystem,
     S: System<E>,
 > where
     S::Components: IntoSubsetIterator<E::Components, M2>,
@@ -49,7 +89,7 @@ pub struct SystemExecutor<
     _phantom: std::marker::PhantomData<(C, M2, M3)>,
 }
 
-impl<E: EntityComponentContext, M2: Marker, M3: Marker, C: TypeList, S: System<E>>
+impl<E: EntityComponentContext, M2: Marker, M3: Marker, C: ExternalSystem, S: System<E>>
     SystemExecutor<E, M2, M3, C, S>
 where
     S::Components: IntoSubsetIterator<E::Components, M2>,
@@ -107,29 +147,26 @@ where
     }
 }
 
-pub trait SystemList<E: EntityComponentContext, C: TypeList>: Sync {
-    fn execute<'a, 'b>(
+pub trait SystemList<E: EntityComponentContext, C: ExternalSystem>: Sync {
+    fn execute<'a, T: Executor<'a, E, C>>(
         &'a self,
-        _scope: &'b Scope<'a>,
+        excutor: T,
         context: &'a E,
         operation_queue: OperationSender<E>,
         external: &'a C,
-    ) where
-        'a: 'b;
+    );
 
     fn component_write(&self) -> EntityQueryType<E>;
 }
 
-impl<E: EntityComponentContext, C: TypeList> SystemList<E, C> for Nil {
-    fn execute<'a, 'b>(
+impl<E: EntityComponentContext, C: ExternalSystem> SystemList<E, C> for Nil {
+    fn execute<'a, T: Executor<'a, E, C>>(
         &'a self,
-        _scope: &'b Scope<'a>,
+        _executor: T,
         _context: &'a E,
         _operation_queue: OperationSender<E>,
         _external: &'a C,
-    ) where
-        'a: 'b,
-    {
+    ) {
     }
 
     fn component_write(&self) -> EntityQueryType<E> {
@@ -149,19 +186,17 @@ where
     S::Components: IntoSubsetIterator<ComponentListType<E>, M2>,
     S::External: Subset<C, M3>,
 {
-    fn execute<'a, 'b>(
+    fn execute<'a, T: Executor<'a, E, C>>(
         &'a self,
-        scope: &'b Scope<'a>,
+        executor: T,
         context: &'a E,
         operation_queue: OperationSender<E>,
         external: &'a C,
-    ) where
-        'a: 'b,
-    {
+    ) {
         self.tail
-            .execute(scope, context, operation_queue.clone(), external);
+            .execute(executor, context, operation_queue.clone(), external);
 
-        scope.spawn(move |_| {
+        executor.execute(move || {
             context.iter_ref().for_each(|archetype| {
                 self.head
                     .execute(archetype, context, &operation_queue, external);
@@ -186,18 +221,16 @@ impl<
 where
     S::External: Subset<C, M2>,
 {
-    fn execute<'a, 'b>(
+    fn execute<'a, T: Executor<'a, E, C>>(
         &'a self,
-        scope: &'b Scope<'a>,
+        executor: T,
         context: &'a E,
         operation_queue: OperationSender<E>,
         external: &'a C,
-    ) where
-        'a: 'b,
-    {
+    ) {
         self.tail
-            .execute(scope, context, operation_queue.clone(), external);
-        scope.spawn(move |_| {
+            .execute(executor, context, operation_queue.clone(), external);
+        executor.execute(move || {
             self.head.execute(context, &operation_queue, external);
         });
     }
@@ -311,7 +344,7 @@ pub trait GlobalSystem<E: EntityComponentContext>: Sync {
 pub struct GlobalSystemExecutor<
     E: EntityComponentContext,
     M3: Marker,
-    C: TypeList,
+    C: ExternalSystem,
     S: GlobalSystem<E>,
 > where
     S::External: Subset<C, M3>,
@@ -321,7 +354,7 @@ pub struct GlobalSystemExecutor<
     _phantom: std::marker::PhantomData<(C, M3)>,
 }
 
-impl<E: EntityComponentContext, M3: Marker, C: TypeList, S: GlobalSystem<E>>
+impl<E: EntityComponentContext, M3: Marker, C: ExternalSystem, S: GlobalSystem<E>>
     GlobalSystemExecutor<E, M3, C, S>
 where
     S::External: Subset<C, M3>,

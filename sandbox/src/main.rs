@@ -1,6 +1,12 @@
 use entity::{
-    component_list_type, context::EntityComponentStorage, ecs_context_type, entity_type,
-    index::EntityIndex, marker_type, operation::OperationSender, stage::Builder,
+    component_list_type,
+    context::EntityComponentStorage,
+    ecs_context_type, entity_type,
+    index::EntityIndex,
+    marker_type,
+    operation::OperationSender,
+    stage::Builder,
+    stage::{Parallel, Synchronous},
 };
 use graphics::{
     model::{
@@ -138,9 +144,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let model = ModelTyped::new(cube_mesh, empty_material);
     let systems_context = game_loop
         .system_builder()
+        .next_stage::<Parallel>()
         .with_system(DrawCommandSystem)
         .with_system(SpinningSystem)
-        .barrier()
+        .next_stage::<Synchronous>()
         .with_system(FirstPerson::new::<EntityComponent>())
         .with_global_system(CameraSelector::new::<EntityComponent>())
         .with_global_system(GlobalInput::<EntityComponent, _>::new(handle_input));

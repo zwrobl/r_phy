@@ -1,7 +1,11 @@
 pub mod error;
 pub mod system;
 
-use entity::{context::EntityComponentContext, entity::EntityBuilder, EntityComponentSystem};
+use entity::{
+    context::{EntityComponentContext, ExternalSystemsSelector},
+    entity::EntityBuilder,
+    EntityComponentSystem,
+};
 use winit::{
     event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -93,8 +97,8 @@ impl<R: Renderer> Loop<R> {
 
     pub fn system_builder<'a, E: EntityComponentContext>(
         &'a self,
-    ) -> impl entity::stage::Builder<E, SharedSystemsList> {
-        E::with_external()
+    ) -> ExternalSystemsSelector<E, SharedSystemsList> {
+        E::with_external::<SharedSystemsList>()
     }
 
     pub fn scene<
