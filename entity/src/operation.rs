@@ -73,6 +73,14 @@ pub struct TemporaryIndex<E: EntityComponentContext> {
     _phantom: PhantomData<E>,
 }
 
+impl<E: EntityComponentContext> Clone for TemporaryIndex<E> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<E: EntityComponentContext> Copy for TemporaryIndex<E> {}
+
 pub struct AddComponent<E: EntityComponentContext> {
     index: TemporaryIndex<E>,
     payload: UpdatePayload<E>,
