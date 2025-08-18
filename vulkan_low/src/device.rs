@@ -3,9 +3,9 @@ pub mod error;
 use error::{DeviceError, DeviceResult, PhysicalDeviceError, PhysicalDeviceResult};
 
 use crate::{
+    Instance,
     error::ExtResult,
     surface::{PhysicalDeviceSurfaceProperties, Surface},
-    Instance,
 };
 
 use ash::{extensions::khr, vk};

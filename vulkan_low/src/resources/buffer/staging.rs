@@ -6,26 +6,26 @@ use std::{
 };
 
 use ash::vk;
-use bytemuck::{cast_slice_mut, AnyBitPattern, NoUninit};
+use bytemuck::{AnyBitPattern, NoUninit, cast_slice_mut};
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
+    Context,
     error::ExtResult,
     memory::{
+        DeviceLocal, HostCoherent,
         allocator::{AllocatorBuilder, AllocatorIndex},
         range::{ByteRange, Range},
-        DeviceLocal, HostCoherent,
     },
     resources::{
+        Partial, Resource, ResourceGuardError,
         buffer::{
             BufferInfoBuilder, BufferPartial, BufferRaw, BufferUsage, PersistentBuffer, SharingMode,
         },
         command::{CopyBuffer, Graphics, Operation, SubmitSemaphoreState, Transfer},
         error::{GuardError, ResourceError},
         image::{Image, ImageType},
-        Partial, Resource, ResourceGuardError,
     },
-    Context,
 };
 
 use super::Buffer;
@@ -257,7 +257,7 @@ impl FromGuard for StagingBuffer {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         StagingBuffer {
-            buffer: PersistentBuffer::from_inner(inner),
+            buffer: unsafe { PersistentBuffer::from_inner(inner) },
         }
     }
 }
@@ -293,7 +293,7 @@ impl Resource for StagingBuffer {
     #[inline]
     fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
         ResourceError::GuardError(GuardError::Buffer {
-            error: (DropGuard::new(resource), err),
+            error: Box::new((DropGuard::new(resource), err)),
         })
     }
 }

@@ -4,13 +4,13 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 
 use crate::{
+    Device,
     resources::{
         buffer::UniformBuffer,
         command::Operation,
         image::DescriptorImageInfo,
         layout::{DescriptorBinding, DescriptorLayout, DescriptorType},
     },
-    Device,
 };
 
 use super::Descriptor;

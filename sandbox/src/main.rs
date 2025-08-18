@@ -14,14 +14,14 @@ use graphics::{
         CommonVertex, EmptyMaterial, MeshHandleTyped, Model, ModelTyped, PbrMaterial, SimpleVertex,
         UnlitMaterial,
     },
-    renderer::{camera::ProjectionMatrix, ContextBuilder},
+    renderer::{ContextBuilder, camera::ProjectionMatrix},
     shader::{Shader, ShaderHandle},
 };
 use std::{error::Error, path::Path, result::Result};
-use type_kit::{list_type, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, RefList, There};
+use type_kit::{Cons, GenVec, GenVecIndex, Here, Nil, RefList, There, list_type, unpack_list};
 use vulkan_high::{
-    renderer::deferred::{DeferredRendererBuilder, DeferredRendererConfig},
     VulkanRendererBuilder, VulkanRendererConfig,
+    renderer::deferred::{DeferredRendererBuilder, DeferredRendererConfig},
 };
 use winit::{
     dpi::PhysicalSize,
@@ -35,6 +35,7 @@ use math::{
 };
 use physics::shape::Cube;
 use system::{
+    LoopBuilder,
     system::{
         command::{Command, CommandQueue},
         control::{FirstPerson, FirstPersonController, KeyBindings},
@@ -42,7 +43,6 @@ use system::{
         input::{GlobalInput, InputSystem, Key, KeyState},
         renderer::{CameraSelector, DrawCommandSystem},
     },
-    LoopBuilder,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -299,7 +299,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     scene
                         .get_entity_builder()
                         .with_component::<ShaderHandle, _>(checker_shader.into())
-                        .with_component::<Model, _>(model.clone().into())
+                        .with_component::<Model, _>(model.into())
                         .with_component::<Transform, _>(Transform::identity().translate(
                             Vector3::new(x as f32 * 3.0, y as f32 * 3.0, z as f32 * 3.0),
                         ))

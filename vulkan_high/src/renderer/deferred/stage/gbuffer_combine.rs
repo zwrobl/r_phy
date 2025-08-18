@@ -1,34 +1,33 @@
 use std::{convert::Infallible, path::Path};
 
 use type_kit::{
-    dependency_list, list_type, unpack_list, Cons, Create, Dependency, Destroy, ListMutType, Nil,
-    Task, TypedNil,
+    Cons, Create, Dependency, Destroy, ListMutType, Nil, Task, TypedNil, dependency_list,
+    list_type, unpack_list,
 };
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     resources::{
+        ResourceIndex,
         command::{EndRenderPass, Graphics, PersistentCommandPool, Secondary},
         error::ResourceError,
         pipeline::{GraphicsPipeline, ModuleLoader, ShaderDirectory},
         render_pass::RenderPass,
         storage::ResourceIndexListBuilder,
-        ResourceIndex,
     },
-    Context,
 };
 
 use crate::{
     renderer::{
+        DestroyTerminator, ExternalResources, ResourceCell,
         deferred::{
+            DeferredSharedResources,
             presets::{
                 AttachmentsGBuffer, DeferedRenderPass, GBufferShadingPass,
                 GBufferShadingPassPipeline,
             },
             stage::gbuffer_write::GBufferWrite,
-            DeferredSharedResources,
         },
         frame::{Frame, FrameCell},
-        DestroyTerminator, ExternalResources, ResourceCell,
     },
     resources::CommonMesh,
 };

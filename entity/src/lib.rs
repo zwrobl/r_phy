@@ -77,11 +77,11 @@ mod test_ecs {
     };
 
     use type_kit::{
-        list_type, list_value, unpack_list, Cons, GenVec, GenVecIndex, Here, Nil, RefList, There,
+        Cons, GenVec, GenVecIndex, Here, Nil, RefList, There, list_type, list_value, unpack_list,
     };
 
     use crate::{
-        component_list_type,
+        ComponentData, EntityComponentSystem, component_list_type,
         context::{EntityComponentContext, EntityComponentStorage},
         ecs_context_type,
         entity::ComponentUpdate,
@@ -91,7 +91,6 @@ mod test_ecs {
         operation::{AddComponent, OperationChannel},
         stage::{Builder, Parallel},
         system::{GlobalSystem, System},
-        ComponentData, EntityComponentSystem,
     };
 
     type EscContextType = ecs_context_type![
@@ -286,7 +285,9 @@ mod test_ecs {
                         entity
                     );
                 } else {
-                    println!("TestEntityPersistentIndex could not find entity with given persistent index");
+                    println!(
+                        "TestEntityPersistentIndex could not find entity with given persistent index"
+                    );
                 }
             }
         }

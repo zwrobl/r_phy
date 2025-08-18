@@ -12,17 +12,17 @@ use super::{
     swapchain::SwapchainRaw,
 };
 use type_kit::{
-    list_type, BorrowList, BorrowedGuard, CollectionDestroyError, Cons, Contains, Create, Destroy,
+    BorrowList, BorrowedGuard, CollectionDestroyError, Cons, Contains, Create, Destroy,
     DestroyResult, FromGuard, GenCollection, GenIndex, GuardCell, GuardVec, IndexList, Marked,
-    Marker, Nil, TypeGuard, TypeMap, TypedIndex,
+    Marker, Nil, TypeGuard, TypeMap, TypedIndex, list_type,
 };
 
 use crate::{
-    resources::{
-        error::{ResourceError, ResourceResult},
-        RawIndex, Resource, ResourceIndex,
-    },
     Context,
+    resources::{
+        RawIndex, Resource, ResourceIndex,
+        error::{ResourceError, ResourceResult},
+    },
 };
 
 pub type RawCollection<R> = <R as Resource>::RawCollection;

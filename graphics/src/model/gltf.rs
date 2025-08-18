@@ -1,6 +1,6 @@
 use super::{CommonVertex, Mesh, PbrMaps, PbrMaterial};
 use base64::Engine;
-use gltf::{self, buffer, mesh::Mode, Gltf, Semantic};
+use gltf::{self, Gltf, Semantic, buffer, mesh::Mode};
 use std::path::Path;
 
 use crate::{
@@ -96,7 +96,7 @@ impl DocumentReader {
         Ok(Self { document, buffers })
     }
 
-    fn get_view(&self, view: gltf::buffer::View) -> BufferView {
+    fn get_view(&self, view: gltf::buffer::View) -> BufferView<'_> {
         let buffer = &self.buffers[view.buffer().index()];
         BufferView {
             stride: view.stride().unwrap_or(0),
@@ -104,7 +104,7 @@ impl DocumentReader {
         }
     }
 
-    fn get_accessor(&self, accessor: gltf::Accessor) -> AttributeReader {
+    fn get_accessor(&self, accessor: gltf::Accessor) -> AttributeReader<'_> {
         let view = self.get_view(accessor.view().unwrap());
         AttributeReader {
             view,

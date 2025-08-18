@@ -8,21 +8,21 @@ mod surface;
 use crate::{
     error::{InstanceError, InstanceResult, VkResult},
     memory::{
+        AllocReqTyped, MemoryProperties,
         allocator::{
             AllocationBorrow, AllocationEntryTyped, Allocator, AllocatorIndex, AllocatorIndexTyped,
             AllocatorStorage, AllocatorStorageList,
         },
         error::MemoryResult,
-        AllocReqTyped, MemoryProperties,
     },
     resources::{
+        RawIndex, Resource, ResourceIndex,
         error::ResourceResult,
         storage::{
             BorrowMut, BorrowRef, RawCollection, ResourceIndexList, ResourceStorage,
             ResourceStorageList, TypeUniqueRawCollection, TypeUniqueResource,
             TypeUniqueResourceStorage, TypeUniqueResourceStorageList,
         },
-        RawIndex, Resource, ResourceIndex,
     },
 };
 
@@ -31,7 +31,7 @@ use ash::extensions::{ext, khr};
 #[cfg(debug_assertions)]
 use debug::DebugUtils;
 use std::convert::Infallible;
-use std::ffi::{c_char, CStr};
+use std::ffi::{CStr, c_char};
 use std::ops::{Deref, DerefMut};
 use type_kit::{
     Contains, Create, CreateResult, Destroy, DestroyResult, DropGuard, Finalize, GenVec, GuardVec,
@@ -276,7 +276,7 @@ impl Context {
         for<'a> R: Destroy<Context<'a> = &'a Context> + 'static,
         ResourceStorageList: Contains<GuardVec<R>, M>,
     {
-        let mut resource = self.storage.pop_raw_resource(index)?;
+        let mut resource = unsafe { self.storage.pop_raw_resource(index)? };
         let _ = resource.destroy(self);
         Ok(())
     }

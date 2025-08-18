@@ -1,21 +1,17 @@
 [package]
 name = "graphics"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-base64 = "0.22.0"
-bytemuck = { workspace = true }
-glob = "0.3.1"
-gltf = "1.4.0"
-serde = "1.0.197"
+glob = { workspace = true }
+gltf = { workspace = true }
 winit = { workspace = true }
+base64 = { workspace = true }
+bytemuck = { workspace = true }
 math = { path = "../math" }
-type_kit= { path = "../type_kit" }
 physics = { path = "../physics" }
 colored = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.9", features = ["windef"] }
+type_kit = { path = "../type_kit" }

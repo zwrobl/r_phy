@@ -15,10 +15,10 @@ use std::{convert::Infallible, marker::PhantomData};
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 
 use vulkan_low::{
+    Context,
     error::VkResult,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::Partial,
-    Context,
 };
 
 use crate::renderer::Renderer;
@@ -81,14 +81,14 @@ pub struct ResourcePackPartial<
 }
 
 impl<
-        'a,
-        R: Renderer,
-        M: MaterialPackList,
-        V: MeshPackList,
-        P: GraphicsPipelineListBuilder,
-        PM: MaterialPackListPartial<Pack = M>,
-        PV: MeshPackListPartial<Pack = V>,
-    > ResourcePackPartial<'a, R, M, V, P, PM, PV>
+    'a,
+    R: Renderer,
+    M: MaterialPackList,
+    V: MeshPackList,
+    P: GraphicsPipelineListBuilder,
+    PM: MaterialPackListPartial<Pack = M>,
+    PV: MeshPackListPartial<Pack = V>,
+> ResourcePackPartial<'a, R, M, V, P, PM, PV>
 where
     for<'b> PM: Destroy<Context<'b> = &'b Context>,
     for<'b> PV: Destroy<Context<'b> = &'b Context>,
@@ -121,14 +121,14 @@ where
 }
 
 impl<
-        'a,
-        R: Renderer,
-        M: MaterialPackList,
-        V: MeshPackList,
-        P: GraphicsPipelineListBuilder,
-        PM: MaterialPackListPartial<Pack = M>,
-        PV: MeshPackListPartial<Pack = V>,
-    > Destroy for ResourcePackPartial<'a, R, M, V, P, PM, PV>
+    'a,
+    R: Renderer,
+    M: MaterialPackList,
+    V: MeshPackList,
+    P: GraphicsPipelineListBuilder,
+    PM: MaterialPackListPartial<Pack = M>,
+    PV: MeshPackListPartial<Pack = V>,
+> Destroy for ResourcePackPartial<'a, R, M, V, P, PM, PV>
 where
     for<'b> PM: Destroy<Context<'b> = &'b Context>,
     for<'b> PV: Destroy<Context<'b> = &'b Context>,
@@ -142,14 +142,14 @@ where
     }
 }
 impl<
-        'a,
-        R: Renderer,
-        M: MaterialPackList,
-        V: MeshPackList,
-        P: GraphicsPipelineListBuilder,
-        PM: MaterialPackListPartial<Pack = M>,
-        PV: MeshPackListPartial<Pack = V>,
-    > Partial for ResourcePackPartial<'a, R, M, V, P, PM, PV>
+    'a,
+    R: Renderer,
+    M: MaterialPackList,
+    V: MeshPackList,
+    P: GraphicsPipelineListBuilder,
+    PM: MaterialPackListPartial<Pack = M>,
+    PV: MeshPackListPartial<Pack = V>,
+> Partial for ResourcePackPartial<'a, R, M, V, P, PM, PV>
 where
     for<'b> PM: Destroy<Context<'b> = &'b Context>,
     for<'b> PV: Destroy<Context<'b> = &'b Context>,
@@ -205,7 +205,7 @@ impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackL
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         let _ = self.materials.destroy(context);
         let _ = self.meshes.destroy(context);
-        let _ = self.pipelines.destroy(context);
+        self.pipelines.destroy(context);
         Ok(())
     }
 }

@@ -5,13 +5,13 @@ use type_kit::{
 };
 
 use crate::{
+    PersistentIndexMap,
     context::{
         ComponentListType, EntityComponentContext, EntityMutType, EntityOwnedType, EntityQueryType,
         EntityRefType, EntityType,
     },
     entity::{Entity, EntityBuilder, EntityRef},
     index::EntityIndexTyped,
-    PersistentIndexMap,
 };
 
 pub struct ArchetypeRef<'a, E: EntityComponentContext> {
@@ -120,7 +120,7 @@ impl<E: EntityComponentContext> Archetype<E> {
     }
 
     #[inline]
-    pub fn as_ref(&self, index: GenVecIndex<Self>) -> ArchetypeRef<E> {
+    pub fn as_ref(&self, index: GenVecIndex<Self>) -> ArchetypeRef<'_, E> {
         ArchetypeRef {
             archetype: self,
             index,
@@ -128,7 +128,7 @@ impl<E: EntityComponentContext> Archetype<E> {
     }
 
     #[inline]
-    pub fn as_mut(&mut self, index: GenVecIndex<Self>) -> ArchetypeMut<E> {
+    pub fn as_mut(&mut self, index: GenVecIndex<Self>) -> ArchetypeMut<'_, E> {
         ArchetypeMut {
             archetype: self,
             index,
@@ -154,10 +154,7 @@ impl<E: EntityComponentContext> Archetype<E> {
             .map(|entity| N::unwrap_ref(entity))
     }
 
-    pub fn try_pop_entity<'a>(
-        &'a mut self,
-        index: EntityIndexTyped<E>,
-    ) -> Option<EntityOwnedType<E>> {
+    pub fn try_pop_entity(&mut self, index: EntityIndexTyped<E>) -> Option<EntityOwnedType<E>> {
         if self.persistent_entity_map.contains(index.entity) {
             let entity = self.entities.pop(index.entity).ok()?;
             let components = entity.get_owned(&mut self.components).ok()?;

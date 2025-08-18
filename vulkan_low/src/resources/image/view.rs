@@ -4,12 +4,12 @@ use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 
 use crate::{
+    Context,
     memory::MemoryProperties,
     resources::{
         error::ResourceError,
         image::{ArrayInfo, ImageCreateInfo, ImageInfo, ImageType, MipInfo},
     },
-    Context,
 };
 
 pub struct ImageViewCreateInfo<V: ImageType> {

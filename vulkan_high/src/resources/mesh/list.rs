@@ -3,10 +3,10 @@ use std::any::type_name;
 use graphics::model::{Mesh, MeshTypeList, Vertex};
 use type_kit::{Cons, Create, Destroy, Nil, TypedNil};
 use vulkan_low::{
+    Context,
     error::VkResult,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::Partial,
-    Context,
 };
 
 use crate::resources::DummyPack;
@@ -14,15 +14,15 @@ use crate::resources::DummyPack;
 use super::{MeshPack, MeshPackPartial, MeshPackRef};
 
 pub trait MeshPackList: for<'a> Destroy<Context<'a> = &'a Context> {
-    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>>;
-    fn get<V: Vertex>(&self) -> MeshPackRef<V>;
+    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<'_, V>>;
+    fn get<V: Vertex>(&self) -> MeshPackRef<'_, V>;
 }
 
 impl MeshPackList for TypedNil<DummyPack> {
-    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<V>> {
+    fn try_get<V: Vertex>(&self) -> Option<MeshPackRef<'_, V>> {
         None
     }
-    fn get<V: Vertex>(&self) -> MeshPackRef<V> {
+    fn get<V: Vertex>(&self) -> MeshPackRef<'_, V> {
         panic!(
             "No mesh pack found for the requested type: {}",
             type_name::<V>()
@@ -43,7 +43,7 @@ impl<'a, V: Vertex, T: Vertex> TryFrom<&'a Option<MeshPack<V>>> for MeshPackRef<
 }
 
 impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<Option<MeshPack<V>>, N> {
-    fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<T>> {
+    fn try_get<T: Vertex>(&self) -> Option<MeshPackRef<'_, T>> {
         if let Ok(pack) = (&self.head).try_into() {
             Some(pack)
         } else {
@@ -51,7 +51,7 @@ impl<V: Vertex, N: MeshPackList> MeshPackList for Cons<Option<MeshPack<V>>, N> {
         }
     }
 
-    fn get<T: Vertex>(&self) -> MeshPackRef<T> {
+    fn get<T: Vertex>(&self) -> MeshPackRef<'_, T> {
         if let Ok(pack) = (&self.head).try_into() {
             pack
         } else {
@@ -101,7 +101,7 @@ pub trait MeshPackListPartial: Sized {
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B);
 
     fn allocate(self, context: &Context, allocator: Option<AllocatorIndex>)
-        -> VkResult<Self::Pack>;
+    -> VkResult<Self::Pack>;
 }
 
 impl MeshPackListPartial for TypedNil<DummyPack> {

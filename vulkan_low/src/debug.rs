@@ -3,7 +3,7 @@
 use std::{
     convert::Infallible,
     error::Error,
-    ffi::{c_char, c_void, CStr},
+    ffi::{CStr, c_char, c_void},
 };
 
 use crate::error::{InstanceError, InstanceResult};
@@ -37,7 +37,7 @@ unsafe extern "system" fn debug_messenger_callback(
         _ => "UNKNOWN".magenta(),
     }
     .bold();
-    let message = CStr::from_ptr((*message).p_message).to_string_lossy();
+    let message = unsafe { CStr::from_ptr((*message).p_message) }.to_string_lossy();
     println!("[{}][{}]:{}", message_severity, message_type, message);
     vk::FALSE
 }

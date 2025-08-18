@@ -2,7 +2,7 @@ use ash::{self, extensions::khr, vk};
 use std::{
     collections::HashSet,
     convert::Infallible,
-    ffi::{c_void, CStr},
+    ffi::{CStr, c_void},
     ptr::null,
 };
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};

@@ -789,14 +789,14 @@ impl<T> GenVec<T> {
         let mut i = 0;
         while i < self.items.len() {
             let mut item_removed = false;
-            if self.mapping[i].is_occupied() {
-                if predicate(unsafe { self.items[i].assume_init_ref() }) {
-                    let cell_index = self.mapping[i].item_index();
-                    let next_free = self.next_free.replace(cell_index);
-                    let _ = self.indices[cell_index].unlock_unchecked().pop(next_free);
-                    removed.push(unsafe { self.swap_remove(i) });
-                    item_removed = true;
-                }
+            if self.mapping[i].is_occupied()
+                && predicate(unsafe { self.items[i].assume_init_ref() })
+            {
+                let cell_index = self.mapping[i].item_index();
+                let next_free = self.next_free.replace(cell_index);
+                let _ = self.indices[cell_index].unlock_unchecked().pop(next_free);
+                removed.push(unsafe { self.swap_remove(i) });
+                item_removed = true;
             }
             if !item_removed {
                 i += 1;
@@ -1121,7 +1121,7 @@ pub type ScopedEntryResult<'a, T> = Result<ScopedEntry<'a, T>, GenCollectionErro
 
 impl<T: Clone + Copy> TypeGuard<T> {
     #[inline]
-    pub fn try_get_scoped_entry<I: FromGuard<Inner = T>>(&self) -> ScopedEntryResult<I> {
+    pub fn try_get_scoped_entry<I: FromGuard<Inner = T>>(&self) -> ScopedEntryResult<'_, I> {
         Ok(ScopedEntry {
             resource: ManuallyDrop::new(I::try_from_guard(*self).map_err(|(_, err)| err)?),
             _raw: self.inner(),
@@ -1142,7 +1142,9 @@ pub type ScopedEntryMutResult<'a, T> = Result<ScopedEntryMut<'a, T>, GenCollecti
 
 impl<T: Clone + Copy> TypeGuard<T> {
     #[inline]
-    pub fn try_get_scoped_entry_mut<I: FromGuard<Inner = T>>(&mut self) -> ScopedEntryMutResult<I> {
+    pub fn try_get_scoped_entry_mut<I: FromGuard<Inner = T>>(
+        &mut self,
+    ) -> ScopedEntryMutResult<'_, I> {
         Ok(ScopedEntryMut {
             resource: Some(I::try_from_guard(*self).map_err(|(_, err)| err)?),
             raw: self.inner_mut(),
@@ -1626,7 +1628,7 @@ impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionMutIter
     }
 }
 
-impl<'a, T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionIntoIter<T>, N> {
+impl<T: 'static, N: ListIterator> ListIterator for Cons<GenCollectionIntoIter<T>, N> {
     type IteratorItem = Cons<Option<T>, N::IteratorItem>;
 
     #[inline]
@@ -1654,7 +1656,7 @@ impl<'a, T: 'static> ListIterator for GenCollectionMutIter<'a, T> {
     }
 }
 
-impl<'a, T: 'static> ListIterator for GenCollectionIntoIter<T> {
+impl<T: 'static> ListIterator for GenCollectionIntoIter<T> {
     type IteratorItem = Option<T>;
 
     #[inline]
@@ -1673,11 +1675,7 @@ impl<T: ListIterator> Iterator for ListIter<T> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.iter.next();
-        if item.any() {
-            Some(item)
-        } else {
-            None
-        }
+        if item.any() { Some(item) } else { None }
     }
 }
 
@@ -1719,8 +1717,7 @@ impl<T: ListIterator> ListIter<T> {
         }
     }
 
-    /// #Safety
-    ///
+    /// # Safety
     /// Subset must contain only unique types, as otherwise aliased mutable references to the collection may be created
     #[inline]
     pub unsafe fn iter_sub_mut<
@@ -1732,7 +1729,7 @@ impl<T: ListIterator> ListIter<T> {
         collection: &'a mut C,
     ) -> Self {
         Self {
-            iter: N::sub_iter_mut(collection),
+            iter: unsafe { N::sub_iter_mut(collection) },
         }
     }
 
@@ -1752,11 +1749,7 @@ impl<T: ListIterator> Iterator for ListIterAll<T> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.iter.next();
-        if item.all() {
-            Some(item)
-        } else {
-            None
-        }
+        if item.all() { Some(item) } else { None }
     }
 }
 
@@ -1772,7 +1765,7 @@ pub trait IntoCollectionIterator: TypeList + Default + 'static {
 
     fn iter_ref<'a>(&'a self) -> Self::RefIterator<'a>;
     fn iter_mut<'a>(&'a mut self) -> Self::MutIterator<'a>;
-    fn into_iter<'a>(self) -> Self::IntoIterator;
+    fn into_iter(self) -> Self::IntoIterator;
 }
 
 impl IntoCollectionIterator for Nil {
@@ -2116,12 +2109,12 @@ impl<T: TypeList> GenCollectionList<T> {
     }
 
     #[inline]
-    pub fn insert<'a, I: IndexList<T>>(&'a mut self, value: I::Owned) -> GenCollectionResult<I> {
+    pub fn insert<I: IndexList<T>>(&mut self, value: I::Owned) -> GenCollectionResult<I> {
         I::insert(value, &mut self.collection)
     }
 
     #[inline]
-    pub fn get_ref<'a, I: IndexList<T>>(&'a self, index: I) -> GenCollectionResult<I::Ref<'a>> {
+    pub fn get_ref<I: IndexList<T>>(&self, index: I) -> GenCollectionResult<I::Ref<'_>> {
         index.get_ref(&self.collection)
     }
 
@@ -2147,7 +2140,7 @@ impl<T: TypeList> GenCollectionList<T> {
 #[cfg(test)]
 mod test_list_index {
     use super::*;
-    use crate::{list_type, list_value, unpack_list, Cons, GenIndex, IndexList, Nil};
+    use crate::{Cons, GenIndex, IndexList, Nil, list_type, list_value, unpack_list};
 
     type TestCopyCollection = list_type![GenVec<u8>, GenVec<u16>, GenVec<u32>, Nil];
 
@@ -2531,9 +2524,9 @@ mod test_type_guard_borrow_list {
     use super::*;
 
     use crate::{
-        list_type,
+        Cons, Nil, list_type,
         type_guard::test_types::{A, B},
-        unpack_list, Cons, Nil,
+        unpack_list,
     };
 
     type TestTypeGuardCollection = list_type![GuardVec<u32>, Nil];
@@ -2694,7 +2687,7 @@ impl<T: Clone + Copy + 'static> GenCell<TypeGuard<T>> {
     pub fn entry<I: FromGuard<Inner = T>>(
         &self,
         index: GuardIndex<I, Self>,
-    ) -> ScopedEntryResult<I> {
+    ) -> ScopedEntryResult<'_, I> {
         self.get(index)?.try_get_scoped_entry()
     }
 
@@ -2702,7 +2695,7 @@ impl<T: Clone + Copy + 'static> GenCell<TypeGuard<T>> {
     pub fn entry_mut<I: FromGuard<Inner = T>>(
         &mut self,
         index: GuardIndex<I, Self>,
-    ) -> ScopedEntryMutResult<I> {
+    ) -> ScopedEntryMutResult<'_, I> {
         self.get_mut(index)?.try_get_scoped_entry_mut()
     }
 }
@@ -2715,11 +2708,7 @@ impl<T: 'static> GenCollection<T> for GenCell<T> {
 
     #[inline]
     fn len(&self) -> usize {
-        if self.cell.is_occupied() {
-            1
-        } else {
-            0
-        }
+        if self.cell.is_occupied() { 1 } else { 0 }
     }
 
     #[inline]
@@ -2787,7 +2776,7 @@ impl<T: Destroy> Destroy for GenCell<T> {
 mod test_mixed_collection_types {
     use super::*;
 
-    use crate::{list_type, unpack_list, Cons, Nil};
+    use crate::{Cons, Nil, list_type, unpack_list};
 
     type TestCollectionListType = list_type![GenVec<u32>, GenCell<u32>, Nil];
     type TestCollectionList = GenCollectionList<TestCollectionListType>;
@@ -2887,14 +2876,8 @@ where
     fn write<'a>(self, _value: <Self::IndexList as MarkedIndexList<L, M>>::Mut<'a>) {}
 }
 
-impl<
-        T: 'static,
-        C: GenCollection<T>,
-        L: 'static,
-        M1: Marker,
-        M2: Marker,
-        N: MarkedItemList<L, M2>,
-    > MarkedItemList<L, Cons<M1, M2>> for Cons<CollectionType<T, C>, N>
+impl<T: 'static, C: GenCollection<T>, L: 'static, M1: Marker, M2: Marker, N: MarkedItemList<L, M2>>
+    MarkedItemList<L, Cons<M1, M2>> for Cons<CollectionType<T, C>, N>
 where
     L: Contains<C, M1>,
 {
@@ -2916,14 +2899,8 @@ where
     }
 }
 
-impl<
-        T: 'static,
-        C: GenCollection<T>,
-        L: 'static,
-        M1: Marker,
-        M2: Marker,
-        N: MarkedItemList<L, M2>,
-    > MarkedItemList<L, Cons<M1, M2>> for Cons<Option<CollectionType<T, C>>, N>
+impl<T: 'static, C: GenCollection<T>, L: 'static, M1: Marker, M2: Marker, N: MarkedItemList<L, M2>>
+    MarkedItemList<L, Cons<M1, M2>> for Cons<Option<CollectionType<T, C>>, N>
 where
     L: Contains<C, M1>,
 {
@@ -2983,13 +2960,13 @@ where
 }
 
 impl<
-        T: 'static,
-        C: GenCollection<T>,
-        L: 'static,
-        M1: Marker,
-        M2: Marker,
-        N: MarkedBorrowList<L, M2>,
-    > MarkedBorrowList<L, Cons<M1, M2>> for Cons<Borrowed<T, C>, N>
+    T: 'static,
+    C: GenCollection<T>,
+    L: 'static,
+    M1: Marker,
+    M2: Marker,
+    N: MarkedBorrowList<L, M2>,
+> MarkedBorrowList<L, Cons<M1, M2>> for Cons<Borrowed<T, C>, N>
 where
     L: Contains<C, M1>,
 {
@@ -3014,13 +2991,13 @@ where
 }
 
 impl<
-        T: 'static,
-        C: GenCollection<T>,
-        L: 'static,
-        M1: Marker,
-        M2: Marker,
-        N: MarkedBorrowList<L, M2>,
-    > MarkedBorrowList<L, Cons<M1, M2>> for Cons<Option<Borrowed<T, C>>, N>
+    T: 'static,
+    C: GenCollection<T>,
+    L: 'static,
+    M1: Marker,
+    M2: Marker,
+    N: MarkedBorrowList<L, M2>,
+> MarkedBorrowList<L, Cons<M1, M2>> for Cons<Option<Borrowed<T, C>>, N>
 where
     L: Contains<C, M1>,
 {
@@ -3060,7 +3037,7 @@ pub trait MarkedIndexList<C: 'static, M: Marker>: Sized {
     type Mut<'a>;
 
     fn get_ref(self, collection: &C) -> GenCollectionResult<Self::Ref<'_>>;
-    /// #Safety
+    /// # Safety
     /// The caller must ensure that the list index contains only unique elements
     /// Otherwise mutable aliased references would be created
     unsafe fn get_mut(self, collection: &mut C) -> GenCollectionResult<Self::Mut<'_>>;
@@ -3098,14 +3075,8 @@ where
     }
 }
 
-impl<
-        T: 'static,
-        C: GenCollection<T>,
-        L: 'static,
-        M1: Marker,
-        M2: Marker,
-        N: MarkedIndexList<L, M2>,
-    > MarkedIndexList<L, Cons<M1, M2>> for Cons<GenIndex<T, C>, N>
+impl<T: 'static, C: GenCollection<T>, L: 'static, M1: Marker, M2: Marker, N: MarkedIndexList<L, M2>>
+    MarkedIndexList<L, Cons<M1, M2>> for Cons<GenIndex<T, C>, N>
 where
     L: Contains<C, M1>,
 {
@@ -3125,9 +3096,9 @@ where
     #[inline]
     unsafe fn get_mut(self, collection: &mut L) -> GenCollectionResult<Self::Mut<'_>> {
         let Cons { head, tail } = self;
-        let mut reborrow = NonNull::new_unchecked(collection);
+        let mut reborrow = unsafe { NonNull::new_unchecked(collection) };
         let head = collection.get_mut().get_mut(head)?;
-        let tail = tail.get_mut(reborrow.as_mut())?;
+        let tail = unsafe { tail.get_mut(reborrow.as_mut())? };
         Ok(Cons { head, tail })
     }
 
@@ -3148,14 +3119,8 @@ where
     }
 }
 
-impl<
-        T: 'static,
-        C: GenCollection<T>,
-        L: 'static,
-        M1: Marker,
-        M2: Marker,
-        N: MarkedIndexList<L, M2>,
-    > MarkedIndexList<L, Cons<M1, M2>> for Cons<Option<GenIndex<T, C>>, N>
+impl<T: 'static, C: GenCollection<T>, L: 'static, M1: Marker, M2: Marker, N: MarkedIndexList<L, M2>>
+    MarkedIndexList<L, Cons<M1, M2>> for Cons<Option<GenIndex<T, C>>, N>
 where
     L: Contains<C, M1>,
 {
@@ -3178,12 +3143,12 @@ where
     #[inline]
     unsafe fn get_mut(self, collection: &mut L) -> GenCollectionResult<Self::Mut<'_>> {
         let Cons { head, tail } = self;
-        let mut reborrow = NonNull::new_unchecked(collection);
+        let mut reborrow = unsafe { NonNull::new_unchecked(collection) };
         let head = match head {
             Some(index) => Some(collection.get_mut().get_mut(index)?),
             None => None,
         };
-        let tail = tail.get_mut(reborrow.as_mut())?;
+        let tail = unsafe { tail.get_mut(reborrow.as_mut())? };
         Ok(Cons { head, tail })
     }
 
@@ -3213,8 +3178,8 @@ where
 #[cfg(test)]
 mod test_marked_borrow {
     use crate::{
-        list_type, list_value, unpack_list, unpack_list_mut, CollectionType, Cons, GenCollection,
-        GenIndex, GenVec, MarkedBorrowList, MarkedIndexList, MarkedItemList, Nil,
+        CollectionType, Cons, GenCollection, GenIndex, GenVec, MarkedBorrowList, MarkedIndexList,
+        MarkedItemList, Nil, list_type, list_value, unpack_list, unpack_list_mut,
     };
 
     type StorageList = list_type![GenVec<u32>, GenVec<u16>, GenVec<String>, Nil];
@@ -3396,11 +3361,10 @@ where
     }
 
     unsafe fn sub_iter_mut<'a>(collection: &'a mut T) -> Self::MutIterator<'a> {
-        let mut reborrow = NonNull::new_unchecked(collection);
-        Cons::new(
-            collection.get_mut().into_iter(),
-            N::sub_iter_mut(reborrow.as_mut()),
-        )
+        let mut reborrow = unsafe { NonNull::new_unchecked(collection) };
+        Cons::new(collection.get_mut().into_iter(), unsafe {
+            N::sub_iter_mut(reborrow.as_mut())
+        })
     }
 }
 

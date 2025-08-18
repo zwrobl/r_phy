@@ -9,8 +9,8 @@ use type_kit::{DropGuard, GuardError, TypeGuard};
 use crate::{
     error::{ExtError, SafeGuardError},
     memory::{
-        allocator::{AllocationRaw, MemoryIndexRaw},
         MemoryRaw,
+        allocator::{AllocationRaw, MemoryIndexRaw},
     },
 };
 

@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use graphics::renderer::{Context, DrawMapper, RendererContext};
 use math::types::Vector2;
-use type_kit::{list_type, list_value, Cons, Nil};
+use type_kit::{Cons, Nil, list_type, list_value};
 use winit::{event::WindowEvent, event_loop::EventLoopWindowTarget, window::Window};
 
 use crate::system::{

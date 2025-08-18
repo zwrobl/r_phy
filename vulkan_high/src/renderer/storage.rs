@@ -1,6 +1,6 @@
 use std::{
     any::TypeId,
-    collections::{hash_map::Values, HashMap},
+    collections::{HashMap, hash_map::Values},
     convert::Infallible,
     hash::Hash,
     marker::PhantomData,
@@ -12,9 +12,9 @@ use graphics::{
 };
 
 use math::types::Matrix4;
-use type_kit::{unpack_list, Cons, Destroy};
+use type_kit::{Cons, Destroy, unpack_list};
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     resources::{
         command::{BindPipeline, DrawIndexed},
         descriptor::{Descriptor, DescriptorBindingData},
@@ -22,7 +22,6 @@ use vulkan_low::{
         pipeline::{GraphicsPipelineConfig, PushConstantRangeMapper},
         storage::ResourceIndexListBuilder,
     },
-    Context,
 };
 
 use crate::{
@@ -333,6 +332,15 @@ pub struct DrawCallRecorder<
     camera: Option<Descriptor<CameraDescriptorSet>>,
     storage: Option<DrawStorage>,
     _resources: PhantomData<ResourcePack<R, M, V, P>>,
+}
+
+impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList> Default
+    for DrawCallRecorder<R, M, V, P>
+{
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<R: Renderer, M: MaterialPackList, V: MeshPackList, P: GraphicsPipelinePackList>

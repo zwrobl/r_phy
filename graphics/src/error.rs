@@ -18,7 +18,7 @@ pub enum GraphicsError {
     MissingMeshData(PathBuf),
     MissingMaterialData(PathBuf),
     MissingVertexAttribute(VertexAttribute),
-    InvalidDrawCall { shader: ShaderHandle, model: Model },
+    InvalidDrawCall(Box<(ShaderHandle, Model)>),
     UnsupportedSemantics(gltf::Semantic),
     UnsupportedPrimitive(Mode),
     Base64DecodeError(base64::DecodeError),
@@ -34,7 +34,8 @@ impl Error for GraphicsError {}
 impl Display for GraphicsError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            GraphicsError::InvalidDrawCall { shader, model } => {
+            GraphicsError::InvalidDrawCall(boxed) => {
+                let (shader, model) = **boxed;
                 write!(
                     f,
                     "Invalid draw call: shader: {:?}, model: {:?}",

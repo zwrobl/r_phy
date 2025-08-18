@@ -5,15 +5,15 @@ use std::{convert::Infallible, fmt::Debug, marker::PhantomData, ops::Deref, ptr:
 use ash::vk;
 
 use crate::{
+    Context,
     device::AttachmentProperties,
     memory::DeviceLocal,
     resources::{
+        Resource, ResourceGuardError,
         error::{GuardError, ResourceError},
         image::{DescriptorImageInfo, Image, Image2D, ImageType, ImageView},
         render_pass::{RenderPass, RenderPassConfig},
-        Resource, ResourceGuardError,
     },
-    Context,
 };
 use type_kit::{Cons, Create, Destroy, DropGuard, FromGuard, GuardVec, Nil};
 
@@ -420,12 +420,12 @@ impl<A: AttachmentList> AttachmentReferences for AttachmentReferenceBuilder<A> {
             .into_iter()
             .zip(&framebuffer.attachments)
             .filter_map(|(reference, &attachment)| {
-                if let Some(usage) = reference.and_then(|r| r.try_get_usage()) {
-                    if usage == AttachmentUsage::Input {
-                        return Some(InputAttachment {
-                            image_view: attachment,
-                        });
-                    }
+                if let Some(usage) = reference.and_then(|r| r.try_get_usage())
+                    && usage == AttachmentUsage::Input
+                {
+                    return Some(InputAttachment {
+                        image_view: attachment,
+                    });
                 }
                 None
             })

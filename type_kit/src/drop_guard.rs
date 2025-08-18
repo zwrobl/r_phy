@@ -107,7 +107,7 @@ pub(crate) mod test_types {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_types::{FaillingCreate, FaillingDestroy, A, B, C, E};
+    use test_types::{A, B, C, E, FaillingCreate, FaillingDestroy};
 
     #[test]
     fn test_drop_guard_destroyed_before_drop() {

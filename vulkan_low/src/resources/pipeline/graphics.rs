@@ -1,15 +1,15 @@
 use std::marker::PhantomData;
 
 use crate::resources::{
+    Resource, ResourceGuardError,
     error::GuardError,
     framebuffer::AttachmentList,
     layout::{Layout, PipelineLayout, PushConstant, PushConstantList, PushRange},
     pipeline::{
-        get_pipeline_states_info, ModuleLoader, PipelineBindData, PushConstantData,
-        PushConstantDataRef,
+        ModuleLoader, PipelineBindData, PushConstantData, PushConstantDataRef,
+        get_pipeline_states_info,
     },
     render_pass::{RenderPass, RenderPassConfig, Subpass},
-    Resource, ResourceGuardError,
 };
 
 use super::PipelineStates;
@@ -47,7 +47,7 @@ use ash::vk;
 use bytemuck::AnyBitPattern;
 use type_kit::{Contains, Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec, Marker};
 
-use crate::{resources::error::ResourceError, Context};
+use crate::{Context, resources::error::ResourceError};
 
 #[derive(Debug)]
 pub struct GraphicsPipeline<T: GraphicsPipelineConfig> {
@@ -139,12 +139,11 @@ impl<T: GraphicsPipelineConfig> Create for GraphicsPipeline<T> {
             p_stages: stages.stages.as_ptr(),
             ..Default::default()
         }];
-        let &handle = unsafe {
-            context
+        let handle = unsafe {
+            let pipeline = context
                 .create_graphics_pipelines(vk::PipelineCache::null(), &create_infos, None)
-                .map_err(|(_, err)| err)?
-                .first()
-                .unwrap()
+                .map_err(|(_, err)| err)?;
+            pipeline[0]
         };
         Ok(GraphicsPipeline {
             handle,
@@ -206,7 +205,7 @@ impl<C: GraphicsPipelineConfig> GraphicsPipeline<C> {
     }
 
     #[inline]
-    pub fn map<'a, P: PushConstant + AnyBitPattern, M: Marker>(
+    pub fn map<P: PushConstant + AnyBitPattern, M: Marker>(
         &self,
         data: impl Into<P>,
     ) -> PushConstantData<P>

@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedIndexList, Marker};
 
 use crate::{
+    ComponentList, ExternalSystem,
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
     entity::{
         Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateMapper, Query, QueryWrite,
@@ -10,7 +11,6 @@ use crate::{
     },
     index::{EntityIndexTyped, PersistentIndexMap, PersistentIndexTyped},
     stage::{self, StageListBuilder, Strategy},
-    ComponentList, ExternalSystem,
 };
 
 pub enum UpdateResult<E: EntityComponentContext> {
@@ -57,6 +57,12 @@ pub struct ExternalSystemsSelector<E: EntityComponentContext, C: ExternalSystem>
     _phantom: PhantomData<(E, C)>,
 }
 
+impl<E: EntityComponentContext, C: ExternalSystem> Default for ExternalSystemsSelector<E, C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: EntityComponentContext, C: ExternalSystem> ExternalSystemsSelector<E, C> {
     pub fn new() -> Self {
         Self {
@@ -64,7 +70,7 @@ impl<E: EntityComponentContext, C: ExternalSystem> ExternalSystemsSelector<E, C>
         }
     }
 
-    pub fn next_stage<T: Strategy<E, C>>(&self) -> impl stage::Builder<E, C> {
+    pub fn next_stage<T: Strategy<E, C>>(&self) -> impl stage::Builder<E, C> + use<T, E, C> {
         StageListBuilder::<E, C, T, _, _>::new()
     }
 }
@@ -122,12 +128,12 @@ pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     where
         Self::Components: UpdateMapWriter<Self, M1>;
 
-    /// #Safety
+    /// # Safety
     /// Function returns reference to context update mapper without borrowing the context
     /// This can be safely done as long as the owning context is not moved or dropped
     /// because the update mapper is immutable and does not change during the lifetime of the context.
     /// User must ensure that the context outlives the reference,
-    unsafe fn get_update_mapper<'a>(&'a self) -> UpdateMapperRef<Self>;
+    unsafe fn get_update_mapper(&self) -> UpdateMapperRef<Self>;
 }
 
 impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
@@ -189,13 +195,11 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
                     self.update_mapper.update_in_place(entity, update.payload);
                     return UpdateResult::InPlace;
                 }
-            } else {
-                if let Some(mut entity) = archetype.try_pop_entity(update.index) {
-                    self.update_mapper.update_owned(&mut entity, update.payload);
-                    let builder = EntityBuilder::from_owned(entity);
-                    let persistent_index = self.persistent_entity_map.get_index(update.index);
-                    return UpdateResult::ArchetypeChanged((builder, persistent_index));
-                }
+            } else if let Some(mut entity) = archetype.try_pop_entity(update.index) {
+                self.update_mapper.update_owned(&mut entity, update.payload);
+                let builder = EntityBuilder::from_owned(entity);
+                let persistent_index = self.persistent_entity_map.get_index(update.index);
+                return UpdateResult::ArchetypeChanged((builder, persistent_index));
             }
         }
         UpdateResult::NotFound(update)
@@ -256,7 +260,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
         Self::Components::write_update_map(&mut self.update_mapper);
     }
 
-    unsafe fn get_update_mapper<'a>(&'a self) -> UpdateMapperRef<Self> {
+    unsafe fn get_update_mapper(&self) -> UpdateMapperRef<Self> {
         UpdateMapperRef::new(&self.update_mapper)
     }
 }

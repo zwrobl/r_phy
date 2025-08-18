@@ -1,15 +1,15 @@
 [package]
 name = "sandbox"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 default-run = "sandbox"
 
 [dependencies]
+winit = { workspace = true }
 math = { path = "../math" }
 system = { path = "../system" }
-winit = { workspace = true }
+entity = { path = "../entity" }
 physics = { path = "../physics" }
+type_kit = { path = "../type_kit" }
 graphics = { path = "../graphics" }
 vulkan_high = { path = "../vulkan_high" }
-entity = { path = "../entity" }
-type_kit = { path = "../type_kit" }

@@ -2,21 +2,21 @@ use std::{convert::Infallible, marker::PhantomData, ops::BitAndAssign};
 
 use ash::vk;
 use type_kit::{
-    list_type, unpack_list, Cons, Contains, Create, CreateResult, Destroy, DestroyResult,
-    FromGuard, GenVec, Marker, Nil,
+    Cons, Contains, Create, CreateResult, Destroy, DestroyResult, FromGuard, GenVec, Marker, Nil,
+    list_type, unpack_list,
 };
 
 use crate::{
+    Context,
     memory::{
+        AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
         allocator::{
             AllocReq, AllocationBorrow, AllocationStore, Allocator, AllocatorBuilder,
             AllocatorIndex, AllocatorIndexTyped, MemoryIndex, NoReleaseRange,
         },
         error::{MemoryError, MemoryResult},
         range::ByteRange,
-        AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
     },
-    Context,
 };
 
 use super::AllocationIndexTyped;

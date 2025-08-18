@@ -1,10 +1,10 @@
 use ash::vk;
-use bytemuck::{bytes_of, Pod};
+use bytemuck::{Pod, bytes_of};
 use type_kit::{Cons, Nil};
 
 use crate::{
     device::Device,
-    memory::{range::ByteRange, MemoryProperties},
+    memory::{MemoryProperties, range::ByteRange},
     resources::{
         buffer::Buffer,
         command::{BeginCommand, Command, FinishedCommand, Level, Lifetime, Operation, Secondary},
@@ -22,7 +22,7 @@ use crate::{
 };
 
 pub trait Recorder {
-    fn record<'a, 'b, T: Lifetime, L: Level, O: Operation>(
+    fn record<'a, T: Lifetime, L: Level, O: Operation>(
         &self,
         command: RecordingCommand<'a, T, L, O>,
     ) -> RecordingCommand<'a, T, L, O>;
@@ -63,7 +63,7 @@ impl Device {
     pub fn start_recording<T: Lifetime, L: Level, O: Operation>(
         &self,
         command: BeginCommand<T, L, O>,
-    ) -> RecordingCommand<T, L, O> {
+    ) -> RecordingCommand<'_, T, L, O> {
         let BeginCommand(command) = command;
         RecordingCommand(command, self)
     }
@@ -523,7 +523,7 @@ impl<V: ImageType, M: MemoryProperties> Image<V, M> {
         &self,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
-    ) -> ChangeImageLayout<V, M> {
+    ) -> ChangeImageLayout<'_, V, M> {
         ChangeImageLayout {
             image: self,
             old_layout,
@@ -743,7 +743,7 @@ pub struct GenerateMip<'a, V: ImageType, M: MemoryProperties> {
 
 impl<V: ImageType, M: MemoryProperties> Image<V, M> {
     #[inline]
-    pub fn generate_mip(&mut self, array_layer: u32) -> GenerateMip<V, M> {
+    pub fn generate_mip(&mut self, array_layer: u32) -> GenerateMip<'_, V, M> {
         GenerateMip {
             image: self,
             array_layer,
@@ -825,6 +825,12 @@ impl<R: Recorder, N: Recorder> Recorder for Cons<R, N> {
 
 pub struct CommandList<T: Recorder> {
     commands: T,
+}
+
+impl Default for CommandList<Nil> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CommandList<Nil> {

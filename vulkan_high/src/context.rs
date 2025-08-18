@@ -1,7 +1,7 @@
 use graphics::error::GraphicsResult;
 use graphics::model::ModelTyped;
-use graphics::renderer::camera::CameraMatrices;
 use graphics::renderer::DrawMapper;
+use graphics::renderer::camera::CameraMatrices;
 use graphics::shader::Shader;
 use math::types::Matrix4;
 use type_kit::{Cons, Contains, Destroy, Marker, Nil};
@@ -64,11 +64,11 @@ pub struct VulkanContextBuilder<
 }
 
 impl<
-        R: Renderer,
-        P: GraphicsPipelineListBuilder + DrawMapper,
-        M: MaterialPackListBuilder,
-        V: MeshPackListBuilder,
-    > ContextBuilder for VulkanContextBuilder<R, P, M, V>
+    R: Renderer,
+    P: GraphicsPipelineListBuilder + DrawMapper,
+    M: MaterialPackListBuilder,
+    V: MeshPackListBuilder,
+> ContextBuilder for VulkanContextBuilder<R, P, M, V>
 {
     type Materials = M;
     type Shaders = P;
@@ -179,7 +179,7 @@ impl<
     where
         Self::Shaders: Contains<Vec<Shader<N, T>>, K>,
     {
-        ShaderHandleTyped::new(push_and_get_index(self.shaders.get_mut(), shader.into()))
+        ShaderHandleTyped::new(push_and_get_index(self.shaders.get_mut(), shader))
     }
 }
 
@@ -207,12 +207,12 @@ fn push_and_get_index<V>(vec: &mut Vec<V>, value: V) -> u32 {
 }
 
 impl<
-        'a,
-        M: MaterialPackList + 'static,
-        V: MeshPackList + 'static,
-        S: GraphicsPipelinePackList + 'static,
-        R: Renderer,
-    > graphics::renderer::RendererContext for VulkanRendererContext<'a, M, V, S, R>
+    'a,
+    M: MaterialPackList + 'static,
+    V: MeshPackList + 'static,
+    S: GraphicsPipelinePackList + 'static,
+    R: Renderer,
+> graphics::renderer::RendererContext for VulkanRendererContext<'a, M, V, S, R>
 {
     type Shaders = S;
     type Materials = M;

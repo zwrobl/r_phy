@@ -3,14 +3,14 @@ use std::convert::Infallible;
 use type_kit::{Create, Destroy, DestroyResult, GenCell};
 
 use crate::{
+    Context,
     memory::{
+        AllocReqTyped, MemoryProperties,
         allocator::{
             AllocationBorrow, AllocationStore, AllocatorIndex, AllocatorIndexTyped, NoReleaseRange,
         },
         error::{MemoryError, MemoryResult},
-        AllocReqTyped, MemoryProperties,
     },
-    Context,
 };
 
 use super::{AllocationIndexTyped, Allocator};

@@ -1,17 +1,19 @@
 use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
-use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard};
+use type_kit::{Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, unpack_list};
 
 use graphics::model::{Mesh, Vertex};
 use vulkan_low::{
+    Context,
     error::ExtError,
     index_list,
     memory::{
+        DeviceLocal,
         allocator::{AllocatorBuilder, AllocatorIndex},
         range::Range,
-        DeviceLocal,
     },
     resources::{
+        Partial,
         buffer::{
             BufferInfoBuilder, BufferPartial, BufferUsage, SharingMode, StagingBuffer,
             StagingBufferBuilder, StagingBufferPartial,
@@ -19,9 +21,7 @@ use vulkan_low::{
         command::{DrawIndexed, Graphics, IndexType, Operation},
         error::{ResourceError, ResourceResult},
         storage::ResourceIndexListBuilder,
-        Partial,
     },
-    Context,
 };
 
 use crate::resources::mesh::PackBufferBindings;

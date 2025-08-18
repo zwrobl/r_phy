@@ -8,11 +8,11 @@ use ash::{self, vk};
 use type_kit::{Create, Destroy, DestroyResult, FromGuard};
 
 use crate::{
+    Context,
     memory::{
         allocator::{AllocationIndex, AllocationIndexTyped},
         error::{MemoryError, MemoryResult},
     },
-    Context,
 };
 
 #[derive(Debug)]

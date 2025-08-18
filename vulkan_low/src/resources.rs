@@ -17,7 +17,7 @@ use type_kit::{
     GuardError, GuardIndex, Marked, Marker, TypedNil,
 };
 
-use crate::{memory::allocator::AllocatorBuilder, resources::error::ResourceError, Context};
+use crate::{Context, memory::allocator::AllocatorBuilder, resources::error::ResourceError};
 
 pub trait Resource:
     FromGuard<Inner = Self::RawType>
@@ -82,7 +82,7 @@ impl<R: Resource> FromGuard for ResourceIndex<R> {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            index: GuardIndex::<R, R::RawCollection>::from_inner(inner),
+            index: unsafe { GuardIndex::<R, R::RawCollection>::from_inner(inner) },
         }
     }
 }

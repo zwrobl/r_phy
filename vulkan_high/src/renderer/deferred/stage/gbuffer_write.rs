@@ -1,11 +1,11 @@
 use std::convert::Infallible;
 
 use type_kit::{
-    dependency_list, list_type, unpack_list, Cons, Dependency, Destroy, ListMutType, Nil, Task,
-    TypedNil,
+    Cons, Dependency, Destroy, ListMutType, Nil, Task, TypedNil, dependency_list, list_type,
+    unpack_list,
 };
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     resources::{
         command::{Graphics, NextRenderPass, PersistentCommandPool, Secondary},
         error::ResourceError,
@@ -13,17 +13,16 @@ use vulkan_low::{
         render_pass::RenderPass,
         storage::ResourceIndexListBuilder,
     },
-    Context,
 };
 
 use crate::renderer::{
+    DestroyTerminator, ExternalResources, ResourceCell,
     deferred::{
         presets::{AttachmentsGBuffer, DeferedRenderPass, GBufferWritePass},
         stage::draw_skybox::DrawSkybox,
     },
     frame::FrameCell,
     storage::DrawStorage,
-    DestroyTerminator, ExternalResources, ResourceCell,
 };
 
 pub struct GBufferWrite;

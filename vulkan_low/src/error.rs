@@ -4,7 +4,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use ash::{vk, LoadingError};
+use ash::{LoadingError, vk};
 use graphics::error::GraphicsError;
 use type_kit::{DropGuard, GenCollectionError, TypeGuard, TypeGuardError};
 use winit::raw_window_handle::HandleError;

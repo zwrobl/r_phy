@@ -3,13 +3,13 @@ use std::any::type_name;
 use graphics::model::{MaterialCollection, MaterialTypeList};
 use type_kit::{Cons, Destroy, Nil, TypedNil};
 use vulkan_low::{
+    Context,
     error::VkResult,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::Partial,
-    Context,
 };
 
-use crate::resources::{allocate_material_pack_memory, prepare_material_pack, DummyPack};
+use crate::resources::{DummyPack, allocate_material_pack_memory, prepare_material_pack};
 
 use super::{Material, MaterialPack, MaterialPackPartial, MaterialPackRef};
 
@@ -54,7 +54,7 @@ pub trait MaterialPackListPartial: Sized {
     fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B);
 
     fn allocate(self, context: &Context, allocator: Option<AllocatorIndex>)
-        -> VkResult<Self::Pack>;
+    -> VkResult<Self::Pack>;
 }
 
 impl MaterialPackListPartial for TypedNil<DummyPack> {

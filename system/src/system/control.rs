@@ -12,7 +12,7 @@ use math::{
     types::{Matrix3, Quat, Vector3},
 };
 
-use type_kit::{list_type, unpack_list, Cons, Marker, Nil, RefList, UContains};
+use type_kit::{Cons, Marker, Nil, RefList, UContains, list_type, unpack_list};
 
 use crate::system::{
     command::{self, CommandQueue},

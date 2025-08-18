@@ -4,17 +4,17 @@ use std::{
     marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{Receiver, Sender, channel},
     },
 };
 
 use type_kit::{Marker, UContains};
 
 use crate::{
+    ComponentData,
     context::{EntityComponentContext, EntityUpdateType, UpdateResult},
     entity::{ComponentUpdate, EntityBuilder, EntityUpdate, UpdatePayload},
     index::EntityIndexTyped,
-    ComponentData,
 };
 
 pub struct OperationSender<E: EntityComponentContext> {
@@ -59,8 +59,33 @@ pub struct OperationQueue<E: EntityComponentContext> {
     sender: Option<OperationSender<E>>,
 }
 
+impl<E: EntityComponentContext> Default for OperationQueue<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: EntityComponentContext> OperationQueue<E> {
-    pub fn take_channel(&mut self) -> OperationChannel<E> {
+    pub fn new() -> Self {
+        let (push_sender, push_receiver) = channel();
+        let (pop_sender, pop_receiver) = channel();
+        let (update_sender, update_receiver) = channel();
+        Self {
+            num_added: AtomicUsize::new(0),
+            sender: Some(OperationSender {
+                push: push_sender,
+                pop: pop_sender,
+                update: update_sender,
+            }),
+            receiver: OperationReceiver {
+                push: push_receiver,
+                pop: pop_receiver,
+                update: update_receiver,
+            },
+        }
+    }
+
+    pub fn take_channel(&mut self) -> OperationChannel<'_, E> {
         OperationChannel {
             num_added: &self.num_added,
             sender: self.sender.take().unwrap(),
@@ -184,26 +209,5 @@ impl<E: EntityComponentContext> OperationQueue<E> {
         builders
             .into_iter()
             .for_each(|entity| world.push_entity(entity, None));
-    }
-}
-
-impl<E: EntityComponentContext> OperationQueue<E> {
-    pub fn new() -> Self {
-        let (push_sender, push_receiver) = channel();
-        let (pop_sender, pop_receiver) = channel();
-        let (update_sender, update_receiver) = channel();
-        Self {
-            num_added: AtomicUsize::new(0),
-            sender: Some(OperationSender {
-                push: push_sender,
-                pop: pop_sender,
-                update: update_sender,
-            }),
-            receiver: OperationReceiver {
-                push: push_receiver,
-                pop: pop_receiver,
-                update: update_receiver,
-            },
-        }
     }
 }

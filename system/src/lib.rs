@@ -2,9 +2,9 @@ pub mod error;
 pub mod system;
 
 use entity::{
+    EntityComponentSystem,
     context::{ComponentListType, EntityComponentContext, ExternalSystemsSelector},
     entity::{EntityBuilder, UpdateMapWriter},
-    EntityComponentSystem,
 };
 use type_kit::Marker;
 use winit::{
@@ -15,7 +15,7 @@ use winit::{
 
 use std::{marker::PhantomData, time::Instant};
 
-use graphics::renderer::{create_context, ContextBuilder, Renderer, RendererBuilder};
+use graphics::renderer::{ContextBuilder, Renderer, RendererBuilder, create_context};
 
 use crate::{
     error::{SystemError, SystemResult},
@@ -75,11 +75,8 @@ pub struct Scene<
     _phantom: PhantomData<E>,
 }
 
-impl<
-        E: EntityComponentContext,
-        D: EntityComponentSystem<E, SharedSystemsList>,
-        B: ContextBuilder,
-    > Scene<E, D, B>
+impl<E: EntityComponentContext, D: EntityComponentSystem<E, SharedSystemsList>, B: ContextBuilder>
+    Scene<E, D, B>
 {
     pub fn get_entity_builder(&self) -> EntityBuilder<E> {
         self.entity_context.get_entity_builder()
@@ -92,12 +89,12 @@ impl<
 }
 
 impl<R: Renderer> Loop<R> {
-    pub fn renderer_context_builder(&self) -> impl ContextBuilder<Renderer = R> {
+    pub fn renderer_context_builder(&self) -> impl ContextBuilder<Renderer = R> + use<R> {
         R::context_builder()
     }
 
-    pub fn system_builder<'a, E: EntityComponentContext>(
-        &'a self,
+    pub fn system_builder<E: EntityComponentContext>(
+        &self,
     ) -> ExternalSystemsSelector<E, SharedSystemsList> {
         E::with_external::<SharedSystemsList>()
     }
@@ -111,7 +108,7 @@ impl<R: Renderer> Loop<R> {
         &self,
         builder: B,
         systems: S,
-    ) -> Scene<E, impl EntityComponentSystem<E, SharedSystemsList>, B>
+    ) -> Scene<E, impl EntityComponentSystem<E, SharedSystemsList> + use<R, E, S, B, M>, B>
     where
         ComponentListType<E>: UpdateMapWriter<E, M>,
     {

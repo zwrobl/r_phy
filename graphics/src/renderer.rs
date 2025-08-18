@@ -32,7 +32,7 @@ impl DrawMapper for Nil {
         model: Model,
         _: &Matrix4,
     ) -> GraphicsResult<()> {
-        Err(GraphicsError::InvalidDrawCall { shader, model })
+        Err(GraphicsError::InvalidDrawCall(Box::new((shader, model))))
     }
 }
 
@@ -101,6 +101,10 @@ pub fn create_context<B: ContextBuilder>(
     })
 }
 
+pub type NextMaterial<B, N> = Cons<Vec<N>, <B as ContextBuilder>::Materials>;
+pub type NextMesh<B, N> = Cons<Vec<Mesh<N>>, <B as ContextBuilder>::Meshes>;
+pub type NextShader<B, N, T> = Cons<Vec<Shader<N, T>>, <B as ContextBuilder>::Shaders>;
+
 pub trait ContextBuilder {
     type Shaders: DrawMapper;
     type Materials;
@@ -114,7 +118,7 @@ pub trait ContextBuilder {
         self,
     ) -> impl ContextBuilder<
         Renderer = Self::Renderer,
-        Materials = Cons<Vec<N>, Self::Materials>,
+        Materials = NextMaterial<Self, N>,
         Shaders = Self::Shaders,
         Meshes = Self::Meshes,
     >;
@@ -125,7 +129,7 @@ pub trait ContextBuilder {
         Renderer = Self::Renderer,
         Materials = Self::Materials,
         Shaders = Self::Shaders,
-        Meshes = Cons<Vec<Mesh<N>>, Self::Meshes>,
+        Meshes = NextMesh<Self, N>,
     >;
 
     fn with_shader_type<N: Vertex, T: Material>(
@@ -133,24 +137,24 @@ pub trait ContextBuilder {
     ) -> impl ContextBuilder<
         Renderer = Self::Renderer,
         Materials = Self::Materials,
-        Shaders = Cons<Vec<Shader<N, T>>, Self::Shaders>,
+        Shaders = NextShader<Self, N, T>,
         Meshes = Self::Meshes,
     >;
 
-    fn add_material<N: Material, T: Marker>(&mut self, material: N) -> MaterialHandleTyped<N>
+    fn add_material<N: Material, M: Marker>(&mut self, material: N) -> MaterialHandleTyped<N>
     where
-        Self::Materials: Contains<Vec<N>, T>;
+        Self::Materials: Contains<Vec<N>, M>;
 
-    fn add_mesh<N: Vertex, T: Marker>(&mut self, mesh: Mesh<N>) -> MeshHandleTyped<N>
+    fn add_mesh<N: Vertex, M: Marker>(&mut self, mesh: Mesh<N>) -> MeshHandleTyped<N>
     where
-        Self::Meshes: Contains<Vec<Mesh<N>>, T>;
+        Self::Meshes: Contains<Vec<Mesh<N>>, M>;
 
-    fn add_shader<N: Vertex, T: Material, K: Marker>(
+    fn add_shader<N: Vertex, M1: Material, M2: Marker>(
         &mut self,
-        shader: Shader<N, T>,
-    ) -> ShaderHandleTyped<Shader<N, T>>
+        shader: Shader<N, M1>,
+    ) -> ShaderHandleTyped<Shader<N, M1>>
     where
-        Self::Shaders: Contains<Vec<Shader<N, T>>, K>;
+        Self::Shaders: Contains<Vec<Shader<N, M1>>, M2>;
 }
 
 pub trait RendererContext {

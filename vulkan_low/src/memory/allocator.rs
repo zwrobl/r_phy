@@ -21,13 +21,13 @@ use type_kit::{
 };
 
 use crate::{
+    Context,
     memory::{
-        error::{MemoryError, MemoryResult},
-        range::ByteRange,
         AllocReq, AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties,
         MemoryRaw,
+        error::{MemoryError, MemoryResult},
+        range::ByteRange,
     },
-    Context,
 };
 
 pub type MemoryIndex<M> = GuardIndex<Memory<M>, GuardVec<MemoryRaw>>;
@@ -78,7 +78,7 @@ impl<M: MemoryProperties> Allocation<M> {
     pub unsafe fn cast<T: MemoryProperties>(self) -> Allocation<T> {
         Allocation {
             range: self.range,
-            memory: MemoryIndex::<T>::from_inner(self.memory.into_inner()),
+            memory: unsafe { MemoryIndex::<T>::from_inner(self.memory.into_inner()) },
         }
     }
 }
@@ -99,7 +99,7 @@ impl<M: MemoryProperties> FromGuard for Allocation<M> {
         let inner: AllocationRaw = inner;
         Self {
             range: inner.range,
-            memory: MemoryIndex::<M>::from_inner(inner.memory),
+            memory: unsafe { MemoryIndex::<M>::from_inner(inner.memory) },
         }
     }
 }
@@ -128,12 +128,12 @@ where
         allocation: AllocationIndexTyped<M>,
     ) -> MemoryResult<()>;
 
-    fn borrow<'a, M: MemoryProperties>(
+    fn borrow<M: MemoryProperties>(
         &mut self,
         allocation: AllocationIndexTyped<M>,
     ) -> MemoryResult<AllocationBorrow<M>>;
 
-    fn put_back<'a, M: MemoryProperties>(
+    fn put_back<M: MemoryProperties>(
         &mut self,
         allocation: AllocationBorrow<M>,
     ) -> MemoryResult<()>;
@@ -163,7 +163,7 @@ pub enum AllocationIndex {
 
 impl AllocationIndex {
     #[inline]
-    fn into_inner(&self) -> AllocationIndexRaw {
+    fn into_inner(self) -> AllocationIndexRaw {
         match self {
             Self::DeviceLocal(index) => index.into_inner(),
             Self::HostCoherent(index) => index.into_inner(),
@@ -190,7 +190,7 @@ impl<M: MemoryProperties> FromGuard for AllocationIndexTyped<M> {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            index: GuardIndex::<Allocation<M>, _>::from_inner(inner.index),
+            index: unsafe { GuardIndex::<Allocation<M>, _>::from_inner(inner.index) },
         }
     }
 }

@@ -1,22 +1,22 @@
 use ash::vk;
 use std::{convert::Infallible, fmt::Debug, marker::PhantomData, ptr::NonNull};
 use type_kit::{
-    unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GenCell,
-    GenIndexRaw, TypeGuard,
+    Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GenCell, GenIndexRaw,
+    TypeGuard, unpack_list,
 };
 
 use crate::{
+    Context,
     error::ExtResult,
     index_list,
     resources::{
+        Resource, ResourceGuardError, ResourceIndex,
         error::{GuardError, ResourceError, ResourceResult},
         framebuffer::{Extent2D, FramebufferBuilder, FramebufferRaw},
         image::{Image2D, ImageView, ImageViewCreateInfo},
         render_pass::RenderPassConfig,
-        Resource, ResourceGuardError, ResourceIndex,
     },
     surface::PhysicalDeviceSurfaceProperties,
-    Context,
 };
 
 use crate::{
@@ -87,7 +87,7 @@ impl<C: RenderPassConfig> Resource for Swapchain<C> {
     #[inline]
     fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
         ResourceError::GuardError(GuardError::Swapchain {
-            error: (DropGuard::new(resource), err),
+            error: Box::new((DropGuard::new(resource), err)),
         })
     }
 }

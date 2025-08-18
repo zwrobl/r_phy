@@ -129,11 +129,11 @@ impl<L: VertexBindingList> VertexBindingBuilder<L> {
         binding: u32,
         mut iter: impl Iterator<Item = &'a mut vk::VertexInputBindingDescription>,
     ) {
-        if !N::exhausted() {
-            if let Some(entry) = iter.next() {
-                *entry = N::Item::get_binding_description(binding);
-                Self::next_binding_description::<N::Next>(binding + 1, iter);
-            }
+        if !N::exhausted()
+            && let Some(entry) = iter.next()
+        {
+            *entry = N::Item::get_binding_description(binding);
+            Self::next_binding_description::<N::Next>(binding + 1, iter);
         }
     }
 
@@ -147,11 +147,11 @@ impl<L: VertexBindingList> VertexBindingBuilder<L> {
         binding: u32,
         mut iter: impl Iterator<Item = &'a mut Vec<vk::VertexInputAttributeDescription>>,
     ) {
-        if !N::exhausted() {
-            if let Some(entry) = iter.next() {
-                *entry = N::Item::get_attribute_descriptions(binding);
-                Self::next_attribute_descriptions::<N::Next>(binding + 1, iter)
-            }
+        if !N::exhausted()
+            && let Some(entry) = iter.next()
+        {
+            *entry = N::Item::get_attribute_descriptions(binding);
+            Self::next_attribute_descriptions::<N::Next>(binding + 1, iter)
         }
     }
 
@@ -217,10 +217,10 @@ impl<B: Blend> ColorBlend for ColorBlendBuilder<B> {
             .get_references()
             .into_iter()
             .filter_map(|reference| {
-                if let Some(reference) = reference {
-                    if reference.try_get_usage() == Some(AttachmentUsage::Color) {
-                        return Some(B::BLEND);
-                    }
+                if let Some(reference) = reference
+                    && reference.try_get_usage() == Some(AttachmentUsage::Color)
+                {
+                    return Some(B::BLEND);
                 }
                 None
             })
@@ -268,14 +268,14 @@ pub struct PipelineStatesBuilder<
 }
 
 impl<
-        I: VertexInput,
-        A: VertexAssembly,
-        D: DepthStencil,
-        R: Rasterization,
-        V: Viewport,
-        C: ColorBlend,
-        M: Multisample,
-    > Default for PipelineStatesBuilder<I, A, D, R, V, C, M>
+    I: VertexInput,
+    A: VertexAssembly,
+    D: DepthStencil,
+    R: Rasterization,
+    V: Viewport,
+    C: ColorBlend,
+    M: Multisample,
+> Default for PipelineStatesBuilder<I, A, D, R, V, C, M>
 {
     fn default() -> Self {
         Self {
@@ -286,14 +286,14 @@ impl<
 
 #[allow(dead_code)]
 impl<
-        I: VertexInput,
-        A: VertexAssembly,
-        D: DepthStencil,
-        R: Rasterization,
-        V: Viewport,
-        C: ColorBlend,
-        M: Multisample,
-    > PipelineStatesBuilder<I, A, D, R, V, C, M>
+    I: VertexInput,
+    A: VertexAssembly,
+    D: DepthStencil,
+    R: Rasterization,
+    V: Viewport,
+    C: ColorBlend,
+    M: Multisample,
+> PipelineStatesBuilder<I, A, D, R, V, C, M>
 {
     pub fn builder() -> Self {
         Self::default()
@@ -345,14 +345,14 @@ impl<
 }
 
 impl<
-        I: VertexInput,
-        A: VertexAssembly,
-        D: DepthStencil,
-        R: Rasterization,
-        V: Viewport,
-        C: ColorBlend,
-        M: Multisample,
-    > PipelineStates for PipelineStatesBuilder<I, A, D, R, V, C, M>
+    I: VertexInput,
+    A: VertexAssembly,
+    D: DepthStencil,
+    R: Rasterization,
+    V: Viewport,
+    C: ColorBlend,
+    M: Multisample,
+> PipelineStates for PipelineStatesBuilder<I, A, D, R, V, C, M>
 {
     type VertexInput = I;
     type VertexAssembly = A;

@@ -11,26 +11,28 @@ use std::{
 
 use graphics::{renderer::camera::CameraMatrices, shader::ShaderType};
 use type_kit::{
-    list_type, list_value, unpack_list, Cons, Create, Destroy, DropGuard, Executor,
-    SynchronousExecutor, TypedNil,
+    Cons, Create, Destroy, DropGuard, Executor, SynchronousExecutor, TypedNil, list_type,
+    list_value, unpack_list,
 };
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
+        Partial, ResourceIndex,
         command::{Graphics, PersistentCommandPool, Secondary},
         descriptor::{Descriptor, DescriptorSetMapper},
         error::{ResourceError, ResourceResult, ShaderResult},
         layout::presets::CameraDescriptorSet,
         pipeline::{GraphicsPipelineConfig, ModuleLoader, Modules, ShaderDirectory},
         storage::ResourceIndexListBuilder,
-        Partial, ResourceIndex,
     },
-    Context,
 };
 
 use crate::{
+    VulkanContext,
     renderer::{
+        DestroyTerminator, ExternalResources, Renderer, RendererBuilder, RendererContext,
+        ResourceCell, ShaderDescriptor,
         deferred::{
             presets::{
                 AttachmentsGBuffer, DeferedRenderPass, GBufferWritePass, PipelineLayoutMaterial,
@@ -45,11 +47,8 @@ use crate::{
         },
         frame::{Frame, FrameCell, FramePool, FramePoolPartial},
         storage::DrawStorage,
-        DestroyTerminator, ExternalResources, Renderer, RendererBuilder, RendererContext,
-        ResourceCell, ShaderDescriptor,
     },
     resources::{GraphicsPipelinePackList, SkyboxPartial},
-    VulkanContext,
 };
 
 pub type DeferredFrameData = list_type![
@@ -163,14 +162,14 @@ pub struct DeferredRendererContext<
 }
 
 impl<
-        'b,
-        E: Executor<
-                InitializerList = DeferredFrameData,
-                TaskError = ResourceError,
-                TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
-            > + 'static,
-        P: GraphicsPipelinePackList,
-    > Destroy for DeferredRendererContext<'b, E, P>
+    'b,
+    E: Executor<
+            InitializerList = DeferredFrameData,
+            TaskError = ResourceError,
+            TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
+        > + 'static,
+    P: GraphicsPipelinePackList,
+> Destroy for DeferredRendererContext<'b, E, P>
 where
     for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
     <E::Resources as Destroy>::DestroyError: Into<Infallible>,
@@ -188,14 +187,14 @@ where
 }
 
 impl<
-        'b,
-        E: Executor<
-                InitializerList = DeferredFrameData,
-                TaskError = ResourceError,
-                TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
-            > + 'static,
-        P: GraphicsPipelinePackList,
-    > RendererContext for DeferredRendererContext<'b, E, P>
+    'b,
+    E: Executor<
+            InitializerList = DeferredFrameData,
+            TaskError = ResourceError,
+            TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
+        > + 'static,
+    P: GraphicsPipelinePackList,
+> RendererContext for DeferredRendererContext<'b, E, P>
 where
     for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
     <E::Resources as Destroy>::DestroyError: Into<Infallible>,
@@ -223,18 +222,18 @@ where
                 draw_calls,
                 TypedNil::<DestroyTerminator>::new()
             ])?;
-        let _ = self.renderer.frame_pool.present(context, frame)?;
+        self.renderer.frame_pool.present(context, frame)?;
         Ok(())
     }
 }
 
 impl<
-        E: Executor<
-                InitializerList = DeferredFrameData,
-                TaskError = ResourceError,
-                TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
-            > + 'static,
-    > Renderer for DeferredRenderer<E>
+    E: Executor<
+            InitializerList = DeferredFrameData,
+            TaskError = ResourceError,
+            TaskResult = Frame<DeferedRenderPass<AttachmentsGBuffer>>,
+        > + 'static,
+> Renderer for DeferredRenderer<E>
 where
     for<'a> E::Resources: Destroy<Context<'a> = &'a Context>,
     <E::Resources as Destroy>::DestroyError: Into<Infallible>,
@@ -302,7 +301,7 @@ impl RendererBuilder for DeferredRendererBuilder {
 
     #[inline]
     fn new(context: &Rc<VulkanContext>, config: Self::Config) -> ResourceResult<Self> {
-        let partial = DeferredRendererPartial::create(config, &context)?;
+        let partial = DeferredRendererPartial::create(config, context)?;
         Ok(DeferredRendererBuilder {
             context: context.clone(),
             allocator: None,
@@ -318,7 +317,7 @@ impl RendererBuilder for DeferredRendererBuilder {
         }
     }
 
-    fn build<'a>(self) -> ResourceResult<impl Renderer> {
+    fn build(self) -> ResourceResult<impl Renderer> {
         let Self {
             context,
             allocator,

@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset};
 
 use crate::{
+    EntityComponentSystem, EntityComponentSystemContext, ExternalSystem,
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
     entity::{Query, QueryWrite, UpdateMapWriter},
     operation::{OperationChannel, OperationQueue},
@@ -10,13 +11,12 @@ use crate::{
         self, GlobalSystem, GlobalSystemExecutor, System, SystemExecutor, SystemList,
         SystemListBuilder,
     },
-    EntityComponentSystem, EntityComponentSystemContext, ExternalSystem,
 };
 
 pub trait StageList<E: EntityComponentContext, C: ExternalSystem> {
     type SystemList: SystemList<E, C>;
 
-    fn execute<'a>(&self, context: &mut E, external: &C);
+    fn execute(&self, context: &mut E, external: &C);
 
     fn component_write(&self) -> EntityQueryType<E>;
 }
@@ -25,7 +25,7 @@ impl<E: EntityComponentContext, C: ExternalSystem> StageList<E, C> for Nil {
     type SystemList = Nil;
 
     #[inline]
-    fn execute<'a>(&self, _context: &mut E, _external: &C) {}
+    fn execute(&self, _context: &mut E, _external: &C) {}
 
     #[inline]
     fn component_write(&self) -> EntityQueryType<E> {
@@ -67,7 +67,7 @@ impl<E: EntityComponentContext, C: ExternalSystem> Strategy<E, C> for Synchronou
         queue: OperationChannel<'_, E>,
         systems: &T,
     ) {
-        let executor = system::Synchronous::new();
+        let executor = system::Synchronous;
         systems.execute(executor, context, queue, external);
     }
 }
@@ -94,7 +94,7 @@ impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, S: Strat
     }
 
     #[inline]
-    pub fn execute<'a>(&self, context: &mut E, external: &C) {
+    pub fn execute(&self, context: &mut E, external: &C) {
         let mut queue = OperationQueue::new();
         S::execute(context, external, queue.take_channel(), &self.systems);
         queue.process(context);
@@ -107,17 +107,17 @@ impl<E: EntityComponentContext, C: ExternalSystem, L: SystemList<E, C>, S: Strat
 }
 
 impl<
-        E: EntityComponentContext,
-        C: ExternalSystem,
-        L: SystemList<E, C>,
-        N: StageList<E, C>,
-        S: Strategy<E, C>,
-    > StageList<E, C> for Cons<Stage<E, C, L, S>, N>
+    E: EntityComponentContext,
+    C: ExternalSystem,
+    L: SystemList<E, C>,
+    N: StageList<E, C>,
+    S: Strategy<E, C>,
+> StageList<E, C> for Cons<Stage<E, C, L, S>, N>
 {
     type SystemList = L;
 
     #[inline]
-    fn execute<'a>(&self, context: &mut E, external: &C) {
+    fn execute(&self, context: &mut E, external: &C) {
         self.tail.execute(context, external);
         self.head.execute(context, external);
     }
@@ -129,29 +129,29 @@ impl<
 }
 
 pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
-    fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+    fn with_system<M1: Marker, M2: Marker, M3: Marker, N: System<E>>(
         self,
         system: N,
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>;
+            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+        N::External: Subset<C, M3>;
 
-    fn with_global_system<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+    fn with_global_system<M1: Marker, M2: Marker, N: GlobalSystem<E>>(
         self,
         system: N,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>;
+        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::External: Subset<C, M2>;
 
     fn next_stage<T: Strategy<E, C>>(self) -> impl Builder<E, C>;
 
-    fn build<M2: Marker>(self) -> impl EntityComponentSystem<E, C>
+    fn build<M: Marker>(self) -> impl EntityComponentSystem<E, C>
     where
-        ComponentListType<E>: UpdateMapWriter<E, M2>;
+        ComponentListType<E>: UpdateMapWriter<E, M>;
 }
 
 pub struct StageListBuilder<
@@ -164,6 +164,14 @@ pub struct StageListBuilder<
     builder: L,
     stages: S,
     _marker: PhantomData<(E, C, T)>,
+}
+
+impl<E: EntityComponentContext, C: ExternalSystem, T: Strategy<E, C>> Default
+    for StageListBuilder<E, C, T, SystemListBuilder<E, C, Nil>, Nil>
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<E: EntityComponentContext, C: ExternalSystem, T: Strategy<E, C>>
@@ -179,22 +187,22 @@ impl<E: EntityComponentContext, C: ExternalSystem, T: Strategy<E, C>>
 }
 
 impl<
-        E: EntityComponentContext,
-        C: ExternalSystem,
-        T: Strategy<E, C>,
-        L: system::Builder<E, C>,
-        S: StageList<E, C>,
-    > Builder<E, C> for StageListBuilder<E, C, T, L, S>
+    E: EntityComponentContext,
+    C: ExternalSystem,
+    T: Strategy<E, C>,
+    L: system::Builder<E, C>,
+    S: StageList<E, C>,
+> Builder<E, C> for StageListBuilder<E, C, T, L, S>
 {
-    fn with_system<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+    fn with_system<M1: Marker, M2: Marker, M3: Marker, N: System<E>>(
         self,
         system: N,
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>,
+            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+        N::External: Subset<C, M3>,
     {
         let system = SystemExecutor::new(system);
         if !system
@@ -211,13 +219,13 @@ impl<
         }
     }
 
-    fn with_global_system<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+    fn with_global_system<M1: Marker, M2: Marker, N: GlobalSystem<E>>(
         self,
         system: N,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::External: Subset<C, M2>,
     {
         let system = GlobalSystemExecutor::new(system);
         if !system

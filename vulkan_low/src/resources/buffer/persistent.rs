@@ -6,13 +6,13 @@ use std::{
 use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
-    memory::{allocator::AllocatorIndex, HostCoherent},
+    Context,
+    memory::{HostCoherent, allocator::AllocatorIndex},
     resources::{
+        Resource, ResourceGuardError,
         buffer::{Buffer, BufferPartial, BufferRaw},
         error::{GuardError, ResourceError},
-        Resource, ResourceGuardError,
     },
-    Context,
 };
 
 #[derive(Debug)]
@@ -61,7 +61,7 @@ impl FromGuard for PersistentBuffer {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            buffer: Buffer::<HostCoherent>::from_inner(inner),
+            buffer: unsafe { Buffer::<HostCoherent>::from_inner(inner) },
         }
     }
 }
@@ -102,7 +102,7 @@ impl Resource for PersistentBuffer {
     #[inline]
     fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
         ResourceError::GuardError(GuardError::Buffer {
-            error: (DropGuard::new(resource), err),
+            error: Box::new((DropGuard::new(resource), err)),
         })
     }
 }

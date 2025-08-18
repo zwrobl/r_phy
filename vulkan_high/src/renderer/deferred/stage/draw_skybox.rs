@@ -1,11 +1,11 @@
 use std::convert::Infallible;
 
 use type_kit::{
-    dependency_list, list_type, unpack_list, Cons, Create, Dependency, Destroy, ListMutType, Nil,
-    Task, TypedNil,
+    Cons, Create, Dependency, Destroy, ListMutType, Nil, Task, TypedNil, dependency_list,
+    list_type, unpack_list,
 };
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     memory::allocator::AllocatorIndex,
     resources::{
         command::{Graphics, NextRenderPass, PersistentCommandPool, Secondary},
@@ -13,11 +13,11 @@ use vulkan_low::{
         render_pass::RenderPass,
         storage::ResourceIndexListBuilder,
     },
-    Context,
 };
 
 use crate::{
     renderer::{
+        DestroyTerminator, ExternalResources, ResourceCell,
         deferred::{
             presets::{
                 AttachmentsGBuffer, DeferedRenderPass, GBufferSkyboxPass, GBufferSkyboxPipeline,
@@ -25,7 +25,6 @@ use crate::{
             stage::depth_prepass::DepthPrepass,
         },
         frame::FrameCell,
-        DestroyTerminator, ExternalResources, ResourceCell,
     },
     resources::{Skybox, SkyboxPartial},
 };

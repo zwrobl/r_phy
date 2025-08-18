@@ -1,12 +1,12 @@
 [package]
 name = "system"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-type_kit= { path = "../type_kit" }
-math = { path = "../math" }
-winit = { workspace = true }
-entity = { path = "../entity" }
-graphics = { path = "../graphics" }
 strum = { workspace = true }
+winit = { workspace = true }
+math = { path = "../math" }
+entity = { path = "../entity" }
+type_kit = { path = "../type_kit" }
+graphics = { path = "../graphics" }

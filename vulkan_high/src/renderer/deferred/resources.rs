@@ -1,13 +1,14 @@
 use std::convert::Infallible;
 
-use type_kit::{unpack_list, Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard};
+use type_kit::{Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, unpack_list};
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     memory::{
-        allocator::{AllocatorBuilder, AllocatorIndex},
         DeviceLocal,
+        allocator::{AllocatorBuilder, AllocatorIndex},
     },
     resources::{
+        Partial, ResourceIndex,
         descriptor::{DescriptorPool, DescriptorSetWriter},
         error::ResourceError,
         framebuffer::{
@@ -18,9 +19,7 @@ use vulkan_low::{
         render_pass::Subpass,
         storage::ResourceIndexListBuilder,
         swapchain::SwapchainFramebufferConfigBuilder,
-        Partial, ResourceIndex,
     },
-    Context,
 };
 
 use crate::renderer::deferred::presets::{

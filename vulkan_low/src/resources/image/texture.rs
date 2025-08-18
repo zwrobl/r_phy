@@ -8,20 +8,20 @@ use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
+    Context,
     memory::{
-        allocator::{AllocatorBuilder, AllocatorIndex},
         DeviceLocal,
+        allocator::{AllocatorBuilder, AllocatorIndex},
     },
     resources::{
+        Partial, Resource, ResourceGuardError,
         buffer::{StagingBuffer, StagingBufferBuilder, StagingBufferPartial},
         error::{GuardError, ResourceError},
         image::{
-            sampler, Image, ImagePartial, ImageRaw, ImageType, Linear, Sampler, SamplerCreateInfo,
-            SamplerRaw,
+            Image, ImagePartial, ImageRaw, ImageType, Linear, Sampler, SamplerCreateInfo,
+            SamplerRaw, sampler,
         },
-        Partial, Resource, ResourceGuardError,
     },
-    Context,
 };
 
 pub struct TexturePartial<V: ImageType, R: ImageReader<Type = V>> {
@@ -173,8 +173,8 @@ impl<V: ImageType> FromGuard for Texture<V> {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            image: Image::from_inner(inner.image),
-            sampler: Sampler::from_inner(inner.sampler),
+            image: unsafe { Image::from_inner(inner.image) },
+            sampler: unsafe { Sampler::from_inner(inner.sampler) },
         }
     }
 }
@@ -186,7 +186,7 @@ impl<V: ImageType> Resource for Texture<V> {
     #[inline]
     fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
         ResourceError::GuardError(GuardError::Texture {
-            error: (DropGuard::new(resource), err),
+            error: Box::new((DropGuard::new(resource), err)),
         })
     }
 }

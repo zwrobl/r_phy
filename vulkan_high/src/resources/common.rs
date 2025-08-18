@@ -10,13 +10,13 @@ use physics::shape;
 use strum::EnumCount;
 use type_kit::{Create, CreateResult, Destroy};
 use vulkan_low::{
+    Context,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
+        Partial,
         command::{DrawIndexed, Level, Lifetime, Operation, Recorder, RecordingCommand},
         error::ResourceError,
-        Partial,
     },
-    Context,
 };
 
 use crate::resources::{MeshPack, MeshPackPartial};
@@ -117,7 +117,7 @@ pub struct CommonDraw<'a> {
 
 impl CommonResources {
     #[inline]
-    pub fn draw(&self, mesh: CommonMesh) -> CommonDraw {
+    pub fn draw(&self, mesh: CommonMesh) -> CommonDraw<'_> {
         let mesh = self.meshes.get(mesh as usize).into();
         CommonDraw {
             resources: self,

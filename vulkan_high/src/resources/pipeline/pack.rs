@@ -2,12 +2,12 @@ use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 use vulkan_low::{
+    Context,
     error::VkError,
     resources::{
-        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader},
         RawIndex, ResourceIndex,
+        pipeline::{GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader},
     },
-    Context,
 };
 
 #[derive(Debug)]

@@ -351,20 +351,23 @@ pub trait TypeList: Sized {
     }
 
     #[inline]
-    fn sub_ref<'a, M: Marker, S: Subset<Self, M>>(&'a self) -> S::RefList<'a> {
+    fn sub_ref<M: Marker, S: Subset<Self, M>>(&self) -> S::RefList<'_> {
         S::sub_get(self)
     }
 
+    /// # Safety
+    /// User must ensure that the subset list does not contain duplicate elements.
+    /// Otherwise aliased mutable references may be created, leading to undefined behavior.
     #[inline]
-    unsafe fn sub_mut<'a, M: Marker, S: Subset<Self, M>>(&'a mut self) -> S::MutList<'a> {
-        S::sub_get_mut(self)
+    unsafe fn sub_mut<M: Marker, S: Subset<Self, M>>(&mut self) -> S::MutList<'_> {
+        unsafe { S::sub_get_mut(self) }
     }
 
-    fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a>;
+    fn unwrap_ref(opt: Self::RefListOpt<'_>) -> Self::RefList<'_>;
 
-    fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a>;
+    fn unwrap_mut(opt: Self::MutListOpt<'_>) -> Self::MutList<'_>;
 
-    fn unwrap_owned<'a>(opt: Self::OptList) -> Self;
+    fn unwrap_owned(opt: Self::OptList) -> Self;
 }
 
 impl<N> TypeList for TypedNil<N> {
@@ -411,7 +414,7 @@ impl<N> TypeList for TypedNil<N> {
         opt
     }
 
-    fn unwrap_owned<'a>(opt: Self::OptList) -> Self {
+    fn unwrap_owned(opt: Self::OptList) -> Self {
         opt
     }
 }
@@ -442,7 +445,7 @@ impl<T: 'static> TypeList for Fin<T> {
         opt.unwrap()
     }
 
-    fn unwrap_owned<'a>(opt: Self::OptList) -> Self {
+    fn unwrap_owned(opt: Self::OptList) -> Self {
         Fin::new(opt.unwrap())
     }
 }
@@ -489,7 +492,7 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
         Cons::new(opt.head.unwrap(), N::unwrap_mut(opt.tail))
     }
 
-    fn unwrap_owned<'a>(opt: Self::OptList) -> Self {
+    fn unwrap_owned(opt: Self::OptList) -> Self {
         Cons::new(opt.head.unwrap(), N::unwrap_owned(opt.tail))
     }
 }
@@ -503,7 +506,7 @@ impl<T: TypeList + 'static> StaticTypeList for T {}
 
 #[cfg(test)]
 mod test_macro {
-    use crate::{list_type, list_value, unpack_any, Cons, Nil};
+    use crate::{Cons, Nil, list_type, list_value, unpack_any};
 
     trait AssertEqualTypes<A, B> {}
 
@@ -745,7 +748,7 @@ where
 #[cfg(test)]
 mod test_type_list_create_destroy {
     use super::*;
-    use crate::drop_guard::test_types::{FaillingCreate, FaillingDestroy, A, C};
+    use crate::drop_guard::test_types::{A, C, FaillingCreate, FaillingDestroy};
     use crate::drop_guard::{Create, Destroy};
 
     type TestTypeList = list_type![A, A, A, A, A, TypedNil<A>];
@@ -805,34 +808,29 @@ pub trait Subset<L, T: Marker>: TypeList {
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a>;
 
     /// # Safety
-    /// If subset lists each element uniquely, then
-    /// it is safe to obtain mutable references to the superset contained items by reborrowing
-    /// the superset mutable reference. Otherwise, multiple mutable references to the same
-    /// element may be obtained, which is not allowed and may cause undefined behavior due to aliasing mutable references.
-    ///
     /// User must ensure that the subset list does not contain duplicate elements.
-    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a>;
+    /// Otherwise aliased mutable references may be created, leading to undefined behavior.
+    unsafe fn sub_get_mut(superset: &mut L) -> Self::MutList<'_>;
 
     fn sub_write(self, superset: &mut L);
 }
 
 pub trait SubsetCopy<L, T: Marker>: TypeList + Clone + Copy {
-    fn sub_copy<'a>(superset: &'a L) -> Self;
+    fn sub_copy(superset: &L) -> Self;
 }
 
 impl<T: 'static, L, M: Marker> Subset<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
-    fn sub_get<'a>(_superset: &'a L) -> Self::RefList<'a> {
+    fn sub_get(_superset: &L) -> Self::RefList<'_> {
         TypedNil::new()
     }
 
-    unsafe fn sub_get_mut<'a>(_superset: &'a mut L) -> Self::MutList<'a> {
+    unsafe fn sub_get_mut(_superset: &mut L) -> Self::MutList<'_> {
         TypedNil::new()
     }
 
-    // No need to write anything to the superset for an empty subset
     fn sub_write(self, _superset: &mut L) {}
 }
 
@@ -840,7 +838,7 @@ impl<T: 'static, L, M: Marker> SubsetCopy<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
-    fn sub_copy<'a>(superset: &'a L) -> Self {
+    fn sub_copy(superset: &L) -> Self {
         *superset.get()
     }
 }
@@ -853,14 +851,16 @@ where
     L: Contains<T, M1>,
 {
     #[inline]
-    fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a> {
+    fn sub_get(superset: &L) -> Self::RefList<'_> {
         Cons::new(superset.get(), N::sub_get(superset))
     }
 
     #[inline]
-    unsafe fn sub_get_mut<'a>(superset: &'a mut L) -> Self::MutList<'a> {
-        let mut reborrow = NonNull::new_unchecked(superset);
-        Cons::new(superset.get_mut(), N::sub_get_mut(reborrow.as_mut()))
+    unsafe fn sub_get_mut(superset: &mut L) -> Self::MutList<'_> {
+        let mut reborrow = unsafe { NonNull::new_unchecked(superset) };
+        Cons::new(superset.get_mut(), unsafe {
+            N::sub_get_mut(reborrow.as_mut())
+        })
     }
 
     #[inline]
@@ -876,7 +876,7 @@ impl<T: 'static + Clone + Copy, L, M1: Marker, M2: Marker, N: SubsetCopy<L, M2>>
 where
     L: Contains<T, M1>,
 {
-    fn sub_copy<'a>(superset: &'a L) -> Self {
+    fn sub_copy(superset: &L) -> Self {
         Cons::new(*superset.get(), N::sub_copy(superset))
     }
 }
@@ -888,19 +888,23 @@ where
 // making the syntax more complex and less ergonomic than directly using Subset methods
 // Temporary left here for future reference and potential improvements.
 pub trait Superset<L: TypeList, T: Marker> {
-    fn super_get<'a>(&'a self) -> L::RefList<'a>;
-    unsafe fn super_get_mut<'a>(&'a mut self) -> L::MutList<'a>;
+    fn super_get(&self) -> L::RefList<'_>;
+
+    /// # Safety
+    /// User must ensure that the subset list does not contain duplicate elements.
+    /// Otherwise aliased mutable references may be created, leading to undefined behavior.
+    unsafe fn super_get_mut(&mut self) -> L::MutList<'_>;
 }
 
 impl<T, L: TypeList, M: Marker> Superset<L, M> for T
 where
     L: Subset<T, M>,
 {
-    fn super_get<'a>(&'a self) -> L::RefList<'a> {
+    fn super_get(&self) -> L::RefList<'_> {
         L::sub_get(self)
     }
-    unsafe fn super_get_mut<'a>(&'a mut self) -> L::MutList<'a> {
-        L::sub_get_mut(self)
+    unsafe fn super_get_mut(&mut self) -> L::MutList<'_> {
+        unsafe { L::sub_get_mut(self) }
     }
 }
 

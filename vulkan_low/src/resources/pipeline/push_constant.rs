@@ -38,10 +38,12 @@ impl PushConstantRangeMapper {
                     None
                 }
             })
-            .expect(&format!(
-                "Failed to map push constant of type {:?}",
-                TypeId::of::<P>()
-            ))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Failed to map push constant of type {:?}",
+                    TypeId::of::<P>()
+                )
+            })
     }
 
     pub fn map<P: PushConstant + Pod>(&self, data: impl Into<P>) -> PushConstantData<P> {
@@ -59,10 +61,12 @@ impl PushConstantRangeMapper {
                     None
                 }
             })
-            .expect(&format!(
-                "Failed to map push constant of type {:?}",
-                TypeId::of::<P>()
-            ))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Failed to map push constant of type {:?}",
+                    TypeId::of::<P>()
+                )
+            })
     }
 
     fn get_next_range<L: PushConstantList>(

@@ -7,12 +7,12 @@ pub use recording::*;
 use ash::{self, vk};
 
 use crate::{
+    Device,
     error::ExtResult,
     resources::{
         framebuffer::FramebufferHandle,
         render_pass::{RenderPass, RenderPassConfig, Subpass},
     },
-    Device,
 };
 
 use std::{any::type_name, fmt::Debug, marker::PhantomData};

@@ -1,12 +1,14 @@
 use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 
-use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard};
+use type_kit::{Cons, Create, Destroy, DestroyResult, DropGuard, FromGuard, unpack_list};
 
 use vulkan_low::{
+    Context,
     error::VkResult,
     index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
+        Partial, ResourceIndex,
         buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
         command::Graphics,
         descriptor::{Descriptor, DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
@@ -15,9 +17,7 @@ use vulkan_low::{
         layout::presets::{FragmentStage, PodUniform},
         pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
         storage::ResourceIndexListBuilder,
-        Partial, ResourceIndex,
     },
-    Context,
 };
 
 use super::{Material, TextureSamplers};

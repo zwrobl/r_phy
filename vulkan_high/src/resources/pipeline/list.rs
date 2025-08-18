@@ -2,7 +2,7 @@ use std::any::type_name;
 
 use graphics::shader::ShaderType;
 use type_kit::{Cons, Create, Destroy, Nil, TypeList};
-use vulkan_low::{error::VkResult, resources::pipeline::GraphicsPipelineConfig, Context};
+use vulkan_low::{Context, error::VkResult, resources::pipeline::GraphicsPipelineConfig};
 
 use crate::renderer::Renderer;
 
@@ -44,18 +44,18 @@ impl<T: ShaderType, N: GraphicsPipelineListBuilder> GraphicsPipelineListBuilder
 pub trait GraphicsPipelinePackList: TypeList + 'static {
     fn destroy(&mut self, _context: &Context);
 
-    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>>;
-    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<P>;
+    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<'_, P>>;
+    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<'_, P>;
 }
 
 impl GraphicsPipelinePackList for Nil {
     fn destroy(&mut self, _context: &Context) {}
 
-    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>> {
+    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<'_, P>> {
         None
     }
 
-    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<P> {
+    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<'_, P> {
         panic!(
             "No pipeline pack found for the requested type: {}",
             type_name::<P>()
@@ -71,7 +71,7 @@ impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> Graphi
         self.tail.destroy(context);
     }
 
-    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<P>> {
+    fn try_get<P: GraphicsPipelineConfig>(&self) -> Option<PipelinePackRef<'_, P>> {
         if let Ok(pipelines) = (&self.head).try_into() {
             Some(pipelines)
         } else {
@@ -79,7 +79,7 @@ impl<T: GraphicsPipelineConfig + ShaderType, N: GraphicsPipelinePackList> Graphi
         }
     }
 
-    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<P> {
+    fn get<P: GraphicsPipelineConfig>(&self) -> PipelinePackRef<'_, P> {
         if let Ok(pipelines) = (&self.head).try_into() {
             pipelines
         } else {

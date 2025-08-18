@@ -1,8 +1,8 @@
 use std::{
     marker::PhantomData,
     sync::{
-        mpsc::{Receiver, Sender},
         Mutex,
+        mpsc::{Receiver, Sender},
     },
 };
 
@@ -16,14 +16,14 @@ use entity::{
 use graphics::{
     model::Model,
     renderer::{
-        camera::{Camera, ProjectionMatrix},
         Context, DrawMapper, RendererContext,
+        camera::{Camera, ProjectionMatrix},
     },
     shader::ShaderHandle,
 };
 use math::transform::Transform;
 use type_kit::{
-    list_type, unpack_any, unpack_list, Cons, Contains, Fin, GenVec, Marker, Nil, RefList,
+    Cons, Contains, Fin, GenVec, Marker, Nil, RefList, list_type, unpack_any, unpack_list,
 };
 
 #[derive(Clone, Copy)]
@@ -98,6 +98,12 @@ impl<E: EntityComponentContext> System<E> for DrawCommandSystem {
 
 pub struct CameraCell {
     matrices: Mutex<Option<Camera>>,
+}
+
+impl Default for CameraCell {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CameraCell {

@@ -12,15 +12,15 @@ use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
+    Context,
     memory::{
-        allocator::{AllocationEntry, AllocationEntryTyped, AllocatorBuilder, AllocatorIndex},
         AllocReqTyped, BindResource, HostCoherent, MemoryProperties,
+        allocator::{AllocationEntry, AllocationEntryTyped, AllocatorBuilder, AllocatorIndex},
     },
     resources::{
-        error::{GuardError, ResourceError, ResourceResult},
         Partial, ResourceGuardError,
+        error::{GuardError, ResourceError, ResourceResult},
     },
-    Context,
 };
 
 use super::Resource;
@@ -236,7 +236,7 @@ impl<M: MemoryProperties> FromGuard for Buffer<M> {
             buffer: inner.buffer,
             size: inner.size,
             ptr: inner.ptr,
-            allocation: AllocationEntryTyped::<M>::from_inner(inner.allocation),
+            allocation: unsafe { AllocationEntryTyped::<M>::from_inner(inner.allocation) },
         }
     }
 }
@@ -248,7 +248,7 @@ impl<M: MemoryProperties> Resource for Buffer<M> {
     #[inline]
     fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
         ResourceError::GuardError(GuardError::Buffer {
-            error: (DropGuard::new(resource), err),
+            error: Box::new((DropGuard::new(resource), err)),
         })
     }
 }

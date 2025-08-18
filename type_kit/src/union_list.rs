@@ -39,10 +39,18 @@ impl<T, U: UnionList> UnionList for UCons<T, U> {
 
 pub trait UContains<C, M: Marker>: UnionList {
     fn new(value: C) -> Self;
+    /// # Safety
+    /// User must ensure that the union contains C variant
     unsafe fn take(self) -> C;
+    /// # Safety
+    /// User must ensure that the union contains C variant
     unsafe fn get(&self) -> &C;
+    /// # Safety
+    /// User must ensure that the union contains C variant
     unsafe fn get_mut(&mut self) -> &mut C;
-    unsafe fn drop(&mut self);
+    /// # Safety
+    /// User must ensure that the union contains C variant
+    unsafe fn drop_variant(&mut self);
 }
 
 impl<C> UContains<C, Here> for UFin<C> {
@@ -52,19 +60,19 @@ impl<C> UContains<C, Here> for UFin<C> {
     }
 
     unsafe fn take(mut self) -> C {
-        ManuallyDrop::take(&mut self.head)
+        unsafe { ManuallyDrop::take(&mut self.head) }
     }
 
     unsafe fn get(&self) -> &C {
-        &self.head
+        unsafe { &self.head }
     }
 
     unsafe fn get_mut(&mut self) -> &mut C {
-        &mut self.head
+        unsafe { &mut self.head }
     }
 
-    unsafe fn drop(&mut self) {
-        ManuallyDrop::drop(&mut self.head);
+    unsafe fn drop_variant(&mut self) {
+        unsafe { ManuallyDrop::drop(&mut self.head) }
     }
 }
 
@@ -75,19 +83,19 @@ impl<C, N: UnionList> UContains<C, Here> for UCons<C, N> {
     }
 
     unsafe fn take(mut self) -> C {
-        ManuallyDrop::take(&mut self.head)
+        unsafe { ManuallyDrop::take(&mut self.head) }
     }
 
     unsafe fn get(&self) -> &C {
-        &self.head
+        unsafe { &self.head }
     }
 
     unsafe fn get_mut(&mut self) -> &mut C {
-        &mut self.head
+        unsafe { &mut self.head }
     }
 
-    unsafe fn drop(&mut self) {
-        ManuallyDrop::drop(&mut self.head);
+    unsafe fn drop_variant(&mut self) {
+        unsafe { ManuallyDrop::drop(&mut self.head) };
     }
 }
 
@@ -98,19 +106,19 @@ impl<T, C, M: Marker, N: UContains<C, M>> UContains<C, There<M>> for UCons<T, N>
     }
 
     unsafe fn take(mut self) -> C {
-        ManuallyDrop::take(&mut self.tail).take()
+        unsafe { ManuallyDrop::take(&mut self.tail).take() }
     }
 
     unsafe fn get(&self) -> &C {
-        self.tail.get()
+        unsafe { self.tail.get() }
     }
 
     unsafe fn get_mut(&mut self) -> &mut C {
-        self.tail.get_mut()
+        unsafe { self.tail.get_mut() }
     }
 
-    unsafe fn drop(&mut self) {
-        self.tail.drop();
+    unsafe fn drop_variant(&mut self) {
+        unsafe { self.tail.drop_variant() }
     }
 }
 
@@ -153,7 +161,7 @@ impl<C, U: UnionList> UnionGuard<C, U> {
     where
         U: UContains<C, M>,
     {
-        unsafe { &*self.data.as_ref().unwrap().get() }
+        unsafe { self.data.as_ref().unwrap().get() }
     }
 
     #[inline]
@@ -161,16 +169,16 @@ impl<C, U: UnionList> UnionGuard<C, U> {
     where
         U: UContains<C, M>,
     {
-        unsafe { &mut *self.data.as_mut().unwrap().get_mut() }
+        unsafe { self.data.as_mut().unwrap().get_mut() }
     }
 
     #[inline]
-    pub fn drop<M: Marker>(&mut self)
+    pub fn drop_variant<M: Marker>(&mut self)
     where
         U: UContains<C, M>,
     {
         let mut data = self.data.take().unwrap();
-        unsafe { data.drop() }
+        unsafe { data.drop_variant() }
     }
 }
 
@@ -197,7 +205,7 @@ impl<C: Copy, U: UnionList + Copy> UnionValue<C, U> {
     where
         U: UContains<C, M>,
     {
-        unsafe { &*self.data.get() }
+        unsafe { self.data.get() }
     }
 
     #[inline]
@@ -205,7 +213,7 @@ impl<C: Copy, U: UnionList + Copy> UnionValue<C, U> {
     where
         U: UContains<C, M>,
     {
-        unsafe { &mut *self.data.get_mut() }
+        unsafe { self.data.get_mut() }
     }
 }
 
@@ -249,6 +257,6 @@ mod tests {
         assert_eq!(*guard.get(), "Hello");
         *guard.get_mut() = "World".to_string();
         assert_eq!(*guard.get(), "World");
-        guard.drop();
+        guard.drop_variant();
     }
 }

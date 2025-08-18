@@ -11,15 +11,15 @@ use std::{convert::Infallible, fmt::Debug, marker::PhantomData};
 use ash::vk;
 
 use crate::{
+    Context,
     memory::{
-        allocator::{AllocationEntry, AllocationEntryTyped, AllocatorBuilder, AllocatorIndex},
         AllocReqTyped, BindResource, DeviceLocal, MemoryProperties,
+        allocator::{AllocationEntry, AllocationEntryTyped, AllocatorBuilder, AllocatorIndex},
     },
     resources::{
-        error::{GuardError, ResourceError, ResourceResult},
         Partial, ResourceGuardError,
+        error::{GuardError, ResourceError, ResourceResult},
     },
-    Context,
 };
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
@@ -278,8 +278,8 @@ impl<V: ImageType, M: MemoryProperties> FromGuard for Image<V, M> {
             image: inner.image,
             image_info: inner.image_info,
             layout: inner.layout,
-            allocation: AllocationEntryTyped::from_inner(inner.allocation),
-            view: ImageView::from_inner(inner.view),
+            allocation: unsafe { AllocationEntryTyped::from_inner(inner.allocation) },
+            view: unsafe { ImageView::from_inner(inner.view) },
         }
     }
 }
@@ -291,7 +291,7 @@ impl<V: ImageType, M: MemoryProperties> Resource for Image<V, M> {
     #[inline]
     fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
         ResourceError::GuardError(GuardError::Image {
-            error: (DropGuard::new(resource), err),
+            error: Box::new((DropGuard::new(resource), err)),
         })
     }
 }

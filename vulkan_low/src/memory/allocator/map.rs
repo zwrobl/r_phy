@@ -5,17 +5,17 @@ use type_kit::{
 };
 
 use crate::{
+    Context,
     error::ExtError,
     memory::{
+        AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties, MemoryRaw,
         allocator::{
             Allocation, AllocationBorrow, AllocationIndexTyped, AllocationRaw, MemoryIndex,
             MemoryIndexRaw,
         },
         error::{MemoryError, MemoryResult},
         range::ByteRange,
-        AllocReqTyped, DeviceLocal, HostCoherent, HostVisible, Memory, MemoryProperties, MemoryRaw,
     },
-    Context,
 };
 
 pub trait MemoryRange: Debug + From<ByteRange> {
@@ -116,7 +116,7 @@ impl<R: MemoryRange> MemoryMap<R> {
         if let Some(range) = self.get_usage::<M>(memory)?.try_alloc(req) {
             Ok(Allocation::new(memory, range))
         } else {
-            Err(MemoryError::OutOfMemory.into())
+            Err(MemoryError::OutOfMemory)
         }
     }
 

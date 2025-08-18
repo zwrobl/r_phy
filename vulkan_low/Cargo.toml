@@ -1,16 +1,16 @@
 [package]
 name = "vulkan_low"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
+png = { workspace = true }
 ash = { workspace = true }
+strum = { workspace= true }
 winit = { workspace = true }
 colored = { workspace = true }
 bytemuck = { workspace = true }
 math = { path = "../math" }
-type_kit= { path = "../type_kit" }
-strum = { workspace= true }
-png = "0.17.13"
 physics = { path = "../physics" } 
-graphics = {path = "../graphics" }
+type_kit = { path = "../type_kit" }
+graphics = { path = "../graphics" }

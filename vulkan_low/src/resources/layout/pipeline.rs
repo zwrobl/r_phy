@@ -3,6 +3,7 @@ use std::{any::TypeId, convert::Infallible, marker::PhantomData};
 use ash::vk;
 
 use crate::{
+    Context,
     resources::{
         descriptor::DescriptorWriteInfo,
         error::{ResourceError, ResourceResult},
@@ -11,7 +12,6 @@ use crate::{
         },
         storage::TypeUniqueResource,
     },
-    Context,
 };
 use type_kit::{Cons, Contains, Create, Destroy, FromGuard, Marker, Nil};
 
@@ -131,12 +131,12 @@ impl<N: PushConstantList> PushConstantRanges<N> {
         offset: u32,
         mut iter: impl Iterator<Item = &'a mut vk::PushConstantRange>,
     ) {
-        if !T::exhausted() {
-            if let Some(entry) = iter.next() {
-                let range = T::Item::range(offset);
-                *entry = range;
-                Self::next_push_range::<T::Next>(offset + range.size, iter)
-            }
+        if !T::exhausted()
+            && let Some(entry) = iter.next()
+        {
+            let range = T::Item::range(offset);
+            *entry = range;
+            Self::next_push_range::<T::Next>(offset + range.size, iter)
         }
     }
 

@@ -1,23 +1,23 @@
 use std::convert::Infallible;
 
-use type_kit::{list_type, unpack_list, Cons, Destroy, ListMutType, Nil, Task, TypedNil};
+use type_kit::{Cons, Destroy, ListMutType, Nil, Task, TypedNil, list_type, unpack_list};
 use vulkan_low::{
+    Context,
     resources::{
         error::ResourceError,
         framebuffer::{ClearColor, ClearDeptStencil, ClearNone, ClearValueBuilder},
         render_pass::RenderPass,
     },
-    Context,
 };
 
 use crate::renderer::{
+    DestroyTerminator, ExternalResources,
     deferred::{
-        presets::{AttachmentsGBuffer, DeferedRenderPass},
         DeferredFrameData,
+        presets::{AttachmentsGBuffer, DeferedRenderPass},
     },
     frame::FrameCell,
     storage::DrawStorage,
-    DestroyTerminator, ExternalResources,
 };
 pub struct LoadResources;
 

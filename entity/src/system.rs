@@ -6,11 +6,11 @@ use type_kit::{
 };
 
 use crate::{
+    ArchetypeRef, ComponentData, ExternalSystem,
     context::{ComponentListType, EntityComponentContext, EntityQueryType, EntityUpdateType},
     entity::{ComponentUpdate, EntityUpdate, Query, QueryWrite},
     index::{EntityIndex, EntityIndexTyped},
     operation::OperationChannel,
-    ArchetypeRef, ComponentData, ExternalSystem,
 };
 
 pub trait System<E: EntityComponentContext>: Sync {
@@ -18,16 +18,16 @@ pub trait System<E: EntityComponentContext>: Sync {
     type WriteList: TypeList;
     type Components: NonEmptyList;
 
-    fn execute<'a>(
+    fn execute(
         &self,
         entity: EntityIndex,
-        components: RefList<'a, Self::Components>,
+        components: RefList<'_, Self::Components>,
         context: &E,
         queue: &OperationChannel<'_, E>,
-        external: RefList<'a, Self::External>,
+        external: RefList<'_, Self::External>,
     );
 
-    fn get_entity_update<'a, C: ComponentData, M: Marker>(
+    fn get_entity_update<C: ComponentData, M: Marker>(
         &self,
         index: EntityIndexTyped<E>,
         component: ComponentUpdate<C>,
@@ -65,13 +65,7 @@ impl<'a, 'b, E: EntityComponentContext, C: ExternalSystem> Executor<'a, E, C> fo
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Synchronous {}
-
-impl Synchronous {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
+pub struct Synchronous;
 
 impl<'a, E: EntityComponentContext, C: ExternalSystem> Executor<'a, E, C> for Synchronous {
     fn execute<F: Fn() + Send + 'a>(&self, executor: F) {
@@ -181,13 +175,13 @@ impl<E: EntityComponentContext, C: ExternalSystem> SystemList<E, C> for Nil {
 }
 
 impl<
-        E: EntityComponentContext,
-        M3: Marker,
-        M2: Marker,
-        C: ExternalSystem,
-        S: System<E>,
-        N: SystemList<E, C>,
-    > SystemList<E, C> for Cons<SystemExecutor<E, M2, M3, C, S>, N>
+    E: EntityComponentContext,
+    M3: Marker,
+    M2: Marker,
+    C: ExternalSystem,
+    S: System<E>,
+    N: SystemList<E, C>,
+> SystemList<E, C> for Cons<SystemExecutor<E, M2, M3, C, S>, N>
 where
     S::Components: IntoSubsetIterator<ComponentListType<E>, M2>,
     S::External: Subset<C, M3>,
@@ -218,12 +212,12 @@ where
 }
 
 impl<
-        E: EntityComponentContext,
-        M2: Marker,
-        C: ExternalSystem,
-        S: GlobalSystem<E>,
-        N: SystemList<E, C>,
-    > SystemList<E, C> for Cons<GlobalSystemExecutor<E, M2, C, S>, N>
+    E: EntityComponentContext,
+    M2: Marker,
+    C: ExternalSystem,
+    S: GlobalSystem<E>,
+    N: SystemList<E, C>,
+> SystemList<E, C> for Cons<GlobalSystemExecutor<E, M2, C, S>, N>
 where
     S::External: Subset<C, M2>,
 {
@@ -249,23 +243,23 @@ where
 }
 
 pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
-    fn with_executor<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+    fn with_executor<M1: Marker, M2: Marker, M3: Marker, N: System<E>>(
         self,
-        system: SystemExecutor<E, M2, M5, C, N>,
+        system: SystemExecutor<E, M1, M3, C, N>,
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>;
+            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+        N::External: Subset<C, M3>;
 
-    fn with_global_executor<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+    fn with_global_executor<M1: Marker, M2: Marker, N: GlobalSystem<E>>(
         self,
-        system: GlobalSystemExecutor<E, M5, C, N>,
+        system: GlobalSystemExecutor<E, M2, C, N>,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>;
+        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::External: Subset<C, M2>;
 
     fn component_write(&self) -> EntityQueryType<E>;
 
@@ -275,6 +269,12 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
 pub struct SystemListBuilder<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> {
     systems: S,
     _marker: PhantomData<(E, C)>,
+}
+
+impl<E: EntityComponentContext, C: ExternalSystem> Default for SystemListBuilder<E, C, Nil> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<E: EntityComponentContext, C: ExternalSystem> SystemListBuilder<E, C, Nil> {
@@ -289,15 +289,15 @@ impl<E: EntityComponentContext, C: ExternalSystem> SystemListBuilder<E, C, Nil> 
 impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> Builder<E, C>
     for SystemListBuilder<E, C, S>
 {
-    fn with_executor<M2: Marker, M3: Marker, M4: Marker, M5: Marker, N: System<E>>(
+    fn with_executor<M1: Marker, M2: Marker, M3: Marker, N: System<E>>(
         self,
-        system: SystemExecutor<E, M2, M5, C, N>,
+        system: SystemExecutor<E, M1, M3, C, N>,
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M2> + QueryWrite<EntityQueryType<E>, M3>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>,
+            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+        N::External: Subset<C, M3>,
     {
         SystemListBuilder {
             systems: Cons::new(system, self.systems),
@@ -305,13 +305,13 @@ impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> Builder<
         }
     }
 
-    fn with_global_executor<M4: Marker, M5: Marker, N: GlobalSystem<E>>(
+    fn with_global_executor<M1: Marker, M2: Marker, N: GlobalSystem<E>>(
         self,
-        system: GlobalSystemExecutor<E, M5, C, N>,
+        system: GlobalSystemExecutor<E, M2, C, N>,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M4>,
-        N::External: Subset<C, M5>,
+        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::External: Subset<C, M2>,
     {
         SystemListBuilder {
             systems: Cons::new(system, self.systems),
@@ -332,14 +332,14 @@ pub trait GlobalSystem<E: EntityComponentContext>: Sync {
     type External: TypeList;
     type WriteList: TypeList;
 
-    fn execute<'a>(
+    fn execute(
         &self,
         context: &E,
         queue: &OperationChannel<'_, E>,
-        external: RefList<'a, Self::External>,
+        external: RefList<'_, Self::External>,
     );
 
-    fn get_entity_update<'a, C: ComponentData, M: Marker>(
+    fn get_entity_update<C: ComponentData, M: Marker>(
         &self,
         index: EntityIndexTyped<E>,
         component: ComponentUpdate<C>,
@@ -353,29 +353,29 @@ pub trait GlobalSystem<E: EntityComponentContext>: Sync {
 
 pub struct GlobalSystemExecutor<
     E: EntityComponentContext,
-    M3: Marker,
+    M: Marker,
     C: ExternalSystem,
     S: GlobalSystem<E>,
 > where
-    S::External: Subset<C, M3>,
+    S::External: Subset<C, M>,
 {
     write: EntityQueryType<E>,
     system: S,
-    _phantom: std::marker::PhantomData<(C, M3)>,
+    _phantom: std::marker::PhantomData<(C, M)>,
 }
 
-impl<E: EntityComponentContext, M3: Marker, C: ExternalSystem, S: GlobalSystem<E>>
-    GlobalSystemExecutor<E, M3, C, S>
+impl<E: EntityComponentContext, M1: Marker, C: ExternalSystem, S: GlobalSystem<E>>
+    GlobalSystemExecutor<E, M1, C, S>
 where
-    S::External: Subset<C, M3>,
+    S::External: Subset<C, M1>,
 {
     #[inline]
-    pub fn new<M5: Marker>(system: S) -> Self
+    pub fn new<M2: Marker>(system: S) -> Self
     where
-        S::WriteList: QueryWrite<EntityQueryType<E>, M5>,
+        S::WriteList: QueryWrite<EntityQueryType<E>, M2>,
     {
         Self {
-            write: <S::WriteList as QueryWrite<EntityQueryType<E>, M5>>::write(
+            write: <S::WriteList as QueryWrite<EntityQueryType<E>, M2>>::write(
                 EntityQueryType::<E>::default(),
             ),
             system,
@@ -384,12 +384,7 @@ where
     }
 
     #[inline]
-    pub fn execute<'a, 'b>(
-        &'a self,
-        context: &E,
-        operation_queue: &OperationChannel<'a, E>,
-        external: &C,
-    ) {
+    pub fn execute(&self, context: &E, operation_queue: &OperationChannel<'_, E>, external: &C) {
         self.system
             .execute(context, operation_queue, S::External::sub_get(external));
     }

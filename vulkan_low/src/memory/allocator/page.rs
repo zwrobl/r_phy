@@ -3,12 +3,12 @@ use std::convert::Infallible;
 use type_kit::{Create, Destroy, DestroyResult, GenVec};
 
 use crate::{
+    Context,
     memory::{
+        AllocReqTyped, MemoryProperties,
         allocator::{AllocationBorrow, Allocator, AllocatorIndex, AllocatorIndexTyped},
         error::{MemoryError, MemoryResult},
-        AllocReqTyped, MemoryProperties,
     },
-    Context,
 };
 
 use super::AllocationIndexTyped;

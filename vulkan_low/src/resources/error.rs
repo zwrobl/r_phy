@@ -26,13 +26,16 @@ use crate::{
 #[derive(Debug)]
 pub enum GuardError {
     Buffer {
-        error: SafeGuardError<BufferRaw>,
+        error: Box<SafeGuardError<BufferRaw>>,
     },
     Image {
-        error: SafeGuardError<ImageRaw>,
+        error: Box<SafeGuardError<ImageRaw>>,
     },
     Texture {
-        error: SafeGuardError<TextureRaw>,
+        error: Box<SafeGuardError<TextureRaw>>,
+    },
+    Swapchain {
+        error: Box<SafeGuardError<SwapchainRaw>>,
     },
     GraphicsPipeline {
         error: SafeGuardError<GraphicsPipelineRaw>,
@@ -45,9 +48,6 @@ pub enum GuardError {
     },
     Framebuffer {
         error: SafeGuardError<FramebufferRaw>,
-    },
-    Swapchain {
-        error: SafeGuardError<SwapchainRaw>,
     },
 }
 

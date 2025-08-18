@@ -4,24 +4,23 @@ use bytemuck::Zeroable;
 use graphics::renderer::camera::CameraMatrices;
 
 use math::types::Vector4;
-use type_kit::{unpack_list, Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil};
+use type_kit::{Cons, Create, Destroy, DestroyResult, DropGuard, DropGuardError, Nil, unpack_list};
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
+        Partial, ResourceIndex,
         command::{BindPipeline, Level, Lifetime, Operation, Recorder, RecordingCommand},
         descriptor::{DescriptorBindingData, DescriptorPool, DescriptorSetWriter},
         error::ResourceError,
         image::{Image2D, ImageCube, ImageCubeReader, Texture, TexturePartial},
-        layout::{presets::TextureDescriptorSet, PipelineLayoutBuilder},
+        layout::{PipelineLayoutBuilder, presets::TextureDescriptorSet},
         pipeline::{
             GraphicsPipeline, GraphicsPipelineConfig, ModuleLoader, PushConstantData,
             ShaderDirectory,
         },
         storage::ResourceIndexListBuilder,
-        Partial, ResourceIndex,
     },
-    Context,
 };
 
 use crate::resources::{CommonMesh, CommonResources};

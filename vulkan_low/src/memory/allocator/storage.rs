@@ -2,20 +2,20 @@ use std::{cell::RefCell, ffi::c_void, fmt::Debug};
 
 use ash::vk;
 use type_kit::{
-    list_type, Cons, Contains, Destroy, FromGuard, GenCell, GenCollection, GenIndex, GenIndexRaw,
-    GenVec, Marker, Nil,
+    Cons, Contains, Destroy, FromGuard, GenCell, GenCollection, GenIndex, GenIndexRaw, GenVec,
+    Marker, Nil, list_type,
 };
 
 use crate::{
+    Context,
     memory::{
+        AllocReqTyped, BindResource, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
         allocator::{
             AllocationBorrow, AllocationIndex, AllocationIndexTyped, Allocator, Page, Static,
             Unpooled,
         },
         error::MemoryResult,
-        AllocReqTyped, BindResource, DeviceLocal, HostCoherent, HostVisible, MemoryProperties,
     },
-    Context,
 };
 
 #[derive(Debug)]
@@ -70,7 +70,7 @@ impl<A: Allocator> FromGuard for AllocatorIndexTyped<A> {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            index: GenIndex::from_inner(inner.index),
+            index: unsafe { GenIndex::from_inner(inner.index) },
         }
     }
 }
@@ -115,7 +115,9 @@ impl<M: MemoryProperties> FromGuard for AllocationEntryTyped<M> {
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
             allocator: inner.allocator,
-            allocation: AllocationIndexTyped::<M>::from_inner(inner.allocation.into_inner()),
+            allocation: unsafe {
+                AllocationIndexTyped::<M>::from_inner(inner.allocation.into_inner())
+            },
         }
     }
 }
@@ -226,7 +228,7 @@ impl AllocatorStorage {
     }
 
     #[inline]
-    pub fn push_allocator<'a, 'b, A: Allocator<Storage = GenVec<A>>, M: Marker>(
+    pub fn push_allocator<A: Allocator<Storage = GenVec<A>>, M: Marker>(
         &self,
         allocator: A,
     ) -> MemoryResult<AllocatorIndexTyped<A>>

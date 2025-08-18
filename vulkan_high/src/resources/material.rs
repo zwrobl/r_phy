@@ -12,9 +12,9 @@ use type_kit::{Cons, Nil};
 use vulkan_low::resources::{
     descriptor::DescriptorWriteInfo,
     layout::{
-        presets::{FragmentStage, PodUniform},
         DescriptorBinding, DescriptorLayout, DescriptorLayoutBuilder, DescriptorPoolSize,
         DescriptorSetLayoutBinding, DescriptorType, ShaderStage,
+        presets::{FragmentStage, PodUniform},
     },
 };
 

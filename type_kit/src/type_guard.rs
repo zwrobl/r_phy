@@ -36,14 +36,14 @@ pub(crate) mod test_types {
 #[cfg(test)]
 mod tests {
     use std::{
-        any::{type_name, TypeId},
+        any::{TypeId, type_name},
         collections::HashMap,
     };
 
     use crate::{
-        list_value,
+        Cons, FromGuard, Nil, TypeGuardError, list_value,
         type_guard::test_types::{A, B},
-        unpack_list, Cons, FromGuard, Nil, TypeGuardError,
+        unpack_list,
     };
 
     #[test]
@@ -150,7 +150,7 @@ mod tests {
 }
 
 use std::{
-    any::{type_name, TypeId},
+    any::{TypeId, type_name},
     error::Error,
     fmt::{Debug, Display, Formatter},
     hash::{Hash, Hasher},
@@ -221,7 +221,7 @@ impl<T: FromGuard> FromGuard for Option<T> {
 
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
-        inner.map(|inner| T::from_inner(inner))
+        inner.map(|inner| unsafe { T::from_inner(inner) })
     }
 }
 
@@ -540,8 +540,8 @@ impl<T: FromGuard, N: FromGuard> FromGuard for Cons<T, N> {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Cons {
-            head: T::from_inner(inner.head),
-            tail: N::from_inner(inner.tail),
+            head: unsafe { T::from_inner(inner.head) },
+            tail: unsafe { N::from_inner(inner.tail) },
         }
     }
 }
@@ -600,8 +600,8 @@ impl<T: FromGuard, N: GuardList> GuardList for Cons<T, N> {
 #[cfg(test)]
 mod test_type_gurad_list {
     use super::{
-        test_types::{A, B},
         GuardList,
+        test_types::{A, B},
     };
     use crate::{
         list_value,

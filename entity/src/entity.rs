@@ -7,12 +7,12 @@ use type_kit::{
 };
 
 use crate::{
+    Archetype, ComponentData, ComponentList,
     context::{
         ComponentListType, EntityBuilderType, EntityComponentContext, EntityMutType,
         EntityOwnedType, EntityQueryType, EntityType, EntityUpdateType,
     },
     index::EntityIndexTyped,
-    Archetype, ComponentData, ComponentList,
 };
 
 pub trait Entity<C: ComponentList, M: Marker>:
@@ -30,15 +30,15 @@ pub trait Entity<C: ComponentList, M: Marker>:
 
     fn query_from_builder(value: &Self::Builder) -> Self::Query;
 
-    fn get_ref<'a>(self, components: &'a C) -> GenCollectionResult<Self::Ref<'a>> {
+    fn get_ref(self, components: &C) -> GenCollectionResult<Self::Ref<'_>> {
         <Self as MarkedIndexList<C, M>>::get_ref(self, components)
     }
 
-    fn get_mut<'a>(self, components: &'a mut C) -> GenCollectionResult<Self::Mut<'a>> {
+    fn get_mut(self, components: &mut C) -> GenCollectionResult<Self::Mut<'_>> {
         unsafe { <Self as MarkedIndexList<C, M>>::get_mut(self, components) }
     }
 
-    fn get_owned<'a>(self, components: &'a mut C) -> GenCollectionResult<Self::Owned> {
+    fn get_owned(self, components: &mut C) -> GenCollectionResult<Self::Owned> {
         <Self as MarkedIndexList<C, M>>::get_owned(self, components)
     }
 }
@@ -131,7 +131,7 @@ where
     EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M>,
     for<'a> EntityMutType<'a, E>: Contains<Option<&'a mut C>, M>,
 {
-    fn archetype_changed<'a>(archetype: &EntityQueryType<E>, update: &EntityUpdateType<E>) -> bool {
+    fn archetype_changed(archetype: &EntityQueryType<E>, update: &EntityUpdateType<E>) -> bool {
         let expected = archetype.get();
         match unsafe { update.get() } {
             ComponentUpdate::Update(_) => !expected.is_expected(),
@@ -140,36 +140,39 @@ where
         }
     }
 
-    fn update_in_place<'a>(mut entity: EntityMutType<'a, E>, update: EntityUpdateType<E>) {
+    fn update_in_place(mut entity: EntityMutType<'_, E>, update: EntityUpdateType<E>) {
         let entity = entity.get_mut();
-        match (unsafe { update.take() }, entity) {
-            (ComponentUpdate::Update(component), Some(entity)) => **entity = component,
-            _ => (),
+        if let (ComponentUpdate::Update(component), Some(entity)) =
+            (unsafe { update.take() }, entity)
+        {
+            **entity = component
         }
     }
 
     fn update_builder(entity: &mut EntityBuilderType<E>, update: EntityUpdateType<E>) {
-        match unsafe { update.take() } {
-            ComponentUpdate::Update(component) => {
-                *entity.get_mut() = Some(CollectionType::new(component))
-            }
-            _ => (),
+        if let ComponentUpdate::Update(component) = unsafe { update.take() } {
+            *entity.get_mut() = Some(CollectionType::new(component))
         }
     }
 
     fn update_owned(entity: &mut EntityOwnedType<E>, update: EntityUpdateType<E>) {
-        match unsafe { update.take() } {
-            ComponentUpdate::Update(component) => *entity.get_mut() = Some(component),
-            _ => (),
+        if let ComponentUpdate::Update(component) = unsafe { update.take() } {
+            *entity.get_mut() = Some(component)
         }
     }
 }
 
+type ArchetypeChangedMap<E> =
+    HashMap<TypeId, fn(&EntityQueryType<E>, &EntityUpdateType<E>) -> bool>;
+type UpdateInPlaceMap<E> = HashMap<TypeId, fn(EntityMutType<'_, E>, EntityUpdateType<E>)>;
+type UpdateBuilderMap<E> = HashMap<TypeId, fn(&mut EntityBuilderType<E>, EntityUpdateType<E>)>;
+type UpdateOwnedMap<E> = HashMap<TypeId, fn(&mut EntityOwnedType<E>, EntityUpdateType<E>)>;
+
 pub struct EntityUpdateMapper<E: EntityComponentContext> {
-    archetype_changed: HashMap<TypeId, fn(&EntityQueryType<E>, &EntityUpdateType<E>) -> bool>,
-    update_in_place: HashMap<TypeId, fn(EntityMutType<'_, E>, EntityUpdateType<E>)>,
-    update_builder: HashMap<TypeId, fn(&mut EntityBuilderType<E>, EntityUpdateType<E>)>,
-    update_owned: HashMap<TypeId, fn(&mut EntityOwnedType<E>, EntityUpdateType<E>)>,
+    archetype_changed: ArchetypeChangedMap<E>,
+    update_in_place: UpdateInPlaceMap<E>,
+    update_builder: UpdateBuilderMap<E>,
+    update_owned: UpdateOwnedMap<E>,
 }
 
 pub struct UpdateMapperRef<E: EntityComponentContext> {
@@ -180,7 +183,7 @@ unsafe impl<E: EntityComponentContext> Send for UpdateMapperRef<E> {}
 
 unsafe impl<E: EntityComponentContext> Sync for UpdateMapperRef<E> {}
 
-impl<'a, E: EntityComponentContext> Deref for UpdateMapperRef<E> {
+impl<E: EntityComponentContext> Deref for UpdateMapperRef<E> {
     type Target = EntityUpdateMapper<E>;
 
     fn deref(&self) -> &Self::Target {
@@ -188,7 +191,7 @@ impl<'a, E: EntityComponentContext> Deref for UpdateMapperRef<E> {
     }
 }
 
-impl<'a, E: EntityComponentContext> UpdateMapperRef<E> {
+impl<E: EntityComponentContext> UpdateMapperRef<E> {
     pub fn new(update_mapper: &EntityUpdateMapper<E>) -> Self {
         Self { update_mapper }
     }
@@ -294,13 +297,8 @@ where
     fn write_update_map(_update_map: &mut EntityUpdateMapper<E>) {}
 }
 
-impl<
-        E: EntityComponentContext,
-        C: ComponentData,
-        M1: Marker,
-        M2: Marker,
-        N: UpdateMapWriter<E, M2>,
-    > UpdateMapWriter<E, Cons<M1, M2>> for Cons<GenVec<C>, N>
+impl<E: EntityComponentContext, C: ComponentData, M1: Marker, M2: Marker, N: UpdateMapWriter<E, M2>>
+    UpdateMapWriter<E, Cons<M1, M2>> for Cons<GenVec<C>, N>
 where
     ComponentListType<E>: Contains<GenVec<C>, M1>,
     EntityUpdateType<E>: UContains<ComponentUpdate<C>, M1>,
@@ -397,9 +395,9 @@ where
 }
 
 pub trait Query: PartialEq + Eq {
-    fn is_subset(self, other: &Self) -> bool;
+    fn is_subset(&self, other: &Self) -> bool;
 
-    fn is_empty(self) -> bool;
+    fn is_empty(&self) -> bool;
 
     fn get_union(self, other: &Self) -> Self;
 
@@ -408,11 +406,11 @@ pub trait Query: PartialEq + Eq {
 
 impl Query for Nil {
     #[inline]
-    fn is_subset(self, _other: &Self) -> bool {
+    fn is_subset(&self, _other: &Self) -> bool {
         true
     }
 
-    fn is_empty(self) -> bool {
+    fn is_empty(&self) -> bool {
         true
     }
 
@@ -428,7 +426,7 @@ impl Query for Nil {
 
 impl<C: ComponentData, N: Query> Query for Cons<Expected<C>, N> {
     #[inline]
-    fn is_subset(self, other: &Self) -> bool {
+    fn is_subset(&self, other: &Self) -> bool {
         let valid = if self.head.is_expected() {
             other.head.is_expected()
         } else {
@@ -438,7 +436,7 @@ impl<C: ComponentData, N: Query> Query for Cons<Expected<C>, N> {
     }
 
     #[inline]
-    fn is_empty(self) -> bool {
+    fn is_empty(&self) -> bool {
         !self.head.is_expected() && self.tail.is_empty()
     }
 
@@ -541,11 +539,11 @@ pub struct EntityRef<
 }
 
 impl<
-        'a,
-        E: EntityComponentContext,
-        M2: Marker,
-        N: IntoSubsetIterator<ComponentListType<E>, M2> + 'a,
-    > EntityRef<'a, E, M2, N>
+    'a,
+    E: EntityComponentContext,
+    M2: Marker,
+    N: IntoSubsetIterator<ComponentListType<E>, M2> + 'a,
+> EntityRef<'a, E, M2, N>
 {
     pub fn new(
         archetype: GenVecIndex<Archetype<E>>,
@@ -564,11 +562,16 @@ pub struct EntityBuilder<E: EntityComponentContext> {
     pub entity_builder: EntityBuilderType<E>,
 }
 
+impl<E: EntityComponentContext> Default for EntityBuilder<E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<E: EntityComponentContext> EntityBuilder<E> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            // query_builder: EntityQueryType::<E>::default(),
             entity_builder: EntityBuilderType::<E>::default(),
         }
     }
@@ -576,27 +579,18 @@ impl<E: EntityComponentContext> EntityBuilder<E> {
     #[inline]
     pub fn from_owned(entity: EntityOwnedType<E>) -> Self {
         Self {
-            // query_builder: EntityType::<E>::query_from_owned(&entity),
             entity_builder: EntityType::<E>::into_builder(entity),
         }
     }
 
     #[inline]
-    pub fn with_component<C: ComponentData, M2: Marker>(self, component: C) -> Self
+    pub fn with_component<C: ComponentData, M2: Marker>(mut self, component: C) -> Self
     where
         EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M2>,
         EntityQueryType<E>: Contains<Expected<C>, M2>,
     {
-        let Self {
-            mut entity_builder,
-            // mut query_builder,
-        } = self;
-        *entity_builder.get_mut() = Some(CollectionType::new(component));
-        // *query_builder.get_mut() = Expected::new(true);
-        Self {
-            // query_builder,
-            entity_builder,
-        }
+        *self.entity_builder.get_mut() = Some(CollectionType::new(component));
+        self
     }
 
     #[inline]

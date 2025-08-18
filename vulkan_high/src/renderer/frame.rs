@@ -4,15 +4,16 @@ use std::{
 };
 
 use type_kit::{
-    unpack_list, Cons, Create, CreateCollection, CreateResult, Destroy, DestroyCollection,
-    DestroyResult, DropGuard,
+    Cons, Create, CreateCollection, CreateResult, Destroy, DestroyCollection, DestroyResult,
+    DropGuard, unpack_list,
 };
 
 use graphics::renderer::camera::CameraMatrices;
 use vulkan_low::{
-    index_list,
+    Context, index_list,
     memory::allocator::{AllocatorBuilder, AllocatorIndex},
     resources::{
+        Partial, ResourceIndex,
         buffer::{UniformBuffer, UniformBufferInfoBuilder, UniformBufferPartial},
         command::{
             BeginCommand, Graphics, Persistent, PersistentCommandPool, Primary, RecordingCommand,
@@ -26,9 +27,7 @@ use vulkan_low::{
             Swapchain, SwapchainFrame, SwapchainFramebufferConfigBuilder, SwapchainImageSync,
             SwapchainPartial,
         },
-        Partial, ResourceIndex,
     },
-    Context,
 };
 
 #[derive(Debug)]
@@ -210,7 +209,7 @@ impl<C: RenderPassConfig> Destroy for FramePool<C> {
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
         self.image_sync.iter_mut().destroy(context)?;
-        let _ = self.camera_uniform.destroy(context)?;
+        self.camera_uniform.destroy(context)?;
         let _ = context.destroy_resource(self.command_pool);
         let _ = context.destroy_resource(self.swapchain);
         Ok(())
@@ -227,7 +226,6 @@ pub struct Frame<C: RenderPassConfig> {
 impl<C: RenderPassConfig> Frame<C> {
     #[inline]
     pub fn record<
-        'a,
         F: FnOnce(
             RecordingCommand<Persistent, Primary, Graphics>,
         ) -> RecordingCommand<Persistent, Primary, Graphics>,

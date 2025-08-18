@@ -3,18 +3,18 @@ use std::{convert::Infallible, ops::Deref, rc::Rc};
 use graphics::{renderer::camera::CameraMatrices, shader::ShaderType};
 use type_kit::Destroy;
 use vulkan_low::{
+    Context,
     memory::allocator::AllocatorIndex,
     resources::{
+        Partial, Resource, ResourceIndex,
         descriptor::{Descriptor, DescriptorSetMapper},
         error::ResourceResult,
-        layout::{presets::CameraDescriptorSet, DescriptorLayout},
+        layout::{DescriptorLayout, presets::CameraDescriptorSet},
         pipeline::{GraphicsPipelineConfig, ModuleLoader},
-        Partial, Resource, ResourceIndex,
     },
-    Context,
 };
 
-use crate::{renderer::storage::DrawStorage, resources::GraphicsPipelinePackList, VulkanContext};
+use crate::{VulkanContext, renderer::storage::DrawStorage, resources::GraphicsPipelinePackList};
 
 pub mod deferred;
 pub mod frame;
@@ -91,7 +91,7 @@ pub trait RendererBuilder:
 
     fn with_allocator<T: Into<AllocatorIndex>>(self, allocator: T) -> Self;
 
-    fn build<'a>(self) -> ResourceResult<impl Renderer>;
+    fn build(self) -> ResourceResult<impl Renderer>;
 }
 
 pub struct DestroyTerminator;

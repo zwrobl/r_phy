@@ -5,6 +5,7 @@ use std::{any::TypeId, collections::HashMap, convert::Infallible, marker::Phanto
 use ash::vk;
 
 use crate::{
+    Context,
     device::AttachmentProperties,
     resources::{
         error::ResourceError,
@@ -15,7 +16,6 @@ use crate::{
         },
         storage::TypeUniqueResource,
     },
-    Context,
 };
 use type_kit::{Cons, Create, Destroy, FromGuard, TypedNil};
 

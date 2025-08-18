@@ -8,14 +8,14 @@ use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
+    Context,
     error::ExtResult,
     resources::{
+        Resource, ResourceGuardError,
         command::{Command, NewCommand, Operation, Persistent, Transient},
         error::{GuardError, ResourceError},
         storage::TypeUniqueResource,
-        Resource, ResourceGuardError,
     },
-    Context,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -208,15 +208,13 @@ impl Context {
         &self,
     ) -> ExtResult<NewCommand<Transient, Primary, O>> {
         let pool = O::get_transient_command_pool(self);
-        let &buffer = unsafe {
-            self.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::builder()
-                    .level(Primary::LEVEL)
-                    .command_pool(pool.pool)
-                    .command_buffer_count(1),
-            )?
-            .first()
-            .unwrap()
+        let buffer = unsafe {
+            let builder = &vk::CommandBufferAllocateInfo::builder()
+                .level(Primary::LEVEL)
+                .command_pool(pool.pool)
+                .command_buffer_count(1);
+            let buffer = self.allocate_command_buffers(builder)?;
+            buffer[0]
         };
         let fence = unsafe {
             self.create_fence(

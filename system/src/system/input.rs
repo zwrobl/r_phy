@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use entity::{context::EntityComponentContext, operation::OperationChannel, system::GlobalSystem};
-use type_kit::{list_type, unpack_list, Cons, Nil};
+use type_kit::{Cons, Nil, list_type, unpack_list};
 
 use crate::system::command::CommandQueue;
 
@@ -251,6 +251,12 @@ pub struct InputSystem {
     cursor: CursorState,
 }
 
+impl Default for InputSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InputSystem {
     pub fn new() -> Self {
         Self {
@@ -321,9 +327,9 @@ pub struct GlobalInput<
 }
 
 impl<
-        E: EntityComponentContext,
-        F: Fn(&E, &OperationChannel<'_, E>, &InputSystem, &CommandQueue) + Send + Sync,
-    > GlobalInput<E, F>
+    E: EntityComponentContext,
+    F: Fn(&E, &OperationChannel<'_, E>, &InputSystem, &CommandQueue) + Send + Sync,
+> GlobalInput<E, F>
 {
     pub fn new(update_fn: F) -> Self {
         Self {
@@ -344,9 +350,9 @@ impl<
 }
 
 impl<
-        E: EntityComponentContext,
-        F: Fn(&E, &OperationChannel<'_, E>, &InputSystem, &CommandQueue) + Send + Sync,
-    > GlobalSystem<E> for GlobalInput<E, F>
+    E: EntityComponentContext,
+    F: Fn(&E, &OperationChannel<'_, E>, &InputSystem, &CommandQueue) + Send + Sync,
+> GlobalSystem<E> for GlobalInput<E, F>
 {
     type External = list_type![InputSystem, CommandQueue, Nil];
     type WriteList = Nil;

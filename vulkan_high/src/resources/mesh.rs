@@ -12,14 +12,14 @@ use strum::EnumCount;
 use graphics::model::{Mesh, Vertex};
 
 use vulkan_low::{
-    memory::{range::ByteRange, DeviceLocal},
+    memory::{DeviceLocal, range::ByteRange},
     resources::{
+        ResourceIndex,
         buffer::{Buffer, BufferPartial},
         command::{
             BindIndexBuffer, BindVertexBuffer, Level, Lifetime, Operation, Recorder,
             RecordingCommand,
         },
-        ResourceIndex,
     },
 };
 

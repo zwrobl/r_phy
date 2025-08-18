@@ -24,6 +24,12 @@ pub struct Dependency<T: Task> {
     _task: PhantomData<T>,
 }
 
+impl<T: Task> Default for Dependency<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Task> Debug for Dependency<T> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -123,6 +129,15 @@ pub struct TaskListBuilder<
     _initializer: PhantomData<Marked<I, M>>,
 }
 
+pub type NextTask<T, R, M1, M2, N1, N2, I> = TaskListBuilder<
+    <T as Task>::TaskError,
+    M1,
+    R,
+    Cons<Dependency<T>, N1>,
+    Cons<Marked<T, M2>, N2>,
+    I,
+>;
+
 impl<R: 'static, T: 'static> ResourceListBuilder<TypedNil<R>, TypedNil<T>> {
     #[inline]
     fn new() -> Self {
@@ -163,17 +178,10 @@ impl<R: TypeList, T: 'static> ResourceListBuilder<R, TypedNil<T>> {
     pub fn push_task<I: Task<Dependencies = Nil>, M1: Marker, M2: Marker>(
         self,
         stage: I,
-    ) -> TaskListBuilder<
-        I::TaskError,
-        M2,
-        R,
-        Cons<Dependency<I>, Nil>,
-        Cons<Marked<I, M1>, TypedNil<T>>,
-        I::InitializerList,
-    >
+    ) -> NextTask<I, R, M1, M2, Nil, TypedNil<T>, I::InitializerList>
     where
-        I::ResourceSet: Subset<R, M1>,
-        I::InitializerList: Subset<R, M2>,
+        I::InitializerList: Subset<R, M1>,
+        I::ResourceSet: Subset<R, M2>,
     {
         TaskListBuilder {
             resources: self.resources,
@@ -186,19 +194,19 @@ impl<R: TypeList, T: 'static> ResourceListBuilder<R, TypedNil<T>> {
 }
 
 impl<
-        E: Error,
-        M: Marker,
-        R: TypeList,
-        D: DependencyList,
-        S: TaskList<R, E, TaskResult = ()>,
-        I: Subset<R, M>,
-    > TaskListBuilder<E, M, R, D, S, I>
+    E: Error,
+    M: Marker,
+    R: TypeList,
+    D: DependencyList,
+    S: TaskList<R, E, TaskResult = ()>,
+    I: Subset<R, M>,
+> TaskListBuilder<E, M, R, D, S, I>
 {
     #[inline]
     pub fn push_task<M1: Marker, M2: Marker, T: Task<InitializerList = Nil>>(
         self,
         stage: T,
-    ) -> TaskListBuilder<T::TaskError, M, R, Cons<Dependency<T>, D>, Cons<Marked<T, M1>, S>, I>
+    ) -> NextTask<T, R, M, M1, D, S, I>
     where
         S: TaskList<R, T::TaskError>,
         T::ResourceSet: Subset<R, M1>,
@@ -289,8 +297,8 @@ mod test_task_list {
     use std::{convert::Infallible, error::Error, fmt::Display};
 
     use crate::{
-        dependency_list, list_type, list_value, unpack_list, Cons, Dependency, Executor,
-        ListMutType, Nil, SynchronousExecutor, Task, TypeList,
+        Cons, Dependency, Executor, ListMutType, Nil, SynchronousExecutor, Task, TypeList,
+        dependency_list, list_type, list_value, unpack_list,
     };
 
     struct Generate;

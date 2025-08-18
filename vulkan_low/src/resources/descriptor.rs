@@ -14,16 +14,16 @@ pub use writer::*;
 use ash::vk;
 
 use crate::{
+    Context,
     resources::{
+        Resource, ResourceGuardError,
         error::{GuardError, ResourceError, ResourceResult},
         layout::{
             DescriptorIndex, DescriptorLayout, DescriptorLayoutList, DescriptorSetLayout, Layout,
             PipelineLayout,
         },
         pipeline::{GraphicsPipeline, GraphicsPipelineConfig},
-        Resource, ResourceGuardError,
     },
-    Context,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -186,12 +186,10 @@ impl<T: DescriptorLayout> Descriptor<T> {
     ) -> Option<DescriptorBindingData> {
         C::Layout::sets()
             .try_get_index::<T>()
-            .and_then(|set_index| {
-                Some(DescriptorBindingData {
-                    set_index,
-                    set: self.set,
-                    pipeline_layout: pipeline.layout().into(),
-                })
+            .map(|set_index| DescriptorBindingData {
+                set_index,
+                set: self.set,
+                pipeline_layout: pipeline.layout().into(),
             })
     }
 }

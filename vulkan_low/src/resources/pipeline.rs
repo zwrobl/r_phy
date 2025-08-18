@@ -10,8 +10,8 @@ use ash::{self, vk};
 use std::{ffi::CStr, marker::PhantomData, path::Path};
 
 use crate::{
-    resources::error::{ShaderError, ShaderResult},
     Context,
+    resources::error::{ShaderError, ShaderResult},
 };
 
 struct ShaderModule {
@@ -64,7 +64,7 @@ pub struct PipelineStagesInfo<'a> {
 }
 
 impl<'a> Modules<'a> {
-    pub fn get_stages_info(&self) -> PipelineStagesInfo {
+    pub fn get_stages_info(&self) -> PipelineStagesInfo<'_> {
         PipelineStagesInfo {
             stages: self
                 .modules

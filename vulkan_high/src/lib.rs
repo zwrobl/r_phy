@@ -7,10 +7,10 @@ use graphics::error::GraphicsResult;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use type_kit::{Create, Destroy};
+use vulkan_low::Context;
 use vulkan_low::memory::allocator::StaticConfig;
 use vulkan_low::memory::allocator::{AllocatorIndexTyped, Static};
 use vulkan_low::resources::Partial;
-use vulkan_low::Context;
 use winit::window::Window;
 
 use crate::context::VulkanContextBuilder;
@@ -109,7 +109,7 @@ impl Drop for VulkanContext {
 impl<R: RendererBuilder> graphics::renderer::RendererBuilder for VulkanRendererBuilder<R> {
     fn build(self, window: &Window) -> GraphicsResult<impl graphics::renderer::Renderer + use<R>> {
         let Self { config, renderer } = self;
-        let context = VulkanContext::new(&window, config.unwrap())?;
+        let context = VulkanContext::new(window, config.unwrap())?;
         let mut allocator = StaticConfig::new();
         let renderer = R::new(&context, renderer)?;
         renderer.register_memory_requirements(&mut allocator);

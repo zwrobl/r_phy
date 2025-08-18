@@ -75,6 +75,12 @@ pub struct PersistentIndexMap<T: Clone + Copy + Eq + Hash + 'static> {
     items: GenVec<T>,
 }
 
+impl<T: Clone + Copy + Eq + Hash + 'static> Default for PersistentIndexMap<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Clone + Copy + Eq + Hash + 'static> PersistentIndexMap<T> {
     #[inline]
     pub fn new() -> Self {
@@ -102,17 +108,17 @@ impl<T: Clone + Copy + Eq + Hash + 'static> PersistentIndexMap<T> {
     #[inline]
     pub fn update(&mut self, index: PersistentIndexTyped<T>, entity: T) {
         let PersistentIndexTyped { index } = index;
-        if let Ok(&registered) = self.items.get(index) {
-            if registered != entity {
-                self.items[index] = entity;
-                self.lookup.remove(&registered);
-                self.lookup.insert(entity, index);
-            }
+        if let Ok(&registered) = self.items.get(index)
+            && registered != entity
+        {
+            self.items[index] = entity;
+            self.lookup.remove(&registered);
+            self.lookup.insert(entity, index);
         }
     }
 
     #[inline]
-    pub fn into_iter<'a>(&'a self) -> impl Iterator<Item = &'a T> {
+    pub fn into_iter(&self) -> impl Iterator<Item = &'_ T> {
         (&self.items).into_iter()
     }
 

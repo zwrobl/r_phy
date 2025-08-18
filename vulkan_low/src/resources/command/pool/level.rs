@@ -3,7 +3,7 @@ use std::{convert::Infallible, fmt::Debug, ptr::NonNull};
 use ash::vk;
 use type_kit::{Destroy, DestroyResult};
 
-use crate::{device::Device, error::ExtResult, Context};
+use crate::{Context, device::Device, error::ExtResult};
 
 #[derive(Debug, Clone, Copy)]
 pub enum PersistentAllocatorRaw {

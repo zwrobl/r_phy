@@ -8,20 +8,20 @@ use bytemuck::AnyBitPattern;
 use type_kit::{Create, Destroy, DestroyResult, DropGuard, FromGuard, GuardVec};
 
 use crate::{
+    Context,
     memory::{
-        allocator::{AllocatorBuilder, AllocatorIndex},
         HostCoherent,
+        allocator::{AllocatorBuilder, AllocatorIndex},
     },
     resources::{
+        Partial, Resource, ResourceGuardError,
         buffer::{
-            persistent::PersistentBuffer, Buffer, BufferInfoBuilder, BufferPartial, BufferRaw,
-            BufferUsage, SharingMode,
+            Buffer, BufferInfoBuilder, BufferPartial, BufferRaw, BufferUsage, SharingMode,
+            persistent::PersistentBuffer,
         },
         command::Operation,
         error::{GuardError, ResourceError},
-        Partial, Resource, ResourceGuardError,
     },
-    Context,
 };
 
 #[derive(Debug)]
@@ -211,7 +211,7 @@ impl<U: AnyBitPattern, O: Operation> Resource for UniformBuffer<U, O> {
     #[inline]
     fn wrap_guard_error((resource, err): ResourceGuardError<Self>) -> ResourceError {
         ResourceError::GuardError(GuardError::Buffer {
-            error: (DropGuard::new(resource), err),
+            error: Box::new((DropGuard::new(resource), err)),
         })
     }
 }
@@ -227,7 +227,7 @@ impl<U: AnyBitPattern, O: Operation> FromGuard for UniformBuffer<U, O> {
     #[inline]
     unsafe fn from_inner(inner: Self::Inner) -> Self {
         Self {
-            buffer: PersistentBuffer::from_inner(inner),
+            buffer: unsafe { PersistentBuffer::from_inner(inner) },
             _phantom: PhantomData,
         }
     }

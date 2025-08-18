@@ -4,11 +4,11 @@ use ash::vk;
 use type_kit::{Create, CreateResult, Destroy, DestroyResult, FromGuard};
 
 use crate::{
+    Context,
     resources::{
         error::ResourceError,
         image::{ImageInfo, MipInfo},
     },
-    Context,
 };
 
 pub trait FilterType: 'static {
