@@ -56,7 +56,7 @@ impl<'b, V: Vertex> Create for MeshPackPartial<'b, V> {
                 .with_usage(BufferUsage::IndexBuffer)
                 .with_usage(BufferUsage::TransferDst)
                 .with_queue_families(&[Graphics::get_queue_family_index(context)])
-                .with_size(buffer_ranges.get_rquired_buffer_size()),
+                .with_size(builder.get_required_size()),
             context,
         )?;
         let partial = MeshPackDataPartial {

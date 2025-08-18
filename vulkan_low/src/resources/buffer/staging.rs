@@ -50,6 +50,10 @@ impl StagingBufferBuilder {
     pub fn append<T: AnyBitPattern>(&mut self, len: usize) -> Range<T> {
         self.range.extend::<T>(len).into()
     }
+
+    pub fn get_required_size(&self) -> usize {
+        self.range.len()
+    }
 }
 
 #[derive(Debug)]

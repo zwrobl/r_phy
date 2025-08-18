@@ -50,15 +50,6 @@ impl BufferRanges {
         }
     }
 
-    fn get_rquired_buffer_size(&self) -> usize {
-        self.ranges
-            .iter()
-            .filter_map(|&range| range)
-            .max_by_key(|range| range.end)
-            .unwrap()
-            .end
-    }
-
     fn set(&mut self, buffer_type: BufferType, range: impl Into<ByteRange>) {
         self.ranges[buffer_type as usize] = Some(range.into());
     }
