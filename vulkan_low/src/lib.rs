@@ -89,6 +89,20 @@ impl InstanceExtension for khr::Win32Surface {
     }
 }
 
+impl InstanceExtension for khr::WaylandSurface {
+    #[inline]
+    fn load(entry: &ash::Entry, instance: &ash::Instance) -> Self {
+        Self::new(entry, instance)
+    }
+}
+
+impl InstanceExtension for khr::XlibSurface {
+    #[inline]
+    fn load(entry: &ash::Entry, instance: &ash::Instance) -> Self {
+        Self::new(entry, instance)
+    }
+}
+
 impl Instance {
     #[inline]
     pub(crate) fn load<E: InstanceExtension>(&self) -> E {
@@ -113,12 +127,12 @@ impl DerefMut for Instance {
 }
 
 impl Create for Instance {
-    type Config<'a> = ();
+    type Config<'a> = &'a Window;
     type CreateError = InstanceError;
 
-    fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
+    fn create<'a, 'b>(config: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
         let entry = unsafe { ash::Entry::load()? };
-        let required_extensions = Surface::iterate_required_extensions();
+        let required_extensions = Surface::iterate_required_extensions(config)?;
 
         #[cfg(debug_assertions)]
         let required_extensions =
@@ -187,7 +201,7 @@ pub struct Context {
 
 impl Context {
     pub fn build(window: &Window) -> VkResult<Self> {
-        let instance = Instance::initialize(())?;
+        let instance = Instance::initialize(window)?;
         #[cfg(debug_assertions)]
         let debug_utils = DebugUtils::create((), &instance)?;
         let surface = Surface::create(window, &instance)?;

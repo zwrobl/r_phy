@@ -7,7 +7,10 @@ use std::{
 };
 use type_kit::{Create, CreateResult, Destroy, DestroyResult};
 use winit::{
-    raw_window_handle::{HasWindowHandle, RawWindowHandle, Win32WindowHandle},
+    dpi::PhysicalSize,
+    raw_window_handle::{
+        HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, Win32WindowHandle,
+    },
     window::Window,
 };
 
@@ -20,47 +23,80 @@ use crate::{
 pub struct Surface {
     handle: vk::SurfaceKHR,
     loader: khr::Surface,
+    extent: vk::Extent2D,
 }
 
-#[cfg(target_os = "windows")]
 fn create_platform_surface(instance: &Instance, window: &Window) -> ExtResult<vk::SurfaceKHR> {
-    let win32_surface: khr::Win32Surface = instance.load();
-    let (hwnd, hinstance) = match window.window_handle()?.as_raw() {
-        RawWindowHandle::Win32(Win32WindowHandle {
-            hwnd, hinstance, ..
-        }) => {
+    let window_handle = window.window_handle()?.as_raw();
+    let display_handle = window.display_handle()?.as_raw();
+    let handle = match (display_handle, window_handle) {
+        (
+            RawDisplayHandle::Windows(_),
+            RawWindowHandle::Win32(Win32WindowHandle {
+                hwnd, hinstance, ..
+            }),
+        ) => {
+            let win32_surface: khr::Win32Surface = instance.load();
             let hwnd = hwnd.get() as *const c_void;
             let hinstance = hinstance.map_or(null(), |hinstance| hinstance.get() as *const c_void);
-            (hwnd, hinstance)
+            unsafe {
+                win32_surface.create_win32_surface(
+                    &vk::Win32SurfaceCreateInfoKHR::builder()
+                        .hwnd(hwnd)
+                        .hinstance(hinstance),
+                    None,
+                )?
+            }
+        }
+        (RawDisplayHandle::Wayland(display), RawWindowHandle::Wayland(window)) => {
+            let wayland_surface: khr::WaylandSurface = instance.load();
+            unsafe {
+                wayland_surface.create_wayland_surface(
+                    &vk::WaylandSurfaceCreateInfoKHR::builder()
+                        .display(display.display.as_ptr())
+                        .surface(window.surface.as_ptr()),
+                    None,
+                )?
+            }
+        }
+        (RawDisplayHandle::Xlib(display), RawWindowHandle::Xlib(window)) => {
+            let xlib_surface: khr::XlibSurface = instance.load();
+            unsafe {
+                xlib_surface.create_xlib_surface(
+                    &vk::XlibSurfaceCreateInfoKHR::builder()
+                        .dpy(display.display.unwrap().as_ptr() as *mut _)
+                        .window(window.window),
+                    None,
+                )?
+            }
         }
         _ => panic!("Unexpected RawWindowHandleType for current platform!"),
-    };
-    let handle = unsafe {
-        win32_surface.create_win32_surface(
-            &vk::Win32SurfaceCreateInfoKHR::builder()
-                .hwnd(hwnd)
-                .hinstance(hinstance),
-            None,
-        )?
     };
     Ok(handle)
 }
 
-#[cfg(not(target_os = "windows"))]
-fn create_platform_surface(instance: &Instance, window: &Window) -> ExtResult<vk::SurfaceKHR> {
-    compile_error!("Current platform not supported!");
-}
-
 impl Surface {
-    #[cfg(target_os = "windows")]
-    pub fn iterate_required_extensions() -> impl Iterator<Item = &'static CStr> {
-        const REQUIRED_EXTENSIONS: [&CStr; 2] = [khr::Win32Surface::name(), khr::Surface::name()];
-        REQUIRED_EXTENSIONS.into_iter()
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub fn iterate_required_extensions() -> impl Iterator<Item = &'static CStr> {
-        compile_error!("Current platform not supported!");
+    pub fn iterate_required_extensions(
+        window: &Window,
+    ) -> ExtResult<impl Iterator<Item = &'static CStr>> {
+        match window.window_handle()?.as_raw() {
+            RawWindowHandle::Win32(_) => {
+                const REQUIRED_EXTENSIONS: [&CStr; 2] =
+                    [khr::Win32Surface::name(), khr::Surface::name()];
+                Ok(REQUIRED_EXTENSIONS.into_iter())
+            }
+            RawWindowHandle::Wayland(_) => {
+                const REQUIRED_EXTENSIONS: [&CStr; 2] =
+                    [khr::WaylandSurface::name(), khr::Surface::name()];
+                Ok(REQUIRED_EXTENSIONS.into_iter())
+            }
+            RawWindowHandle::Xlib(_) => {
+                const REQUIRED_EXTENSIONS: [&CStr; 2] =
+                    [khr::XlibSurface::name(), khr::Surface::name()];
+                Ok(REQUIRED_EXTENSIONS.into_iter())
+            }
+            _ => panic!("Unsupported platform!"),
+        }
     }
 }
 
@@ -71,7 +107,12 @@ impl Create for Surface {
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let handle = create_platform_surface(context, config)?;
         let loader: khr::Surface = context.load();
-        Ok(Self { handle, loader })
+        let PhysicalSize { width, height } = config.inner_size();
+        Ok(Self {
+            handle,
+            loader,
+            extent: vk::Extent2D { width, height },
+        })
     }
 }
 
@@ -93,6 +134,7 @@ impl From<&Surface> for vk::SurfaceKHR {
 
 #[derive(Debug, Clone)]
 pub struct PhysicalDeviceSurfaceProperties {
+    pub extent: vk::Extent2D,
     pub present_mode: vk::PresentModeKHR,
     pub surface_format: vk::SurfaceFormatKHR,
     pub supported_queue_families: HashSet<u32>,
@@ -157,7 +199,23 @@ impl PhysicalDeviceSurfaceProperties {
                 .loader
                 .get_physical_device_surface_capabilities(physical_device, surface.handle)?
         };
+        let mut extent = if capabilities.current_extent.width == u32::MAX
+            && capabilities.current_extent.height == u32::MAX
+        {
+            surface.extent
+        } else {
+            capabilities.current_extent
+        };
+        extent.width = extent.width.clamp(
+            capabilities.min_image_extent.width,
+            capabilities.max_image_extent.width,
+        );
+        extent.height = extent.height.clamp(
+            capabilities.min_image_extent.height,
+            capabilities.max_image_extent.height,
+        );
         Ok(Self {
+            extent,
             present_mode,
             surface_format,
             supported_queue_families,
@@ -166,20 +224,7 @@ impl PhysicalDeviceSurfaceProperties {
     }
 
     pub fn get_current_extent(&self) -> vk::Extent2D {
-        let vk::SurfaceCapabilitiesKHR {
-            current_extent,
-            min_image_extent,
-            max_image_extent,
-            ..
-        } = self.capabilities;
-        vk::Extent2D {
-            width: current_extent
-                .width
-                .clamp(min_image_extent.width, max_image_extent.width),
-            height: current_extent
-                .height
-                .clamp(min_image_extent.height, max_image_extent.height),
-        }
+        self.extent
     }
 
     pub fn get_image_count(&self) -> u32 {
