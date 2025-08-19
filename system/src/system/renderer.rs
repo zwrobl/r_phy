@@ -7,8 +7,7 @@ use std::{
 };
 
 use entity::{
-    context::{ComponentListType, EntityComponentContext, EntityQueryType},
-    entity::Expected,
+    context::{ComponentListType, EntityComponentContext},
     index::EntityIndex,
     operation::OperationChannel,
     system::{GlobalSystem, System},
@@ -23,7 +22,8 @@ use graphics::{
 };
 use math::transform::Transform;
 use type_kit::{
-    Cons, Contains, Fin, GenVec, Marker, Nil, RefList, list_type, unpack_any, unpack_list,
+    Cons, Contains, Fin, GenVec, IndexedMarker, Marker, Nil, RefList, list_type, unpack_any,
+    unpack_list,
 };
 
 #[derive(Clone, Copy)]
@@ -126,13 +126,11 @@ pub struct CameraSelector<M: Marker> {
     _marker: PhantomData<M>,
 }
 
-impl<M1: Marker, M2: Marker> CameraSelector<Cons<M1, M2>> {
+impl<M1: IndexedMarker, M2: IndexedMarker> CameraSelector<Cons<M1, M2>> {
     pub fn new<E: EntityComponentContext>() -> Self
     where
         ComponentListType<E>: Contains<GenVec<ProjectionMatrix>, M1>,
-        EntityQueryType<E>: Contains<Expected<ProjectionMatrix>, M1>,
         ComponentListType<E>: Contains<GenVec<Transform>, M2>,
-        EntityQueryType<E>: Contains<Expected<Transform>, M2>,
     {
         Self {
             _marker: PhantomData,
@@ -140,13 +138,11 @@ impl<M1: Marker, M2: Marker> CameraSelector<Cons<M1, M2>> {
     }
 }
 
-impl<E: EntityComponentContext, M1: Marker, M2: Marker> GlobalSystem<E>
+impl<E: EntityComponentContext, M1: IndexedMarker, M2: IndexedMarker> GlobalSystem<E>
     for CameraSelector<Cons<M1, M2>>
 where
     ComponentListType<E>: Contains<GenVec<ProjectionMatrix>, M1>,
-    EntityQueryType<E>: Contains<Expected<ProjectionMatrix>, M1>,
     ComponentListType<E>: Contains<GenVec<Transform>, M2>,
-    EntityQueryType<E>: Contains<Expected<Transform>, M2>,
 {
     type External = list_type![CameraCell, Nil];
     type WriteList = Nil;

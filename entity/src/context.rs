@@ -6,7 +6,7 @@ use crate::{
     ComponentList, ExternalSystem,
     archetype::{Archetype, ArchetypeMut, ArchetypeRef},
     entity::{
-        Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateMapper, Query, QueryWrite,
+        ComponentQuery, Entity, EntityBuilder, EntityRef, EntityUpdate, EntityUpdateMapper, Query,
         UpdateMapWriter, UpdateMapperRef,
     },
     index::{EntityIndexTyped, PersistentIndexMap, PersistentIndexTyped},
@@ -23,10 +23,7 @@ pub type EntityType<E> = <E as EntityComponentContext>::Entity;
 
 pub type ComponentListType<E> = <E as EntityComponentContext>::Components;
 
-pub type EntityQueryType<E> = <EntityType<E> as Entity<
-    <E as EntityComponentContext>::Components,
-    <E as EntityComponentContext>::Marker,
->>::Query;
+pub type EntityQueryType<E> = Query<<E as EntityComponentContext>::Components>;
 
 pub type EntityUpdateType<E> = <EntityType<E> as Entity<
     <E as EntityComponentContext>::Components,
@@ -102,7 +99,7 @@ pub trait EntityComponentContext: Default + Sized + Sync + Send + 'static {
     fn query<
         'a,
         M2: Marker,
-        N: IntoSubsetIterator<Self::Components, M2> + QueryWrite<EntityQueryType<Self>, M2> + 'a,
+        N: IntoSubsetIterator<Self::Components, M2> + ComponentQuery<ComponentListType<Self>, M2> + 'a,
     >(
         &'a self,
     ) -> impl Iterator<Item = EntityRef<'a, Self, M2, N>>;
@@ -151,7 +148,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
         let query = entity.query();
         let archetype = self
             .iter_mut()
-            .find(|archetype| archetype.is_matching(&query));
+            .find(|archetype| archetype.is_matching(query));
         let entity = match archetype {
             Some(mut archetype) => archetype.push_entity(entity),
             None => {
@@ -219,10 +216,14 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
             .map(|(archetype, &index)| archetype.as_mut(index))
     }
 
-    fn query<'a, M2: Marker, N: IntoSubsetIterator<C, M2> + QueryWrite<E::Query, M2> + 'a>(
+    fn query<
+        'a,
+        M2: Marker,
+        N: IntoSubsetIterator<C, M2> + ComponentQuery<ComponentListType<Self>, M2> + 'a,
+    >(
         &'a self,
     ) -> impl Iterator<Item = EntityRef<'a, Self, M2, N>> {
-        let query = N::write(E::Query::default());
+        let query = N::query();
         self.iter_ref()
             .filter(move |archetype| query.is_subset(&archetype.query))
             .flat_map(|archetype| archetype.sub_iter_entity())

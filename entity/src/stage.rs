@@ -5,7 +5,7 @@ use type_kit::{Cons, IntoSubsetIterator, Marker, Nil, Subset};
 use crate::{
     EntityComponentSystem, EntityComponentSystemContext, ExternalSystem,
     context::{ComponentListType, EntityComponentContext, EntityQueryType},
-    entity::{Query, QueryWrite, UpdateMapWriter},
+    entity::{ComponentQuery, UpdateMapWriter},
     operation::{OperationChannel, OperationQueue},
     system::{
         self, GlobalSystem, GlobalSystemExecutor, System, SystemExecutor, SystemList,
@@ -135,8 +135,8 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+            IntoSubsetIterator<ComponentListType<E>, M1> + ComponentQuery<ComponentListType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M2>,
         N::External: Subset<C, M3>;
 
     fn with_global_system<M1: Marker, M2: Marker, N: GlobalSystem<E>>(
@@ -144,7 +144,7 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
         system: N,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M1>,
         N::External: Subset<C, M2>;
 
     fn next_stage<T: Strategy<E, C>>(self) -> impl Builder<E, C>;
@@ -200,14 +200,14 @@ impl<
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+            IntoSubsetIterator<ComponentListType<E>, M1> + ComponentQuery<ComponentListType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M2>,
         N::External: Subset<C, M3>,
     {
         let system = SystemExecutor::new(system);
         if !system
             .component_write()
-            .get_intersection(&system::Builder::component_write(&self.builder))
+            .get_intersection(system::Builder::component_write(&self.builder))
             .is_empty()
         {
             panic!("New system's write access is a subset of existing systems");
@@ -224,13 +224,13 @@ impl<
         system: N,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M1>,
         N::External: Subset<C, M2>,
     {
         let system = GlobalSystemExecutor::new(system);
         if !system
             .component_write()
-            .get_intersection(&system::Builder::component_write(&self.builder))
+            .get_intersection(system::Builder::component_write(&self.builder))
             .is_empty()
         {
             panic!("New system's write access is a subset of existing systems");

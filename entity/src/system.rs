@@ -8,7 +8,7 @@ use type_kit::{
 use crate::{
     ArchetypeRef, ComponentData, ExternalSystem,
     context::{ComponentListType, EntityComponentContext, EntityQueryType, EntityUpdateType},
-    entity::{ComponentUpdate, EntityUpdate, Query, QueryWrite},
+    entity::{ComponentQuery, ComponentUpdate, EntityUpdate},
     index::{EntityIndex, EntityIndexTyped},
     operation::OperationChannel,
 };
@@ -98,16 +98,12 @@ where
     #[inline]
     pub fn new<M4: Marker, M5: Marker>(system: S) -> Self
     where
-        S::Components: QueryWrite<EntityQueryType<E>, M4>,
-        S::WriteList: QueryWrite<EntityQueryType<E>, M5>,
+        S::Components: ComponentQuery<ComponentListType<E>, M4>,
+        S::WriteList: ComponentQuery<ComponentListType<E>, M5>,
     {
         Self {
-            query: <S::Components as QueryWrite<EntityQueryType<E>, M4>>::write(
-                EntityQueryType::<E>::default(),
-            ),
-            write: <S::WriteList as QueryWrite<EntityQueryType<E>, M5>>::write(
-                EntityQueryType::<E>::default(),
-            ),
+            query: <S::Components as ComponentQuery<_, _>>::query(),
+            write: <S::WriteList as ComponentQuery<_, _>>::query(),
             system,
             _phantom: std::marker::PhantomData,
         }
@@ -207,7 +203,7 @@ where
     fn component_write(&self) -> EntityQueryType<E> {
         let head = self.head.component_write();
         let tail = self.tail.component_write();
-        head.get_union(&tail)
+        head.get_union(tail)
     }
 }
 
@@ -238,7 +234,7 @@ where
     fn component_write(&self) -> EntityQueryType<E> {
         let head = self.head.component_write();
         let tail = self.tail.component_write();
-        head.get_union(&tail)
+        head.get_union(tail)
     }
 }
 
@@ -249,8 +245,8 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+            IntoSubsetIterator<ComponentListType<E>, M1> + ComponentQuery<ComponentListType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M2>,
         N::External: Subset<C, M3>;
 
     fn with_global_executor<M1: Marker, M2: Marker, N: GlobalSystem<E>>(
@@ -258,7 +254,7 @@ pub trait Builder<E: EntityComponentContext, C: ExternalSystem> {
         system: GlobalSystemExecutor<E, M2, C, N>,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M1>,
         N::External: Subset<C, M2>;
 
     fn component_write(&self) -> EntityQueryType<E>;
@@ -295,8 +291,8 @@ impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> Builder<
     ) -> impl Builder<E, C>
     where
         N::Components:
-            IntoSubsetIterator<ComponentListType<E>, M1> + QueryWrite<EntityQueryType<E>, M1>,
-        N::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+            IntoSubsetIterator<ComponentListType<E>, M1> + ComponentQuery<ComponentListType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M2>,
         N::External: Subset<C, M3>,
     {
         SystemListBuilder {
@@ -310,7 +306,7 @@ impl<E: EntityComponentContext, C: ExternalSystem, S: SystemList<E, C>> Builder<
         system: GlobalSystemExecutor<E, M2, C, N>,
     ) -> impl Builder<E, C>
     where
-        N::WriteList: QueryWrite<EntityQueryType<E>, M1>,
+        N::WriteList: ComponentQuery<ComponentListType<E>, M1>,
         N::External: Subset<C, M2>,
     {
         SystemListBuilder {
@@ -372,12 +368,10 @@ where
     #[inline]
     pub fn new<M2: Marker>(system: S) -> Self
     where
-        S::WriteList: QueryWrite<EntityQueryType<E>, M2>,
+        S::WriteList: ComponentQuery<ComponentListType<E>, M2>,
     {
         Self {
-            write: <S::WriteList as QueryWrite<EntityQueryType<E>, M2>>::write(
-                EntityQueryType::<E>::default(),
-            ),
+            write: <S::WriteList as ComponentQuery<_, _>>::query(),
             system,
             _phantom: std::marker::PhantomData,
         }

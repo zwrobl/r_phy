@@ -47,10 +47,18 @@ mod tests {
 
 pub trait Marker: 'static + Clone + Copy + Send + Sync {}
 
+pub trait IndexedMarker: Marker {
+    const INDEX: usize;
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Here {}
 
 impl Marker for Here {}
+
+impl IndexedMarker for Here {
+    const INDEX: usize = 0;
+}
 
 pub struct There<T: Marker> {
     _phantom: PhantomData<T>,
@@ -83,6 +91,10 @@ impl<T: Marker> Clone for There<T> {
 impl<T: Marker> Copy for There<T> {}
 
 impl<T: Marker> Marker for There<T> {}
+
+impl<T: IndexedMarker> IndexedMarker for There<T> {
+    const INDEX: usize = T::INDEX + 1;
+}
 
 pub trait Contains<T, M: Marker> {
     fn get(&self) -> &T;
@@ -184,6 +196,8 @@ pub type Nil = TypedNil<()>;
 pub struct Fin<H> {
     pub head: H,
 }
+
+impl<H> NonEmptyList for Fin<H> {}
 
 impl<H> Contains<H, Here> for Fin<H> {
     #[inline]
@@ -419,14 +433,26 @@ impl<N> TypeList for TypedNil<N> {
     }
 }
 
-impl<T: 'static> TypeList for Fin<T> {
+impl<T> TypeList for Fin<T> {
     const LEN: usize = 1;
     type Item = T;
     type Next = Nil;
-    type RefList<'a> = &'a T;
-    type RefListOpt<'a> = Option<&'a T>;
-    type MutList<'a> = &'a mut T;
-    type MutListOpt<'a> = Option<&'a mut T>;
+    type RefList<'a>
+        = &'a T
+    where
+        T: 'a;
+    type RefListOpt<'a>
+        = Option<&'a T>
+    where
+        T: 'a;
+    type MutList<'a>
+        = &'a mut T
+    where
+        T: 'a;
+    type MutListOpt<'a>
+        = Option<&'a mut T>
+    where
+        T: 'a;
     type OptList = Option<T>;
 
     fn as_ref(&self) -> Self::RefList<'_> {

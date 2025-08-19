@@ -10,7 +10,7 @@ use crate::{
         ComponentListType, EntityComponentContext, EntityMutType, EntityOwnedType, EntityQueryType,
         EntityRefType, EntityType,
     },
-    entity::{Entity, EntityBuilder, EntityRef},
+    entity::{Entity, EntityBuilder, EntityRef, Query},
     index::EntityIndexTyped,
 };
 
@@ -112,7 +112,7 @@ impl<E: EntityComponentContext> Archetype<E> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            query: Default::default(),
+            query: Query::default(),
             entities: GenVec::new(),
             persistent_entity_map: PersistentIndexMap::new(),
             components: Default::default(),
@@ -136,13 +136,13 @@ impl<E: EntityComponentContext> Archetype<E> {
     }
 
     #[inline]
-    pub fn is_matching(&self, query: &EntityQueryType<E>) -> bool {
-        self.query == *query
+    pub fn is_matching(&self, query: EntityQueryType<E>) -> bool {
+        self.query.is_matching(query)
     }
 
     #[inline]
-    pub fn query(&self) -> &EntityQueryType<E> {
-        &self.query
+    pub fn query(&self) -> EntityQueryType<E> {
+        self.query
     }
 
     #[inline]

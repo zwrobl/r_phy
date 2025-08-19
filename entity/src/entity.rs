@@ -1,9 +1,16 @@
-use std::{any::TypeId, collections::HashMap, fmt::Debug, marker::PhantomData, ops::Deref};
+use std::{
+    any::TypeId,
+    collections::HashMap,
+    fmt::Debug,
+    hash::{Hash, Hasher},
+    marker::PhantomData,
+    ops::Deref,
+};
 
 use type_kit::{
-    CollectionType, Cons, Contains, Fin, GenCollectionResult, GenVec, GenVecIndex,
-    IntoSubsetIterator, MarkedIndexList, MarkedItemList, Marker, Nil, OptionalList, StaticTypeList,
-    TypeList, UCons, UContains, UnionList,
+    CollectionType, Cons, Contains, Fin, GenCollectionResult, GenVec, GenVecIndex, IndexedMarker,
+    IntoSubsetIterator, MarkedIndexList, MarkedItemList, Marker, Nil, NonEmptyList, OptionalList,
+    StaticTypeList, UCons, UContains, UnionList,
 };
 
 use crate::{
@@ -18,17 +25,16 @@ use crate::{
 pub trait Entity<C: ComponentList, M: Marker>:
     MarkedIndexList<C, M> + StaticTypeList + OptionalList + Clone + Copy + Send + Sync
 {
-    type Query: TypeList + Default + Clone + Copy + Query + Send + Sync;
     type Builder: MarkedItemList<C, M, IndexList = Self> + OptionalList + Default + Send;
     type Update: UnionList + Send;
 
-    fn is_matching(&self, query: &Self::Query) -> bool;
+    fn is_matching(&self, query: Query<C>) -> bool;
 
     fn into_builder(value: Self::Owned) -> Self::Builder;
 
-    fn query_from_owned(value: &Self::Owned) -> Self::Query;
+    fn query_from_owned(value: &Self::Owned) -> Query<C>;
 
-    fn query_from_builder(value: &Self::Builder) -> Self::Query;
+    fn query_from_builder(value: &Self::Builder) -> Query<C>;
 
     fn get_ref(self, components: &C) -> GenCollectionResult<Self::Ref<'_>> {
         <Self as MarkedIndexList<C, M>>::get_ref(self, components)
@@ -47,12 +53,11 @@ impl<T: ComponentList, M: Marker> Entity<T, M> for Nil
 where
     T: Contains<Nil, M>,
 {
-    type Query = Nil;
     type Builder = Nil;
     type Update = Nil;
 
     #[inline]
-    fn is_matching(&self, _query: &Self::Query) -> bool {
+    fn is_matching(&self, _query: Query<T>) -> bool {
         true
     }
 
@@ -62,29 +67,28 @@ where
     }
 
     #[inline]
-    fn query_from_owned(value: &Self::Owned) -> Self::Query {
-        *value
+    fn query_from_owned(_value: &Self::Owned) -> Query<T> {
+        Query::empty()
     }
 
     #[inline]
-    fn query_from_builder(value: &Self::Builder) -> Self::Query {
-        *value
+    fn query_from_builder(_value: &Self::Builder) -> Query<T> {
+        Query::empty()
     }
 }
 
-impl<C: ComponentData, T: ComponentList, M1: Marker, M2: Marker, N: Entity<T, M2>>
+impl<C: ComponentData, T: ComponentList, M1: IndexedMarker, M2: Marker, N: Entity<T, M2>>
     Entity<T, Cons<M1, M2>> for Cons<Option<GenVecIndex<C>>, N>
 where
     T: Contains<GenVec<C>, M1>,
 {
-    type Query = Cons<Expected<C>, N::Query>;
     type Builder = Cons<Option<CollectionType<C, GenVec<C>>>, N::Builder>;
     type Update = UCons<ComponentUpdate<C>, N::Update>;
 
     #[inline]
-    fn is_matching(&self, query: &Self::Query) -> bool {
-        if self.head.is_some() && query.is_expected() {
-            self.tail.is_matching(&query.tail)
+    fn is_matching(&self, query: Query<T>) -> bool {
+        if self.head.is_some() && query.has_component() {
+            self.tail.is_matching(query)
         } else {
             false
         }
@@ -100,22 +104,32 @@ where
     }
 
     #[inline]
-    fn query_from_owned(value: &Self::Owned) -> Self::Query {
+    fn query_from_owned(value: &Self::Owned) -> Query<T> {
         let Cons { head, tail } = value;
-        Cons::new(Expected::new(head.is_some()), N::query_from_owned(tail))
+        let query = N::query_from_owned(tail);
+        if head.is_some() {
+            query.with_component()
+        } else {
+            query
+        }
     }
 
     #[inline]
-    fn query_from_builder(value: &Self::Builder) -> Self::Query {
+    fn query_from_builder(value: &Self::Builder) -> Query<T> {
         let Cons { head, tail } = value;
-        Cons::new(Expected::new(head.is_some()), N::query_from_builder(tail))
+        let query = N::query_from_builder(tail);
+        if head.is_some() {
+            query.with_component()
+        } else {
+            query
+        }
     }
 }
 
-pub struct ComponentUpdater<E: EntityComponentContext, C: ComponentData, M: Marker>
+pub struct ComponentUpdater<E: EntityComponentContext, C: ComponentData, M: IndexedMarker>
 where
+    ComponentListType<E>: Contains<GenVec<C>, M>,
     EntityUpdateType<E>: UContains<ComponentUpdate<C>, M>,
-    EntityQueryType<E>: Contains<Expected<C>, M>,
     EntityOwnedType<E>: Contains<Option<C>, M>,
     EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M>,
     for<'a> EntityMutType<'a, E>: Contains<Option<&'a mut C>, M>,
@@ -123,19 +137,19 @@ where
     _phatnom: PhantomData<(C, M, E)>,
 }
 
-impl<E: EntityComponentContext, C: ComponentData, M: Marker> ComponentUpdater<E, C, M>
+impl<E: EntityComponentContext, C: ComponentData, M: IndexedMarker> ComponentUpdater<E, C, M>
 where
+    ComponentListType<E>: Contains<GenVec<C>, M>,
     EntityUpdateType<E>: UContains<ComponentUpdate<C>, M>,
-    EntityQueryType<E>: Contains<Expected<C>, M>,
     EntityOwnedType<E>: Contains<Option<C>, M>,
     EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M>,
     for<'a> EntityMutType<'a, E>: Contains<Option<&'a mut C>, M>,
 {
-    fn archetype_changed(archetype: &EntityQueryType<E>, update: &EntityUpdateType<E>) -> bool {
-        let expected = archetype.get();
+    fn archetype_changed(archetype: EntityQueryType<E>, update: &EntityUpdateType<E>) -> bool {
+        let expected = archetype.has_component();
         match unsafe { update.get() } {
-            ComponentUpdate::Update(_) => !expected.is_expected(),
-            ComponentUpdate::Remove => expected.is_expected(),
+            ComponentUpdate::Update(_) => !expected,
+            ComponentUpdate::Remove => expected,
             ComponentUpdate::Keep => false,
         }
     }
@@ -162,8 +176,7 @@ where
     }
 }
 
-type ArchetypeChangedMap<E> =
-    HashMap<TypeId, fn(&EntityQueryType<E>, &EntityUpdateType<E>) -> bool>;
+type ArchetypeChangedMap<E> = HashMap<TypeId, fn(EntityQueryType<E>, &EntityUpdateType<E>) -> bool>;
 type UpdateInPlaceMap<E> = HashMap<TypeId, fn(EntityMutType<'_, E>, EntityUpdateType<E>)>;
 type UpdateBuilderMap<E> = HashMap<TypeId, fn(&mut EntityBuilderType<E>, EntityUpdateType<E>)>;
 type UpdateOwnedMap<E> = HashMap<TypeId, fn(&mut EntityOwnedType<E>, EntityUpdateType<E>)>;
@@ -215,7 +228,7 @@ impl<E: EntityComponentContext> EntityUpdateMapper<E> {
 
     pub fn archetype_changed(
         &self,
-        archetype: &EntityQueryType<E>,
+        archetype: EntityQueryType<E>,
         update: &UpdatePayload<E>,
     ) -> bool {
         if let Some(&func) = self.archetype_changed.get(&update.component) {
@@ -261,10 +274,10 @@ impl<E: EntityComponentContext> EntityUpdateMapper<E> {
         }
     }
 
-    pub fn register<C: ComponentData, M: Marker>(&mut self)
+    pub fn register<C: ComponentData, M: IndexedMarker>(&mut self)
     where
+        ComponentListType<E>: Contains<GenVec<C>, M>,
         EntityUpdateType<E>: UContains<ComponentUpdate<C>, M>,
-        EntityQueryType<E>: Contains<Expected<C>, M>,
         EntityOwnedType<E>: Contains<Option<C>, M>,
         EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M>,
         for<'a> EntityMutType<'a, E>: Contains<Option<&'a mut C>, M>,
@@ -297,12 +310,16 @@ where
     fn write_update_map(_update_map: &mut EntityUpdateMapper<E>) {}
 }
 
-impl<E: EntityComponentContext, C: ComponentData, M1: Marker, M2: Marker, N: UpdateMapWriter<E, M2>>
-    UpdateMapWriter<E, Cons<M1, M2>> for Cons<GenVec<C>, N>
+impl<
+    E: EntityComponentContext,
+    C: ComponentData,
+    M1: IndexedMarker,
+    M2: Marker,
+    N: UpdateMapWriter<E, M2>,
+> UpdateMapWriter<E, Cons<M1, M2>> for Cons<GenVec<C>, N>
 where
     ComponentListType<E>: Contains<GenVec<C>, M1>,
     EntityUpdateType<E>: UContains<ComponentUpdate<C>, M1>,
-    EntityQueryType<E>: Contains<Expected<C>, M1>,
     EntityOwnedType<E>: Contains<Option<C>, M1>,
     EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M1>,
     for<'a> EntityMutType<'a, E>: Contains<Option<&'a mut C>, M1>,
@@ -313,147 +330,183 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct Expected<C: ComponentData> {
-    expected: bool,
-    _marker: PhantomData<C>,
+pub struct Query<E: ComponentList> {
+    component_bitmask: u128,
+    _phantom: PhantomData<E>,
 }
 
-impl<C: ComponentData> PartialEq for Expected<C> {
+impl<E: ComponentList> Default for Query<E> {
     #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.expected == other.expected
+    fn default() -> Self {
+        Self::empty()
     }
 }
 
-impl<C: ComponentData> Eq for Expected<C> {}
-
-impl<C: ComponentData> Expected<C> {
-    #[inline]
-    pub fn new(expected: bool) -> Self {
-        Self {
-            expected,
-            _marker: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub fn is_expected(&self) -> bool {
-        self.expected
-    }
-}
-
-impl<C: ComponentData> Clone for Expected<C> {
+impl<E: ComponentList> Clone for Query<E> {
     #[inline]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<C: ComponentData> Copy for Expected<C> {}
+impl<E: ComponentList> Copy for Query<E> {}
 
-impl<C: ComponentData> Default for Expected<C> {
+impl<E: ComponentList> PartialEq for Query<E> {
     #[inline]
-    fn default() -> Self {
-        Self::new(false)
+    fn eq(&self, other: &Self) -> bool {
+        self.component_bitmask == other.component_bitmask
     }
 }
 
-pub trait QueryWrite<Q: TypeList, M: Marker> {
-    fn write(query: Q) -> Q;
-}
+impl<E: ComponentList> Eq for Query<E> {}
 
-impl<Q: TypeList, M: Marker> QueryWrite<Q, M> for Nil
-where
-    Q: Contains<Nil, M>,
-{
-    fn write(query: Q) -> Q {
-        query
-    }
-}
-
-impl<C: ComponentData, Q: TypeList, M: Marker> QueryWrite<Q, M> for Fin<C>
-where
-    Q: Contains<Expected<C>, M>,
-    C: 'static,
-{
-    fn write(mut query: Q) -> Q {
-        *query.get_mut() = Expected::<C>::new(true);
-        query
-    }
-}
-
-impl<Q: TypeList, C: ComponentData, M1: Marker, M2: Marker, N: QueryWrite<Q, M2>>
-    QueryWrite<Q, Cons<M1, M2>> for Cons<C, N>
-where
-    Q: Contains<Expected<C>, M1>,
-{
-    fn write(mut query: Q) -> Q {
-        *query.get_mut() = Expected::<C>::new(true);
-        N::write(query)
-    }
-}
-
-pub trait Query: PartialEq + Eq {
-    fn is_subset(&self, other: &Self) -> bool;
-
-    fn is_empty(&self) -> bool;
-
-    fn get_union(self, other: &Self) -> Self;
-
-    fn get_intersection(self, other: &Self) -> Self;
-}
-
-impl Query for Nil {
+impl<E: ComponentList> Hash for Query<E> {
     #[inline]
-    fn is_subset(&self, _other: &Self) -> bool {
-        true
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.component_bitmask.hash(state);
+    }
+}
+
+#[cfg(test)]
+mod test_entity_query {
+    use type_kit::list_type;
+
+    use super::*;
+
+    type ComponentList = list_type![
+        GenVec<f64>,
+        GenVec<f32>,
+        GenVec<u16>,
+        GenVec<u32>,
+        GenVec<u64>,
+        GenVec<u128>,
+        Nil
+    ];
+
+    #[test]
+    fn test_query() {
+        let query =
+            Query::<ComponentList>::from_component_list::<list_type![f64, u16, u128, Nil], _>();
+        assert_eq!(query.component_bitmask, 0b100101);
+        let query = Query::<ComponentList>::from_component_list::<
+            list_type![f64, f32, u16, u32, u64, u128, Nil],
+            _,
+        >();
+        assert_eq!(query.component_bitmask, 0b111111);
+        let query = Query::<ComponentList>::from_component_list::<list_type![u128, Nil], _>();
+        assert_eq!(query.component_bitmask, 0b100000);
+        let query = Query::<ComponentList>::from_component_list::<list_type![f64, Nil], _>();
+        assert_eq!(query.component_bitmask, 0b000001);
     }
 
-    fn is_empty(&self) -> bool {
-        true
+    #[test]
+    fn test_query_using_fin() {
+        let query = Query::<ComponentList>::from_component_list::<Fin<u128>, _>();
+        assert_eq!(query.component_bitmask, 0b100000);
+        let query = Query::<ComponentList>::from_component_list::<Fin<u64>, _>();
+        assert_eq!(query.component_bitmask, 0b010000);
+        let query = Query::<ComponentList>::from_component_list::<Fin<u32>, _>();
+        assert_eq!(query.component_bitmask, 0b001000);
+        let query = Query::<ComponentList>::from_component_list::<Fin<f64>, _>();
+        assert_eq!(query.component_bitmask, 0b000001);
+    }
+}
+
+pub trait ComponentQuery<E: ComponentList, M: Marker> {
+    const COMPONENT_BITMASK: u128;
+
+    fn query() -> Query<E> {
+        Query {
+            component_bitmask: Self::COMPONENT_BITMASK,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<E: ComponentList, M: Marker> ComponentQuery<E, M> for Nil
+where
+    E: Contains<Nil, M>,
+{
+    const COMPONENT_BITMASK: u128 = 0;
+}
+
+impl<C: ComponentData, E: ComponentList, M: IndexedMarker> ComponentQuery<E, M> for Fin<C>
+where
+    E: Contains<GenVec<C>, M>,
+{
+    const COMPONENT_BITMASK: u128 = 1 << M::INDEX;
+}
+
+impl<C: ComponentData, E: ComponentList, M1: IndexedMarker, M2: Marker, N: ComponentQuery<E, M2>>
+    ComponentQuery<E, Cons<M1, M2>> for Cons<C, N>
+where
+    E: Contains<GenVec<C>, M1>,
+{
+    const COMPONENT_BITMASK: u128 = 1 << M1::INDEX | N::COMPONENT_BITMASK;
+}
+
+impl<E: ComponentList> Query<E> {
+    #[inline]
+    pub fn empty() -> Self {
+        Self {
+            component_bitmask: 0,
+            _phantom: PhantomData,
+        }
     }
 
     #[inline]
-    fn get_union(self, _other: &Self) -> Self {
+    pub fn from_component_list<L: NonEmptyList, M: Marker>() -> Self
+    where
+        L: ComponentQuery<E, M>,
+    {
+        Self {
+            component_bitmask: L::COMPONENT_BITMASK,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub fn is_matching(self, other: Self) -> bool {
+        self.component_bitmask == other.component_bitmask
+    }
+
+    #[inline]
+    pub fn is_subset(self, other: &Self) -> bool {
+        self.component_bitmask & other.component_bitmask == self.component_bitmask
+    }
+
+    #[inline]
+    pub fn is_empty(self) -> bool {
+        self.component_bitmask == 0
+    }
+
+    #[inline]
+    pub fn get_union(mut self, other: Self) -> Self {
+        self.component_bitmask |= other.component_bitmask;
         self
     }
 
-    fn get_intersection(self, _other: &Self) -> Self {
+    #[inline]
+    pub fn get_intersection(mut self, other: Self) -> Self {
+        self.component_bitmask &= other.component_bitmask;
         self
     }
-}
 
-impl<C: ComponentData, N: Query> Query for Cons<Expected<C>, N> {
     #[inline]
-    fn is_subset(&self, other: &Self) -> bool {
-        let valid = if self.head.is_expected() {
-            other.head.is_expected()
-        } else {
-            true
-        };
-        valid && self.tail.is_subset(&other.tail)
+    pub fn with_component<C: ComponentData, M: IndexedMarker>(mut self) -> Self
+    where
+        E: Contains<GenVec<C>, M>,
+    {
+        self.component_bitmask |= 1 << M::INDEX;
+        self
     }
 
     #[inline]
-    fn is_empty(&self) -> bool {
-        !self.head.is_expected() && self.tail.is_empty()
-    }
-
-    #[inline]
-    fn get_union(self, other: &Self) -> Self {
-        Cons::new(
-            Expected::new(self.is_expected() || other.head.is_expected()),
-            self.tail.get_union(&other.tail),
-        )
-    }
-
-    #[inline]
-    fn get_intersection(self, other: &Self) -> Self {
-        Cons::new(
-            Expected::new(self.is_expected() && other.head.is_expected()),
-            self.tail.get_intersection(&other.tail),
-        )
+    pub fn has_component<C: ComponentData, M: IndexedMarker>(self) -> bool
+    where
+        E: Contains<GenVec<C>, M>,
+    {
+        (self.component_bitmask & 1 << M::INDEX) != 0
     }
 }
 
@@ -485,16 +538,6 @@ impl<C: ComponentData> Default for ComponentUpdate<C> {
     #[inline]
     fn default() -> Self {
         Self::Keep
-    }
-}
-
-impl<'a, C: ComponentData> From<&'a ComponentUpdate<C>> for Expected<C> {
-    #[inline]
-    fn from(value: &'a ComponentUpdate<C>) -> Self {
-        match value {
-            ComponentUpdate::Remove => Expected::new(false),
-            _ => Expected::new(true),
-        }
     }
 }
 
@@ -586,8 +629,8 @@ impl<E: EntityComponentContext> EntityBuilder<E> {
     #[inline]
     pub fn with_component<C: ComponentData, M2: Marker>(mut self, component: C) -> Self
     where
+        ComponentListType<E>: Contains<GenVec<C>, M2>,
         EntityBuilderType<E>: Contains<Option<CollectionType<C, GenVec<C>>>, M2>,
-        EntityQueryType<E>: Contains<Expected<C>, M2>,
     {
         *self.entity_builder.get_mut() = Some(CollectionType::new(component));
         self
