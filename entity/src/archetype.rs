@@ -16,7 +16,7 @@ use crate::{
 
 pub struct ArchetypeRef<'a, E: EntityComponentContext> {
     archetype: &'a Archetype<E>,
-    index: GenVecIndex<Archetype<E>>,
+    pub index: GenVecIndex<Archetype<E>>,
 }
 
 impl<'a, E: EntityComponentContext> Deref for ArchetypeRef<'a, E> {

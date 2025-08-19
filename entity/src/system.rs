@@ -80,7 +80,7 @@ pub struct SystemExecutor<
     C: ExternalSystem,
     S: System<E>,
 > where
-    S::Components: IntoSubsetIterator<E::Components, M2>,
+    S::Components: IntoSubsetIterator<E::Components, M2> + ComponentQuery<ComponentListType<E>, M2>,
     S::External: Subset<C, M3>,
 {
     query: EntityQueryType<E>,
@@ -92,14 +92,13 @@ pub struct SystemExecutor<
 impl<E: EntityComponentContext, M2: Marker, M3: Marker, C: ExternalSystem, S: System<E>>
     SystemExecutor<E, M2, M3, C, S>
 where
-    S::Components: IntoSubsetIterator<E::Components, M2>,
+    S::Components: IntoSubsetIterator<E::Components, M2> + ComponentQuery<ComponentListType<E>, M2>,
     S::External: Subset<C, M3>,
 {
     #[inline]
-    pub fn new<M4: Marker, M5: Marker>(system: S) -> Self
+    pub fn new<M4: Marker>(system: S) -> Self
     where
-        S::Components: ComponentQuery<ComponentListType<E>, M4>,
-        S::WriteList: ComponentQuery<ComponentListType<E>, M5>,
+        S::WriteList: ComponentQuery<ComponentListType<E>, M4>,
     {
         Self {
             query: <S::Components as ComponentQuery<_, _>>::query(),
@@ -112,29 +111,24 @@ where
     #[inline]
     pub fn execute<'a, 'b>(
         &'a self,
-        archetype: ArchetypeRef<'b, E>,
         context: &E,
         operation_queue: &OperationChannel<'_, E>,
         external: &C,
     ) {
-        if self.is_matching(archetype) {
-            archetype
-                .sub_iter_entity::<_, S::Components>()
-                .for_each(|entity| {
-                    self.system.execute(
-                        entity.index.into(),
-                        entity.components,
-                        context,
-                        operation_queue,
-                        S::External::sub_get(external),
-                    );
-                });
-        }
+        context.query::<_, S::Components>().for_each(|entity| {
+            self.system.execute(
+                entity.index.into(),
+                entity.components,
+                context,
+                operation_queue,
+                S::External::sub_get(external),
+            );
+        });
     }
 
     #[inline]
     pub fn is_matching(&self, archetype: ArchetypeRef<'_, E>) -> bool {
-        self.query.is_subset(&archetype.query)
+        self.query.is_subset(archetype.query)
     }
 
     #[inline]
@@ -179,7 +173,8 @@ impl<
     N: SystemList<E, C>,
 > SystemList<E, C> for Cons<SystemExecutor<E, M2, M3, C, S>, N>
 where
-    S::Components: IntoSubsetIterator<ComponentListType<E>, M2>,
+    S::Components:
+        IntoSubsetIterator<ComponentListType<E>, M2> + ComponentQuery<ComponentListType<E>, M2>,
     S::External: Subset<C, M3>,
 {
     fn execute<'a, T: Executor<'a, E, C>>(
@@ -193,10 +188,7 @@ where
             .execute(executor, context, operation_queue.clone(), external);
 
         executor.execute(move || {
-            context.iter_ref().for_each(|archetype| {
-                self.head
-                    .execute(archetype, context, &operation_queue, external);
-            })
+            self.head.execute(context, &operation_queue, external);
         });
     }
 

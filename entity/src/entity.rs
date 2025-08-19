@@ -471,7 +471,7 @@ impl<E: ComponentList> Query<E> {
     }
 
     #[inline]
-    pub fn is_subset(self, other: &Self) -> bool {
+    pub fn is_subset(self, other: Self) -> bool {
         self.component_bitmask & other.component_bitmask == self.component_bitmask
     }
 

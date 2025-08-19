@@ -1,4 +1,8 @@
-use std::marker::PhantomData;
+use std::{
+    collections::HashMap,
+    marker::PhantomData,
+    sync::{RwLock, RwLockReadGuard},
+};
 
 use type_kit::{GenCollection, GenVec, GenVecIndex, IntoSubsetIterator, MarkedIndexList, Marker};
 
@@ -152,11 +156,10 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
         let entity = match archetype {
             Some(mut archetype) => archetype.push_entity(entity),
             None => {
-                let archetype = self.archetypes.push(Archetype::new()).unwrap();
-                self.persistent_archetype_map.register(archetype);
-                self.archetypes[archetype]
-                    .as_mut(archetype)
-                    .set_archetype(entity)
+                let index = self.archetypes.push(Archetype::new()).unwrap();
+                self.persistent_archetype_map.register(index);
+                self.query_cache.register(entity.query(), index);
+                self.archetypes[index].as_mut(index).set_archetype(entity)
             }
         };
         if let Some(persistent_index) = persistent_index {
@@ -223,10 +226,11 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
     >(
         &'a self,
     ) -> impl Iterator<Item = EntityRef<'a, Self, M2, N>> {
-        let query = N::query();
-        self.iter_ref()
-            .filter(move |archetype| query.is_subset(&archetype.query))
-            .flat_map(|archetype| archetype.sub_iter_entity())
+        let query_result = self.query_cache.get(N::query(), self);
+        query_result.into_iter().flat_map(|index| {
+            let archetype = &self.archetypes[index].as_ref(index);
+            archetype.sub_iter_entity()
+        })
     }
 
     fn try_get_entity<'a>(&'a self, index: EntityIndexTyped<Self>) -> Option<E::Ref<'a>> {
@@ -266,7 +270,69 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentContext
     }
 }
 
+pub struct QueryResult<'a, E: EntityComponentContext> {
+    _lock: RwLockReadGuard<'a, QueryMap<E>>,
+    archetypes: *const Vec<GenVecIndex<Archetype<E>>>,
+}
+
+impl<'a, E: EntityComponentContext> QueryResult<'a, E> {
+    fn into_iter(self) -> impl Iterator<Item = GenVecIndex<Archetype<E>>> {
+        unsafe { (*self.archetypes).iter().copied() }
+    }
+}
+
+pub type QueryMap<E> =
+    HashMap<Query<<E as EntityComponentContext>::Components>, Vec<GenVecIndex<Archetype<E>>>>;
+
+pub struct QueryCache<E: EntityComponentContext> {
+    queries: RwLock<QueryMap<E>>,
+}
+
+impl<E: EntityComponentContext> QueryCache<E> {
+    pub fn new() -> Self {
+        Self {
+            queries: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn register(&mut self, archetype: Query<E::Components>, index: GenVecIndex<Archetype<E>>) {
+        self.queries
+            .write()
+            .unwrap()
+            .iter_mut()
+            .for_each(|(query, archetypes)| {
+                if query.is_subset(archetype) {
+                    archetypes.push(index);
+                }
+            })
+    }
+
+    pub fn get<'a>(&'a self, query: Query<E::Components>, context: &E) -> QueryResult<'a, E> {
+        let contains = self.queries.read().unwrap().contains_key(&query);
+        if !contains {
+            let archetypes = context
+                .iter_ref()
+                .filter_map(|archetype| {
+                    if query.is_subset(archetype.query) {
+                        Some(archetype.index)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            self.queries.write().unwrap().insert(query, archetypes);
+        }
+        let lock = self.queries.read().unwrap();
+        let archetypes = lock.get(&query).unwrap() as *const _;
+        QueryResult {
+            _lock: lock,
+            archetypes,
+        }
+    }
+}
+
 pub struct EntityComponentStorage<C: ComponentList, M: Marker, E: Entity<C, M>> {
+    query_cache: QueryCache<Self>,
     archetypes: GenVec<Archetype<Self>>,
     persistent_archetype_map: PersistentIndexMap<GenVecIndex<Archetype<Self>>>,
     persistent_entity_map: PersistentIndexMap<EntityIndexTyped<Self>>,
@@ -284,6 +350,7 @@ impl<C: ComponentList, M: Marker, E: Entity<C, M>> EntityComponentStorage<C, M, 
     #[inline]
     pub fn new() -> Self {
         Self {
+            query_cache: QueryCache::new(),
             archetypes: GenVec::new(),
             persistent_archetype_map: PersistentIndexMap::new(),
             persistent_entity_map: PersistentIndexMap::new(),
