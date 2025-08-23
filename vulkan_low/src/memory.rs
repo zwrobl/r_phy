@@ -30,6 +30,17 @@ impl<T: MemoryProperties> Clone for AllocReqTyped<T> {
 
 impl<T: MemoryProperties> Copy for AllocReqTyped<T> {}
 
+impl<T: MemoryProperties> PartialEq for AllocReqTyped<T> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.requirements.alignment == other.requirements.alignment
+            && self.requirements.memory_type_bits == other.requirements.memory_type_bits
+            && self.requirements.size == other.requirements.size
+    }
+}
+
+impl<T: MemoryProperties> Eq for AllocReqTyped<T> {}
+
 impl<M: MemoryProperties> AllocReqTyped<M> {
     #[inline]
     pub fn new(requirements: vk::MemoryRequirements) -> Self {
@@ -50,7 +61,7 @@ impl<M: MemoryProperties> AllocReqTyped<M> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AllocReq {
     HostVisible(AllocReqTyped<HostVisible>),
     DeviceLocal(AllocReqTyped<DeviceLocal>),

@@ -9,16 +9,26 @@ use type_kit::{DropGuard, GuardError, TypeGuard};
 use crate::{
     error::{ExtError, SafeGuardError},
     memory::{
-        MemoryRaw,
+        AllocReq, MemoryRaw,
         allocator::{AllocationRaw, MemoryIndexRaw},
     },
 };
 
 #[derive(Debug)]
 pub enum MemoryError {
-    InvalidMemoryIndex { index: TypeGuard<MemoryIndexRaw> },
-    AllocationGuard { error: GuardError<AllocationRaw> },
-    MemoryGuard { error: SafeGuardError<MemoryRaw> },
+    InvalidMemoryIndex {
+        index: TypeGuard<MemoryIndexRaw>,
+    },
+    AllocationGuard {
+        error: GuardError<AllocationRaw>,
+    },
+    MemoryGuard {
+        error: SafeGuardError<MemoryRaw>,
+    },
+    UnexpectedAllocation {
+        actual: AllocReq,
+        expected: Option<AllocReq>,
+    },
     InvalidConfiguration,
     UnsupportedMemoryType,
     OutOfMemory,
@@ -36,6 +46,13 @@ impl Display for MemoryError {
             }
             MemoryError::MemoryGuard { error } => {
                 write!(f, "Memory type guard error: {:?}", error)
+            }
+            MemoryError::UnexpectedAllocation { actual, expected } => {
+                write!(
+                    f,
+                    "Unexpected allocation: {:?}, expected: {:?}",
+                    actual, expected
+                )
             }
             MemoryError::InvalidConfiguration => write!(f, "Invalid configuration"),
             MemoryError::UnsupportedMemoryType => write!(f, "Unsupported memory type"),

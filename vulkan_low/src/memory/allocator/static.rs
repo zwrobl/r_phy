@@ -35,9 +35,11 @@ impl Default for BufferInfo {
         }
     }
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct LinearBuffer<M: MemoryProperties> {
     memory: MemoryIndex<M>,
+    allocations: Box<[AllocReqTyped<M>]>,
+    next_allocation: usize,
 }
 
 impl<M: MemoryProperties> LinearBuffer<M> {
@@ -48,11 +50,18 @@ impl<M: MemoryProperties> LinearBuffer<M> {
     ) -> MemoryResult<AllocationIndexTyped<M>> {
         store.suballocate(req, self.memory)
     }
+
+    fn next_expected_allocation(&mut self) -> Option<AllocReqTyped<M>> {
+        let allocation = self.allocations.get(self.next_allocation)?;
+        self.next_allocation += 1;
+        Some(*allocation)
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct LinearBufferBuilder<M: MemoryProperties> {
     info: BufferInfo,
+    allocations: Vec<AllocReqTyped<M>>,
     _phantom: PhantomData<M>,
 }
 
@@ -69,7 +78,11 @@ impl<M: MemoryProperties> LinearBufferBuilder<M> {
                 ..Default::default()
             });
             let memory = storage.allocate(context, req)?;
-            Ok(Some(LinearBuffer { memory }))
+            Ok(Some(LinearBuffer {
+                memory,
+                allocations: self.allocations.into_boxed_slice(),
+                next_allocation: 0,
+            }))
         } else {
             Ok(None)
         }
@@ -80,6 +93,7 @@ impl<M: MemoryProperties> Default for LinearBufferBuilder<M> {
     fn default() -> Self {
         Self {
             info: Default::default(),
+            allocations: Vec::new(),
             _phantom: PhantomData,
         }
     }
@@ -118,6 +132,8 @@ impl StaticConfig {
         }
     }
 
+    /// For the static allocator, allocation must be made in the same order as they are pushed.
+    /// Otherwise, allocations may fail due to larger than expected memory use due to alignment requirements.
     #[inline]
     pub fn push_allocation_type<M: MemoryProperties, T: Marker>(
         &mut self,
@@ -127,11 +143,16 @@ impl StaticConfig {
         BufferBuilders: Contains<LinearBufferBuilder<M>, T>,
     {
         let requirements = req.requirements();
-        let info = &mut self.builders.get_mut::<LinearBufferBuilder<M>, _>().info;
-        info.range
+        let builder = &mut self.builders.get_mut::<LinearBufferBuilder<M>, _>();
+        builder
+            .info
+            .range
             .extend_raw(requirements.size as usize, requirements.alignment as usize);
-        info.memory_type_bits
+        builder
+            .info
+            .memory_type_bits
             .bitand_assign(requirements.memory_type_bits);
+        builder.allocations.push(req);
         self
     }
 
@@ -201,11 +222,26 @@ impl Static {
     where
         Buffers: Contains<Option<LinearBuffer<M>>, T>,
     {
-        self.buffers
+        let buffer = self
+            .buffers
             .get_mut::<Option<LinearBuffer<M>>, _>()
             .as_mut()
-            .map(|buffer| buffer.allocate(req, &mut self.store))
-            .ok_or(MemoryError::OutOfMemory)?
+            .ok_or(MemoryError::OutOfMemory)?;
+        let expected =
+            buffer
+                .next_expected_allocation()
+                .ok_or(MemoryError::UnexpectedAllocation {
+                    actual: req.into(),
+                    expected: None,
+                })?;
+        if expected == req {
+            buffer.allocate(req, &mut self.store)
+        } else {
+            Err(MemoryError::UnexpectedAllocation {
+                actual: req.into(),
+                expected: Some(expected.into()),
+            })
+        }
     }
 }
 

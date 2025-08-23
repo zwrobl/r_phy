@@ -103,8 +103,8 @@ where
 // TODO: Come up with a better way of enforcing this pattern
 impl<T: Partial> Partial for DropGuard<T> {
     #[inline]
-    fn register_memory_requirements<B: AllocatorBuilder>(&self, _builder: &mut B) {
-        self.as_ref().register_memory_requirements(_builder);
+    fn register_memory_requirements<B: AllocatorBuilder>(&self, builder: &mut B) {
+        self.as_ref().register_memory_requirements(builder);
     }
 }
 
