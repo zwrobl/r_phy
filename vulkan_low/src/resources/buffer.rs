@@ -145,6 +145,7 @@ impl<'a, M: MemoryProperties> BufferInfoBuilder<'a, M> {
 
 #[derive(Debug)]
 pub struct BufferPartial<M: MemoryProperties> {
+    size: usize,
     buffer: vk::Buffer,
     alloc_req: AllocReqTyped<M>,
 }
@@ -157,9 +158,14 @@ impl<M: MemoryProperties> Create for BufferPartial<M> {
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let info = config.build();
+        let size = info.create_info.size as usize;
         let buffer = unsafe { context.create_buffer(&info.create_info, None)? };
         let alloc_req = BindResource::new(buffer).get_alloc_req(context);
-        Ok(BufferPartial { buffer, alloc_req })
+        Ok(BufferPartial {
+            buffer,
+            alloc_req,
+            size,
+        })
     }
 }
 
@@ -260,12 +266,16 @@ impl<M: MemoryProperties> Create for Buffer<M> {
     #[inline]
     fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
         let (buffer_partial, allocator) = config;
-        let BufferPartial { buffer, alloc_req } = unsafe { buffer_partial.unwrap() };
+        let BufferPartial {
+            buffer,
+            alloc_req,
+            size,
+        } = unsafe { buffer_partial.unwrap() };
         let allocation = context.allocate(alloc_req, allocator)?;
         context.bind_memory(buffer, allocation)?;
         let buffer = Buffer {
             buffer,
-            size: alloc_req.requirements().size as usize,
+            size,
             allocation,
             ptr: None,
         };
