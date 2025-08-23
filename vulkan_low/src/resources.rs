@@ -9,6 +9,7 @@ pub mod pipeline;
 pub mod render_pass;
 pub mod storage;
 pub mod swapchain;
+pub mod sync;
 
 use std::fmt::Debug;
 

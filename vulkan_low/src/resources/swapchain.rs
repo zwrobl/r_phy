@@ -1,8 +1,8 @@
 use ash::vk;
 use std::{convert::Infallible, fmt::Debug, marker::PhantomData, ptr::NonNull};
 use type_kit::{
-    Cons, Create, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard, GenCell, GenIndexRaw,
-    TypeGuard, unpack_list,
+    Cons, Create, CreateCollection, CreateResult, Destroy, DestroyResult, DropGuard, FromGuard,
+    GenCell, GenIndexRaw, TypeGuard, unpack_list,
 };
 
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
         framebuffer::{Extent2D, FramebufferBuilder, FramebufferRaw},
         image::{Image2D, ImageView, ImageViewCreateInfo},
         render_pass::RenderPassConfig,
+        sync::Semaphore,
     },
     surface::PhysicalDeviceSurfaceProperties,
 };
@@ -30,17 +31,12 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct SwapchainImageSync {
-    draw_ready: vk::Semaphore,
-    draw_finished: vk::Semaphore,
-}
-
 pub struct SwapchainFrame<C: RenderPassConfig> {
     pub framebuffer: FramebufferHandle<C>,
     pub render_area: vk::Rect2D,
     image_index: u32,
-    image_sync: SwapchainImageSync,
+    draw_ready: Semaphore,
+    draw_finished: Semaphore,
 }
 
 struct SwapchainImage {
@@ -53,6 +49,7 @@ pub struct SwapchainRaw {
     pub num_images: usize,
     pub extent: vk::Extent2D,
     pub framebuffers: Option<NonNull<[GenIndexRaw]>>,
+    pub semaphores: Option<NonNull<[Semaphore]>>,
     images: Option<NonNull<[SwapchainImage]>>,
     handle: vk::SwapchainKHR,
 }
@@ -75,6 +72,7 @@ pub struct Swapchain<C: RenderPassConfig> {
     pub num_images: usize,
     pub extent: vk::Extent2D,
     pub framebuffers: Box<[GenIndexRaw]>,
+    pub semaphores: Box<[Semaphore]>,
     images: Box<[SwapchainImage]>,
     handle: vk::SwapchainKHR,
     _phantom: PhantomData<C>,
@@ -102,6 +100,7 @@ impl<C: RenderPassConfig> FromGuard for Swapchain<C> {
             extent: self.extent,
             framebuffers: NonNull::new(Box::leak(self.framebuffers)),
             images: NonNull::new(Box::leak(self.images)),
+            semaphores: NonNull::new(Box::leak(self.semaphores)),
             handle: self.handle,
         }
     }
@@ -113,6 +112,7 @@ impl<C: RenderPassConfig> FromGuard for Swapchain<C> {
             extent: inner.extent,
             framebuffers: unsafe { Box::from_raw(inner.framebuffers.take().unwrap().as_mut()) },
             images: unsafe { Box::from_raw(inner.images.take().unwrap().as_mut()) },
+            semaphores: unsafe { Box::from_raw(inner.semaphores.take().unwrap().as_mut()) },
             handle: inner.handle,
             _phantom: PhantomData,
         }
@@ -143,17 +143,18 @@ impl Context {
     pub fn get_frame<C: RenderPassConfig>(
         &self,
         swapchain: &Swapchain<C>,
-        image_sync: SwapchainImageSync,
+        draw_ready: Semaphore,
     ) -> ResourceResult<SwapchainFrame<C>> {
         let (image_index, _) = unsafe {
             self.get_extensions().swapchain.acquire_next_image(
                 swapchain.handle,
                 u64::MAX,
-                image_sync.draw_ready,
+                *draw_ready,
                 vk::Fence::null(),
             )?
         };
         let framebuffer = self.get_framebuffer_handle(swapchain, image_index as usize)?;
+        let draw_finished = swapchain.semaphores[image_index as usize];
         let render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: swapchain.extent,
@@ -162,7 +163,8 @@ impl Context {
             framebuffer,
             render_area,
             image_index,
-            image_sync,
+            draw_ready,
+            draw_finished,
         })
     }
 }
@@ -176,23 +178,24 @@ impl Device {
     ) -> ExtResult<()> {
         let SwapchainFrame {
             image_index,
-            image_sync,
+            draw_finished,
+            draw_ready,
             ..
         } = frame;
         unsafe {
             self.submit_command(
                 command,
                 SubmitSemaphoreState {
-                    semaphores: &[image_sync.draw_ready],
+                    semaphores: &[*draw_ready],
                     masks: &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
                 },
-                &[image_sync.draw_finished],
+                &[*draw_finished],
             )?;
             self.get_extensions().swapchain.queue_present(
                 self.device_queues.graphics,
                 &vk::PresentInfoKHR {
                     wait_semaphore_count: 1,
-                    p_wait_semaphores: [image_sync.draw_finished].as_ptr(),
+                    p_wait_semaphores: [*draw_finished].as_ptr(),
                     swapchain_count: 1,
                     p_swapchains: [swapchain.handle].as_ptr(),
                     p_image_indices: [image_index].as_ptr(),
@@ -221,36 +224,6 @@ impl Context {
             _image: image,
             view,
         })
-    }
-}
-
-impl Create for SwapchainImageSync {
-    type Config<'a> = ();
-    type CreateError = ResourceError;
-
-    fn create<'a, 'b>(_: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let create_info = vk::SemaphoreCreateInfo::default();
-        unsafe {
-            let draw_ready = context.device.create_semaphore(&create_info, None)?;
-            let draw_finished = context.device.create_semaphore(&create_info, None)?;
-            Ok(SwapchainImageSync {
-                draw_ready,
-                draw_finished,
-            })
-        }
-    }
-}
-
-impl Destroy for SwapchainImageSync {
-    type Context<'a> = &'a Context;
-    type DestroyError = Infallible;
-
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        unsafe {
-            context.destroy_semaphore(self.draw_ready, None);
-            context.destroy_semaphore(self.draw_finished, None);
-        }
-        Ok(())
     }
 }
 
@@ -361,11 +334,16 @@ impl<C: RenderPassConfig> Create for Swapchain<C> {
                     .map(|index| index.into_inner())
             })
             .collect::<Result<Box<_>, _>>()?;
+        let semaphores = (0..images.len())
+            .map(|_| ())
+            .create(context)
+            .collect::<Result<Box<_>, _>>()?;
         Ok(Swapchain {
             num_images: images.len(),
             extent,
             images,
             framebuffers,
+            semaphores,
             handle,
             _phantom: PhantomData,
         })
@@ -382,6 +360,9 @@ impl<C: RenderPassConfig> Destroy for Swapchain<C> {
         });
         self.images.iter_mut().for_each(|image| {
             let _ = image.view.destroy(context);
+        });
+        self.semaphores.iter_mut().for_each(|semaphore| {
+            let _ = semaphore.destroy(context);
         });
         unsafe {
             context
@@ -411,6 +392,12 @@ impl Destroy for SwapchainRaw {
             let mut images = unsafe { Box::from_raw(images.as_mut()) };
             images.iter_mut().for_each(|image| {
                 let _ = image.view.destroy(context);
+            })
+        };
+        if let Some(mut semaphores) = self.semaphores.take() {
+            let mut semaphores = unsafe { Box::from_raw(semaphores.as_mut()) };
+            semaphores.iter_mut().for_each(|semaphore| {
+                let _ = semaphore.destroy(context);
             })
         };
         unsafe {

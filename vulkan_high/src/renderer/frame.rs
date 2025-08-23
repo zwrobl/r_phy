@@ -24,9 +24,9 @@ use vulkan_low::{
         render_pass::RenderPassConfig,
         storage::ResourceIndexListBuilder,
         swapchain::{
-            Swapchain, SwapchainFrame, SwapchainFramebufferConfigBuilder, SwapchainImageSync,
-            SwapchainPartial,
+            Swapchain, SwapchainFrame, SwapchainFramebufferConfigBuilder, SwapchainPartial,
         },
+        sync::Semaphore,
     },
 };
 
@@ -157,7 +157,7 @@ impl<C: RenderPassConfig> Destroy for FramePoolPartial<C> {
 
 #[derive(Debug)]
 pub struct FramePool<C: RenderPassConfig> {
-    image_sync: Vec<SwapchainImageSync>,
+    semaphores: Box<[Semaphore]>,
     camera_uniform: CameraUniform,
     command_pool: ResourceIndex<PersistentCommandPool<Primary, Graphics>>,
     pub swapchain: ResourceIndex<Swapchain<C>>,
@@ -166,7 +166,7 @@ pub struct FramePool<C: RenderPassConfig> {
 impl<C: RenderPassConfig> FramePool<C> {
     #[inline]
     pub fn num_images(&self) -> usize {
-        self.image_sync.len()
+        self.semaphores.len()
     }
 }
 
@@ -188,13 +188,13 @@ impl<C: RenderPassConfig> Create for FramePool<C> {
         let num_images = swapchain_partial.num_images();
         let swapchain = context.create_resource((framebuffer_builder, swapchain_partial))?;
         let camera_uniform = CameraUniform::create((camera_partial, allocator), context)?;
-        let image_sync = (0..num_images)
+        let semaphores = (0..num_images)
             .map(|_| ())
             .create(context)
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Box<_>, _>>()?;
         let command_pool = context.create_resource(num_images)?;
         Ok(FramePool {
-            image_sync,
+            semaphores,
             camera_uniform,
             command_pool,
             swapchain,
@@ -208,7 +208,7 @@ impl<C: RenderPassConfig> Destroy for FramePool<C> {
 
     #[inline]
     fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.image_sync.iter_mut().destroy(context)?;
+        self.semaphores.iter_mut().destroy(context)?;
         self.camera_uniform.destroy(context)?;
         let _ = context.destroy_resource(self.command_pool);
         let _ = context.destroy_resource(self.swapchain);
@@ -305,7 +305,7 @@ impl<C: RenderPassConfig> FramePool<C> {
                 // this violates the Vulkan spec
                 // TODO: Try come up with a pattern that enforces correct order of operations
                 let command = context.begin_primary_command(command)?;
-                let frame = context.get_frame(swapchain, self.image_sync[index])?;
+                let frame = context.get_frame(swapchain, self.semaphores[index])?;
                 let descriptor = descriptor_pool.get(index);
                 camera_uniform[index] = *camera_matrices;
                 Result::<_, ResourceError>::Ok((command, frame, descriptor))
