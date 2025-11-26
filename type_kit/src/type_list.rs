@@ -45,12 +45,18 @@ mod tests {
     }
 }
 
+/// Marker trait for type list type position identification.
 pub trait Marker: 'static + Clone + Copy + Send + Sync {}
 
+/// Appends index value to the simple `Marker` types in which
+/// linear position in the type list is known at compile time.
+/// e.g. `Here`, There<Here>, There<There<Here>>, etc.
 pub trait IndexedMarker: Marker {
     const INDEX: usize;
 }
 
+/// Marker denoting the target position in the type list
+/// Terminates the marker chain.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Here {}
 
@@ -60,6 +66,7 @@ impl IndexedMarker for Here {
     const INDEX: usize = 0;
 }
 
+/// Marker denoting a position further in the type list.
 pub struct There<T: Marker> {
     _phantom: PhantomData<T>,
 }
@@ -96,13 +103,24 @@ impl<T: IndexedMarker> IndexedMarker for There<T> {
     const INDEX: usize = T::INDEX + 1;
 }
 
+/// Allows for retrieval of type `T` from a type-level list.
+/// `T` must be present in the the type list.
+/// `M` denotes the position of `T` type in the type list.
+/// If the `T` is unique in the scope of the type list, `M` can be inferred by the compiler.
 pub trait Contains<T, M: Marker> {
     fn get(&self) -> &T;
     fn get_mut(&mut self) -> &mut T;
 }
 
+/// `Cons` type lists can be used as complex marker types,
+/// Zipping a collection of marker types allows for more complex operations on a tye list types
+/// while requiring to state only single marker type parameter that would most of the time be aotomatically inferred by the compiler.
+/// e.g. this marker type enables operation on the subsets of type lists, defined by `Subset` trait.
 impl<M1: Marker, M2: Marker> Marker for Cons<M1, M2> {}
 
+/// Wrapper type associating a value of type `T` with a marker type `M`.
+/// Allows for storing value zipped with marker type,
+/// denoting position of its related type (e.g. container from which `T` value was retrieved) in a type list.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Marked<T, M: Marker> {
     pub value: T,
@@ -146,6 +164,12 @@ impl<T: Destroy, M: Marker> Destroy for Marked<T, M> {
     }
 }
 
+/// Type acting as zero sized terminator of a type-level list.
+/// The type parameter `T` is added so that additional properties of tyepe-level list
+/// can be defined by the user. e.g. user defined trait ListA can have
+/// blanket implementation defined for type list types which all nested types implement trait A.
+/// Having `TypedNil` be generic over `T` allows user to define custom Nil type whih would implement trait A,
+/// without affecting other type-level lists which do not require such property.
 pub struct TypedNil<T> {
     _phantom: PhantomData<T>,
 }
@@ -190,8 +214,10 @@ impl<T> TypedNil<T> {
     }
 }
 
+/// Type alias for a simple type-level list terminator.
 pub type Nil = TypedNil<()>;
 
+/// Type list terminator owning `H` type value.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Fin<H> {
     pub head: H,
@@ -243,6 +269,7 @@ impl<H: PartialEq> PartialEq for Fin<H> {
 
 impl<H: Eq> Eq for Fin<H> {}
 
+/// Type list node owning `head` of type `H` and `tail` of type `T`
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Cons<H, T> {
     pub head: H,
@@ -327,60 +354,89 @@ pub type RefListOpt<'a, T> = <T as TypeList>::RefListOpt<'a>;
 pub type MutListOpt<'a, T> = <T as TypeList>::MutListOpt<'a>;
 pub type OptList<T> = <T as TypeList>::OptList;
 
+/// Trait definiing common operation and associated types for type-level lists.
 pub trait TypeList: Sized {
+    /// Length of the type list - number of `Cons` nodes in the type list.
     const LEN: usize;
+    /// Type of the item stored in the `head` of the first `Cons` node of the type list implementing the trait.
     type Item;
+    /// Type of the `tail` of the first `Cons` node of the type list implementing the trait.
     type Next: TypeList;
+    /// Type list of borrowed references to the items in the type list.
     type RefList<'a>
     where
         Self: 'a;
+    /// Type list of optional borrowed references to the items in the type list.
     type RefListOpt<'a>
     where
         Self: 'a;
+    /// Type list of mutable references to the items in the type list.
     type MutList<'a>
     where
         Self: 'a;
+    /// Type list of optional mutable references to the items in the type list.
     type MutListOpt<'a>
     where
         Self: 'a;
+    /// Type list of optional owned items in the type list.
     type OptList;
 
+    /// Returns the length of the type list.
     #[inline]
     fn len(&self) -> usize {
         Self::LEN
     }
 
+    /// Returns `true` if the type list is empty.
     #[inline]
     fn is_empty(&self) -> bool {
         Self::LEN == 0
     }
 
+    /// Converts borrow of the type list into a list of its items borrows.
     fn as_ref(&self) -> Self::RefList<'_>;
 
+    /// Converts mutable borrow of the type list into a list of its items mutable borrows.
     fn as_mut(&mut self) -> Self::MutList<'_>;
 
+    /// Constructs a new type list by wrapping 'Self` winth a `Cons` node holding `item` as its new head.
     #[inline]
     fn append<N>(self, item: N) -> Cons<N, Self> {
         Cons::new(item, self)
     }
 
+    /// Converts borrow of the type list into a list containing a subset of its items borrows.
     #[inline]
     fn sub_ref<M: Marker, S: Subset<Self, M>>(&self) -> S::RefList<'_> {
         S::sub_get(self)
     }
 
+    /// Converts mutable borrow of the type list into a list containing a subset of its items mutable borrows.
+    /// 
     /// # Safety
-    /// User must ensure that the subset list does not contain duplicate elements.
+    /// User must ensure that the `S` subset list does not contain duplicate elements.
     /// Otherwise aliased mutable references may be created, leading to undefined behavior.
     #[inline]
     unsafe fn sub_mut<M: Marker, S: Subset<Self, M>>(&mut self) -> S::MutList<'_> {
         unsafe { S::sub_get_mut(self) }
     }
 
+    /// Attempts to unwrap a list of optional borrowed references into a list of borrowed references.
+    /// 
+    /// # Panics
+    /// Panics if any of the items in the `RefListOpt` is `None`.
     fn unwrap_ref(opt: Self::RefListOpt<'_>) -> Self::RefList<'_>;
 
+    /// Attempts to unwrap a list of optional mutable references into a list of mutable references.
+    /// 
+    /// # Panics
+    /// Panics if any of the items in the `MutListOpt` is `None`.
     fn unwrap_mut(opt: Self::MutListOpt<'_>) -> Self::MutList<'_>;
 
+    /// Attempts to unwrap a list of optional owned items into a list of owned items.
+    /// 
+    /// # Panics
+    /// Panics if any of the items in the `OptList` is `None`.
     fn unwrap_owned(opt: Self::OptList) -> Self;
 }
 
@@ -526,6 +582,7 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
 pub type ListRefType<'a, T> = <T as TypeList>::RefList<'a>;
 pub type ListMutType<'a, T> = <T as TypeList>::MutList<'a>;
 
+/// Marker trait for type list not capturing ant lifetime parameters.
 pub trait StaticTypeList: TypeList + 'static {}
 
 impl<T: TypeList + 'static> StaticTypeList for T {}
@@ -566,6 +623,21 @@ mod test_macro {
     }
 }
 
+/// Macro for convinient definition type lists types.
+/// To allow for specific termination type e.g. `TypedNil<T>` with user defined `T` type,
+/// following macro does not append `Nil` automatically.
+/// To ensure most of the library functionality is correctly derived for the list type,
+/// the last element in the list should be the terminator type. e.g. `Nil`. or `Fin<T>`.
+/// 
+/// # Example
+/// ```rust
+/// # use type_kit::{list_type, Nil, Cons};
+/// # use std::any::TypeId;
+/// type MacroTypeList = list_type![u8, u16, u32, Nil];
+/// type ExplicitTypeList = Cons<u8, Cons<u16, Cons<u32, Nil>>>;
+/// 
+/// assert_eq!(TypeId::of::<MacroTypeList>(), TypeId::of::<ExplicitTypeList>());
+/// ```
 #[macro_export]
 macro_rules! list_type {
     [$head:ty, $tail:ty] => {
@@ -576,6 +648,16 @@ macro_rules! list_type {
     };
 }
 
+/// Macro for convinient construction of type lists values.
+/// Same as `list_type!` macro, following macro does not append `Nil` automatically.
+/// 
+/// # Example
+/// ```rust
+/// # use type_kit::{list_value, Nil, Cons};
+/// let macro_list = list_value![1u8, 2u16, 3u32, Nil::new()];
+/// let explicit_list = Cons::new(1u8, Cons::new(2u16, Cons::new(3u32, Nil::new())));
+/// assert_eq!(macro_list, explicit_list);
+/// ```
 #[macro_export]
 macro_rules! list_value {
     [$head:expr, $tail:expr] => {
@@ -586,6 +668,28 @@ macro_rules! list_value {
     };
 }
 
+/// Macro for convinient unpacking of type list values into their constituent elements.
+/// 
+/// The macro generates pattern matching code for destructuring the type list,
+/// binding each element, up to the depth defined by the number of identifiers,
+/// to the corresponding identifier. Rest of the type list is discarded.
+/// 
+/// If the entire list is to be unpacked,
+/// last identifier should correspond to the last owned value in the list,
+/// and identifier for the last terminator should be omitted.
+/// 
+/// Identifiers are specified as non mutable bindings.
+/// To allow for mutable access to the unwapped elements, use `unpack_list_mut!` macro.
+/// 
+/// # Example
+/// ```rust
+/// # use type_kit::{list_value, unpack_list, Cons, Nil};
+/// let list = list_value![1u8, 2u16, 3u32, Nil::new()];
+/// let unpack_list![value_u8, value_u16, value_u32] = list;
+/// assert_eq!(value_u8, 1u8);
+/// assert_eq!(value_u16, 2u16);
+/// assert_eq!(value_u32, 3u32);
+/// ```
 #[macro_export]
 macro_rules! unpack_list {
     [$tail:ident] => {
@@ -602,6 +706,24 @@ macro_rules! unpack_list {
     };
 }
 
+/// Macro for convinient unpacking of type list values into their constituent elements.
+/// 
+/// Work similarly to `unpack_list!` macro, but generates mutable bindings for each element.
+/// 
+/// # Example
+/// ```rust
+/// # use type_kit::{list_value, unpack_list_mut, Cons, Nil, TypeList};
+/// let mut list = list_value![1u8, 2u16, 3u32, Nil::new()];
+/// let unpack_list_mut![value_u8, value_u16, value_u32] = list;
+/// 
+/// value_u8 += 1;
+/// value_u16 += 2;
+/// value_u32 += 3;
+/// 
+/// assert_eq!(value_u8, 2u8);
+/// assert_eq!(value_u16, 4u16);
+/// assert_eq!(value_u32, 6u32);
+/// ```
 #[macro_export]
 macro_rules! unpack_list_mut {
     [$tail:ident] => {
@@ -618,6 +740,21 @@ macro_rules! unpack_list_mut {
     };
 }
 
+/// Macro for convinient unpacking of type list values into their constituent elements,
+/// 
+/// Work similarly to `unpack_list!` macro,
+/// instead of matching only `Cons` nodes `head` values and discarding the tail for the last unpacked node,
+/// this macro binds the last node to last identifier, allowing to capture the entire tail of the list.
+/// 
+/// # Example
+/// ```rust
+/// # use type_kit::{list_value, unpack_any, Cons, Nil};
+/// let list = list_value![1u8, 2u16, 3u32];
+/// let unpack_any![value_u8, value_u16, value_u32] = list;
+/// assert_eq!(value_u8, 1u8);
+/// assert_eq!(value_u16, 2u16);
+/// assert_eq!(value_u32, 3u32);
+/// ```
 #[macro_export]
 macro_rules! unpack_any {
     [$tail:ident] => {
@@ -830,18 +967,26 @@ impl<T> Contains<TypedNil<T>, Here> for TypedNil<T> {
     }
 }
 
+/// Defines `Self` as a subset of type-level list `L`.
+/// Uses marker type `T`. to identify positions of subset elements in the superset list.
 pub trait Subset<L, T: Marker>: TypeList {
+    /// Convert borroww of the superset list into a list borrows for subset of its items.
     fn sub_get<'a>(superset: &'a L) -> Self::RefList<'a>;
 
+    /// Convert mutable borroww of the superset list into a list of mutable borrows for subset of its items.
+    ///
     /// # Safety
     /// User must ensure that the subset list does not contain duplicate elements.
     /// Otherwise aliased mutable references may be created, leading to undefined behavior.
     unsafe fn sub_get_mut(superset: &mut L) -> Self::MutList<'_>;
 
+    /// Updates the supseset list items with the values from the subset list.
     fn sub_write(self, superset: &mut L);
 }
 
+/// Defines `Self` as a copyable subset of type-level list `L`.
 pub trait SubsetCopy<L, T: Marker>: TypeList + Clone + Copy {
+    /// Creates a copy of the subset of items from the superset list.
     fn sub_copy(superset: &L) -> Self;
 }
 
@@ -907,12 +1052,15 @@ where
     }
 }
 
-// This trait could act as a markr trait, the methods as currently defined
-// are tehnically valid, but are not usefull in practice as the type inference
-// will not be able to infer the correct type for `L` and `T`.
-// Its use requires to explicity state te superet type in the method invocation,
-// making the syntax more complex and less ergonomic than directly using Subset methods
-// Temporary left here for future reference and potential improvements.
+/// Defines `Self` as a superset of type-level list `L`.
+/// Uses marker type `T`. to identify positions of subset elements in the superset list.
+///
+/// # Note
+/// The methods as currently defined, are technically valid, but are not useful in practice
+/// as the type inference will not be able to infer the correct type for `L` and `T`.
+/// Its use requires to explicitly state the superset type in the method invocation,
+/// making the syntax more complex and less ergonomic than directly using Subset methods
+/// Temporary left here for future reference and potential improvements, or use as a marker trait.
 pub trait Superset<L: TypeList, T: Marker> {
     fn super_get(&self) -> L::RefList<'_>;
 
@@ -1003,9 +1151,13 @@ mod test_subset {
     }
 }
 
+/// Defines boolean operations over type-level lists containing `bool` or `Option<T>` items.
 pub trait BoolList {
+    /// Returns `true` if all items in the list are `true` or `Some`.
     fn all(&self) -> bool;
+    /// Returns `true` if any item in the list is `true` or `Some`.
     fn any(&self) -> bool;
+    /// Returns `true` if no items in the list are `true` or `Some`.
     fn none(&self) -> bool;
 }
 
@@ -1077,7 +1229,9 @@ impl<C, N: BoolList> BoolList for Cons<Option<C>, N> {
     }
 }
 
+/// Defines update operation for type-level lists containing `Option<T>` items.
 pub trait OptionalList {
+    /// Updates `Self` with values from `value`, replacing only the `Some` items.
     fn update(&mut self, value: Self);
 }
 
@@ -1096,6 +1250,8 @@ impl<C: 'static, N: OptionalList> OptionalList for Cons<Option<C>, N> {
     }
 }
 
+/// Marker traits denoting that a type list is non-empty.
+/// It contains at least one `Cons` node, or is a `Fin` node.
 pub trait NonEmptyList: TypeList {}
 
 impl<C, N: NonEmptyList> NonEmptyList for Cons<C, N> {}
