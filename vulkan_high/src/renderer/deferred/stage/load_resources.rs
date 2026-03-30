@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use type_kit::{Cons, Destroy, ListMutType, Nil, Task, TypedNil, list_type, unpack_list};
+use type_kit::{Cons, Destroy, MutList, Nil, Task, TypedNil, list_type, unpack_list};
 use vulkan_low::{
     Context,
     resources::{
@@ -45,7 +45,7 @@ unsafe impl Task for LoadResources {
 
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, frame]: ListMutType<'a, Self::ResourceSet>,
+        unpack_list![context, frame]: MutList<'a, Self::ResourceSet>,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let render_pass = context
             .get_unique_resource::<RenderPass<DeferedRenderPass<AttachmentsGBuffer>>, _>()?;

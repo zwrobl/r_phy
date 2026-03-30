@@ -1,14 +1,10 @@
-use std::{
-    any::type_name,
-    convert::Infallible,
-    error::Error,
-    fmt::{Debug, Display, Formatter},
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-};
+mod marker;
+mod nodes;
 
-use crate::{Create, CreateResult, Destroy, DestroyResult};
+pub use marker::*;
+pub use nodes::*;
+
+use std::ptr::NonNull;
 
 #[cfg(test)]
 mod tests {
@@ -44,315 +40,6 @@ mod tests {
         assert_eq!(nil.len(), 0);
     }
 }
-
-/// Marker trait for type list type position identification.
-pub trait Marker: 'static + Clone + Copy + Send + Sync {}
-
-/// Appends index value to the simple `Marker` types in which
-/// linear position in the type list is known at compile time.
-/// e.g. `Here`, There<Here>, There<There<Here>>, etc.
-pub trait IndexedMarker: Marker {
-    const INDEX: usize;
-}
-
-/// Marker denoting the target position in the type list
-/// Terminates the marker chain.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Here {}
-
-impl Marker for Here {}
-
-impl IndexedMarker for Here {
-    const INDEX: usize = 0;
-}
-
-/// Marker denoting a position further in the type list.
-pub struct There<T: Marker> {
-    _phantom: PhantomData<T>,
-}
-
-impl<T: Marker> Debug for There<T> {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("There")
-            .field("T", &type_name::<T>())
-            .finish()
-    }
-}
-
-impl<T: Marker> Default for There<T> {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: Marker> Clone for There<T> {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Marker> Copy for There<T> {}
-
-impl<T: Marker> Marker for There<T> {}
-
-impl<T: IndexedMarker> IndexedMarker for There<T> {
-    const INDEX: usize = T::INDEX + 1;
-}
-
-/// Allows for retrieval of type `T` from a type-level list.
-/// `T` must be present in the the type list.
-/// `M` denotes the position of `T` type in the type list.
-/// If the `T` is unique in the scope of the type list, `M` can be inferred by the compiler.
-pub trait Contains<T, M: Marker> {
-    fn get(&self) -> &T;
-    fn get_mut(&mut self) -> &mut T;
-}
-
-/// `Cons` type lists can be used as complex marker types,
-/// Zipping a collection of marker types allows for more complex operations on a tye list types
-/// while requiring to state only single marker type parameter that would most of the time be aotomatically inferred by the compiler.
-/// e.g. this marker type enables operation on the subsets of type lists, defined by `Subset` trait.
-impl<M1: Marker, M2: Marker> Marker for Cons<M1, M2> {}
-
-/// Wrapper type associating a value of type `T` with a marker type `M`.
-/// Allows for storing value zipped with marker type,
-/// denoting position of its related type (e.g. container from which `T` value was retrieved) in a type list.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Marked<T, M: Marker> {
-    pub value: T,
-    _marker: PhantomData<M>,
-}
-
-impl<T, M: Marker> Marked<T, M> {
-    #[inline]
-    pub fn new(value: T) -> Self {
-        Self {
-            value,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T, M: Marker> Deref for Marked<T, M> {
-    type Target = T;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<T, M: Marker> DerefMut for Marked<T, M> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
-}
-
-impl<T: Destroy, M: Marker> Destroy for Marked<T, M> {
-    type Context<'a> = T::Context<'a>;
-
-    type DestroyError = T::DestroyError;
-
-    #[inline]
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.value.destroy(context)
-    }
-}
-
-/// Type acting as zero sized terminator of a type-level list.
-/// The type parameter `T` is added so that additional properties of tyepe-level list
-/// can be defined by the user. e.g. user defined trait ListA can have
-/// blanket implementation defined for type list types which all nested types implement trait A.
-/// Having `TypedNil` be generic over `T` allows user to define custom Nil type whih would implement trait A,
-/// without affecting other type-level lists which do not require such property.
-pub struct TypedNil<T> {
-    _phantom: PhantomData<T>,
-}
-
-impl<T> Debug for TypedNil<T> {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        f.debug_struct("TypedNil")
-            .field("T", &type_name::<T>())
-            .finish()
-    }
-}
-
-impl<T> Clone for TypedNil<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for TypedNil<T> {}
-
-impl<T> Default for TypedNil<T> {
-    fn default() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<T> PartialEq for TypedNil<T> {
-    #[inline]
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-
-impl<T> Eq for TypedNil<T> {}
-
-impl<T> TypedNil<T> {
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-/// Type alias for a simple type-level list terminator.
-pub type Nil = TypedNil<()>;
-
-/// Type list terminator owning `H` type value.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Fin<H> {
-    pub head: H,
-}
-
-impl<H> NonEmptyList for Fin<H> {}
-
-impl<H> Contains<H, Here> for Fin<H> {
-    #[inline]
-    fn get(&self) -> &H {
-        &self.head
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut H {
-        &mut self.head
-    }
-}
-
-impl<H> Fin<H> {
-    #[inline]
-    pub fn new(head: H) -> Self {
-        Self { head }
-    }
-}
-
-impl<H> Deref for Fin<H> {
-    type Target = H;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.head
-    }
-}
-
-impl<H> DerefMut for Fin<H> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.head
-    }
-}
-
-impl<H: PartialEq> PartialEq for Fin<H> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.head == other.head
-    }
-}
-
-impl<H: Eq> Eq for Fin<H> {}
-
-/// Type list node owning `head` of type `H` and `tail` of type `T`
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Cons<H, T> {
-    pub head: H,
-    pub tail: T,
-}
-
-impl<S, N> Contains<S, Here> for Cons<S, N> {
-    #[inline]
-    fn get(&self) -> &S {
-        &self.head
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut S {
-        &mut self.head
-    }
-}
-
-impl<O, S, T: Marker, N: Contains<S, T>> Contains<S, There<T>> for Cons<O, N> {
-    #[inline]
-    fn get(&self) -> &S {
-        self.tail.get()
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut S {
-        self.tail.get_mut()
-    }
-}
-
-impl<H, T> Cons<H, T> {
-    #[inline]
-    pub fn new(head: H, tail: T) -> Self {
-        Self { head, tail }
-    }
-
-    #[inline]
-    pub fn get<S, M: Marker>(&self) -> &S
-    where
-        Self: Contains<S, M>,
-    {
-        <Self as Contains<S, M>>::get(self)
-    }
-
-    #[inline]
-    pub fn get_mut<S, M: Marker>(&mut self) -> &mut S
-    where
-        Self: Contains<S, M>,
-    {
-        <Self as Contains<S, M>>::get_mut(self)
-    }
-}
-
-impl<H, T> Deref for Cons<H, T> {
-    type Target = H;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.head
-    }
-}
-
-impl<H, T> DerefMut for Cons<H, T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.head
-    }
-}
-
-impl<H: PartialEq, T: PartialEq> PartialEq for Cons<H, T> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.head == other.head && self.tail == other.tail
-    }
-}
-
-impl<H: Eq, T: Eq> Eq for Cons<H, T> {}
-
-pub type RefList<'a, T> = <T as TypeList>::RefList<'a>;
-pub type MutList<'a, T> = <T as TypeList>::MutList<'a>;
-pub type RefListOpt<'a, T> = <T as TypeList>::RefListOpt<'a>;
-pub type MutListOpt<'a, T> = <T as TypeList>::MutListOpt<'a>;
-pub type OptList<T> = <T as TypeList>::OptList;
 
 /// Trait definiing common operation and associated types for type-level lists.
 pub trait TypeList: Sized {
@@ -412,7 +99,7 @@ pub trait TypeList: Sized {
     }
 
     /// Converts mutable borrow of the type list into a list containing a subset of its items mutable borrows.
-    /// 
+    ///
     /// # Safety
     /// User must ensure that the `S` subset list does not contain duplicate elements.
     /// Otherwise aliased mutable references may be created, leading to undefined behavior.
@@ -422,23 +109,29 @@ pub trait TypeList: Sized {
     }
 
     /// Attempts to unwrap a list of optional borrowed references into a list of borrowed references.
-    /// 
+    ///
     /// # Panics
     /// Panics if any of the items in the `RefListOpt` is `None`.
     fn unwrap_ref(opt: Self::RefListOpt<'_>) -> Self::RefList<'_>;
 
     /// Attempts to unwrap a list of optional mutable references into a list of mutable references.
-    /// 
+    ///
     /// # Panics
     /// Panics if any of the items in the `MutListOpt` is `None`.
     fn unwrap_mut(opt: Self::MutListOpt<'_>) -> Self::MutList<'_>;
 
     /// Attempts to unwrap a list of optional owned items into a list of owned items.
-    /// 
+    ///
     /// # Panics
     /// Panics if any of the items in the `OptList` is `None`.
     fn unwrap_owned(opt: Self::OptList) -> Self;
 }
+
+pub type RefList<'a, T> = <T as TypeList>::RefList<'a>;
+pub type MutList<'a, T> = <T as TypeList>::MutList<'a>;
+pub type RefListOpt<'a, T> = <T as TypeList>::RefListOpt<'a>;
+pub type MutListOpt<'a, T> = <T as TypeList>::MutListOpt<'a>;
+pub type OptList<T> = <T as TypeList>::OptList;
 
 impl<N> TypeList for TypedNil<N> {
     const LEN: usize = 0;
@@ -462,14 +155,17 @@ impl<N> TypeList for TypedNil<N> {
         N: 'a;
     type OptList = Self;
 
+    #[inline]
     fn as_ref(&self) -> Self::RefList<'_> {
         *self
     }
 
+    #[inline]
     fn as_mut(&mut self) -> Self::MutList<'_> {
         *self
     }
 
+    #[inline]
     fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a>
     where
         N: 'a,
@@ -477,6 +173,7 @@ impl<N> TypeList for TypedNil<N> {
         opt
     }
 
+    #[inline]
     fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a>
     where
         N: 'a,
@@ -484,6 +181,7 @@ impl<N> TypeList for TypedNil<N> {
         opt
     }
 
+    #[inline]
     fn unwrap_owned(opt: Self::OptList) -> Self {
         opt
     }
@@ -511,22 +209,27 @@ impl<T> TypeList for Fin<T> {
         T: 'a;
     type OptList = Option<T>;
 
+    #[inline]
     fn as_ref(&self) -> Self::RefList<'_> {
         self
     }
 
+    #[inline]
     fn as_mut(&mut self) -> Self::MutList<'_> {
         self
     }
 
+    #[inline]
     fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a> {
         opt.unwrap()
     }
 
+    #[inline]
     fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a> {
         opt.unwrap()
     }
 
+    #[inline]
     fn unwrap_owned(opt: Self::OptList) -> Self {
         Fin::new(opt.unwrap())
     }
@@ -558,29 +261,31 @@ impl<T, N: TypeList> TypeList for Cons<T, N> {
         N: 'a;
     type OptList = Cons<Option<T>, N::OptList>;
 
+    #[inline]
     fn as_ref(&self) -> Self::RefList<'_> {
         Cons::new(&self.head, self.tail.as_ref())
     }
 
+    #[inline]
     fn as_mut(&mut self) -> Self::MutList<'_> {
         Cons::new(&mut self.head, self.tail.as_mut())
     }
 
+    #[inline]
     fn unwrap_ref<'a>(opt: Self::RefListOpt<'a>) -> Self::RefList<'a> {
         Cons::new(opt.head.unwrap(), N::unwrap_ref(opt.tail))
     }
 
+    #[inline]
     fn unwrap_mut<'a>(opt: Self::MutListOpt<'a>) -> Self::MutList<'a> {
         Cons::new(opt.head.unwrap(), N::unwrap_mut(opt.tail))
     }
 
+    #[inline]
     fn unwrap_owned(opt: Self::OptList) -> Self {
         Cons::new(opt.head.unwrap(), N::unwrap_owned(opt.tail))
     }
 }
-
-pub type ListRefType<'a, T> = <T as TypeList>::RefList<'a>;
-pub type ListMutType<'a, T> = <T as TypeList>::MutList<'a>;
 
 /// Marker trait for type list not capturing ant lifetime parameters.
 pub trait StaticTypeList: TypeList + 'static {}
@@ -628,14 +333,14 @@ mod test_macro {
 /// following macro does not append `Nil` automatically.
 /// To ensure most of the library functionality is correctly derived for the list type,
 /// the last element in the list should be the terminator type. e.g. `Nil`. or `Fin<T>`.
-/// 
+///
 /// # Example
 /// ```rust
 /// # use type_kit::{list_type, Nil, Cons};
 /// # use std::any::TypeId;
 /// type MacroTypeList = list_type![u8, u16, u32, Nil];
 /// type ExplicitTypeList = Cons<u8, Cons<u16, Cons<u32, Nil>>>;
-/// 
+///
 /// assert_eq!(TypeId::of::<MacroTypeList>(), TypeId::of::<ExplicitTypeList>());
 /// ```
 #[macro_export]
@@ -650,7 +355,7 @@ macro_rules! list_type {
 
 /// Macro for convinient construction of type lists values.
 /// Same as `list_type!` macro, following macro does not append `Nil` automatically.
-/// 
+///
 /// # Example
 /// ```rust
 /// # use type_kit::{list_value, Nil, Cons};
@@ -669,18 +374,18 @@ macro_rules! list_value {
 }
 
 /// Macro for convinient unpacking of type list values into their constituent elements.
-/// 
+///
 /// The macro generates pattern matching code for destructuring the type list,
 /// binding each element, up to the depth defined by the number of identifiers,
 /// to the corresponding identifier. Rest of the type list is discarded.
-/// 
+///
 /// If the entire list is to be unpacked,
 /// last identifier should correspond to the last owned value in the list,
 /// and identifier for the last terminator should be omitted.
-/// 
+///
 /// Identifiers are specified as non mutable bindings.
 /// To allow for mutable access to the unwapped elements, use `unpack_list_mut!` macro.
-/// 
+///
 /// # Example
 /// ```rust
 /// # use type_kit::{list_value, unpack_list, Cons, Nil};
@@ -707,19 +412,19 @@ macro_rules! unpack_list {
 }
 
 /// Macro for convinient unpacking of type list values into their constituent elements.
-/// 
+///
 /// Work similarly to `unpack_list!` macro, but generates mutable bindings for each element.
-/// 
+///
 /// # Example
 /// ```rust
 /// # use type_kit::{list_value, unpack_list_mut, Cons, Nil, TypeList};
 /// let mut list = list_value![1u8, 2u16, 3u32, Nil::new()];
 /// let unpack_list_mut![value_u8, value_u16, value_u32] = list;
-/// 
+///
 /// value_u8 += 1;
 /// value_u16 += 2;
 /// value_u32 += 3;
-/// 
+///
 /// assert_eq!(value_u8, 2u8);
 /// assert_eq!(value_u16, 4u16);
 /// assert_eq!(value_u32, 6u32);
@@ -741,11 +446,11 @@ macro_rules! unpack_list_mut {
 }
 
 /// Macro for convinient unpacking of type list values into their constituent elements,
-/// 
+///
 /// Work similarly to `unpack_list!` macro,
 /// instead of matching only `Cons` nodes `head` values and discarding the tail for the last unpacked node,
 /// this macro binds the last node to last identifier, allowing to capture the entire tail of the list.
-/// 
+///
 /// # Example
 /// ```rust
 /// # use type_kit::{list_value, unpack_any, Cons, Nil};
@@ -766,146 +471,6 @@ macro_rules! unpack_any {
             tail: unpack_any![$($tail),*]
         }
     };
-}
-
-impl<T: Create> Create for TypedNil<T> {
-    type Config<'a> = ();
-    type CreateError = Infallible;
-
-    #[inline]
-    fn create<'a, 'b>(_: Self::Config<'a>, _: Self::Context<'b>) -> CreateResult<Self> {
-        Ok(TypedNil::new())
-    }
-}
-
-impl<T: Destroy> Destroy for TypedNil<T> {
-    type Context<'a> = T::Context<'a>;
-    type DestroyError = Infallible;
-
-    #[inline]
-    fn destroy<'a>(&mut self, _: Self::Context<'a>) -> DestroyResult<Self> {
-        Ok(())
-    }
-}
-
-impl<T: Create> Create for Fin<T> {
-    type Config<'a> = T::Config<'a>;
-    type CreateError = T::CreateError;
-
-    #[inline]
-    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        Ok(Fin::new(T::create(config, context)?))
-    }
-}
-
-impl<T: Destroy> Destroy for Fin<T> {
-    type Context<'a> = T::Context<'a>;
-    type DestroyError = T::DestroyError;
-
-    #[inline]
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.head.destroy(context)
-    }
-}
-
-pub enum ConsCreateError<H: Create, T: Create> {
-    Head(H::CreateError),
-    Tail(T::CreateError),
-}
-
-impl<H: Create, T: Create> Debug for ConsCreateError<H, T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Head(arg0) => f.debug_tuple("Head").field(arg0).finish(),
-            Self::Tail(arg0) => f.debug_tuple("Tail").field(arg0).finish(),
-        }
-    }
-}
-
-impl<H: Create, T: Create> Display for ConsCreateError<H, T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Head(arg0) => write!(f, "Head({})", arg0),
-            Self::Tail(arg0) => write!(f, "Tail({})", arg0),
-        }
-    }
-}
-
-impl<H: Create, T: Create> Error for ConsCreateError<H, T> {}
-
-impl<H: Create, T: Create> Create for Cons<H, T>
-where
-    for<'a> H::Context<'a>: Clone + Copy,
-    for<'a> T: Destroy<Context<'a> = H::Context<'a>>,
-{
-    type Config<'a> = Cons<H::Config<'a>, T::Config<'a>>;
-    type CreateError = ConsCreateError<H, T>;
-
-    #[inline]
-    fn create<'a, 'b>(config: Self::Config<'a>, context: Self::Context<'b>) -> CreateResult<Self> {
-        let Cons { head, tail } = config;
-        let head = H::create(head, context).map_err(|err| ConsCreateError::Head(err))?;
-        let tail = T::create(tail, context).map_err(|err| ConsCreateError::Tail(err))?;
-        Ok(Cons::new(head, tail))
-    }
-}
-
-pub enum ConsDestroyError<H: Destroy, T: Destroy> {
-    Head(H::DestroyError),
-    Tail(T::DestroyError),
-}
-
-impl<H: Destroy, T: Destroy> Debug for ConsDestroyError<H, T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Head(arg0) => f.debug_tuple("Head").field(arg0).finish(),
-            Self::Tail(arg0) => f.debug_tuple("Tail").field(arg0).finish(),
-        }
-    }
-}
-
-impl<H: Destroy, T: Destroy> Display for ConsDestroyError<H, T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Head(arg0) => write!(f, "Head({})", arg0),
-            Self::Tail(arg0) => write!(f, "Tail({})", arg0),
-        }
-    }
-}
-
-impl<H: Destroy, T: Destroy> Error for ConsDestroyError<H, T> {}
-
-impl<H: Destroy<DestroyError = Infallible>, T: Destroy> From<ConsDestroyError<H, T>> for Infallible
-where
-    T::DestroyError: Into<Infallible>,
-{
-    #[inline]
-    fn from(err: ConsDestroyError<H, T>) -> Self {
-        unreachable!(
-            "ConsDestroyError with Infallible errors should never occur: {:?}",
-            err
-        )
-    }
-}
-
-impl<H: Destroy, T: Destroy> Destroy for Cons<H, T>
-where
-    for<'a> H::Context<'a>: Clone + Copy,
-    for<'a> T: Destroy<Context<'a> = H::Context<'a>>,
-{
-    type Context<'a> = T::Context<'a>;
-    type DestroyError = ConsDestroyError<H, T>;
-
-    #[inline]
-    fn destroy<'a>(&mut self, context: Self::Context<'a>) -> DestroyResult<Self> {
-        self.head
-            .destroy(context)
-            .map_err(|err| ConsDestroyError::Head(err))?;
-        self.tail
-            .destroy(context)
-            .map_err(|err| ConsDestroyError::Tail(err))?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -955,18 +520,6 @@ mod test_type_list_create_destroy {
     }
 }
 
-impl<T> Contains<TypedNil<T>, Here> for TypedNil<T> {
-    #[inline]
-    fn get(&self) -> &TypedNil<T> {
-        self
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut TypedNil<T> {
-        self
-    }
-}
-
 /// Defines `Self` as a subset of type-level list `L`.
 /// Uses marker type `T`. to identify positions of subset elements in the superset list.
 pub trait Subset<L, T: Marker>: TypeList {
@@ -994,10 +547,12 @@ impl<T: 'static, L, M: Marker> Subset<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
+    #[inline]
     fn sub_get(_superset: &L) -> Self::RefList<'_> {
         TypedNil::new()
     }
 
+    #[inline]
     unsafe fn sub_get_mut(_superset: &mut L) -> Self::MutList<'_> {
         TypedNil::new()
     }
@@ -1009,6 +564,7 @@ impl<T: 'static, L, M: Marker> SubsetCopy<L, M> for TypedNil<T>
 where
     L: Contains<TypedNil<T>, M>,
 {
+    #[inline]
     fn sub_copy(superset: &L) -> Self {
         *superset.get()
     }
@@ -1047,6 +603,7 @@ impl<T: 'static + Clone + Copy, L, M1: Marker, M2: Marker, N: SubsetCopy<L, M2>>
 where
     L: Contains<T, M1>,
 {
+    #[inline]
     fn sub_copy(superset: &L) -> Self {
         Cons::new(*superset.get(), N::sub_copy(superset))
     }
@@ -1074,9 +631,12 @@ impl<T, L: TypeList, M: Marker> Superset<L, M> for T
 where
     L: Subset<T, M>,
 {
+    #[inline]
     fn super_get(&self) -> L::RefList<'_> {
         L::sub_get(self)
     }
+
+    #[inline]
     unsafe fn super_get_mut(&mut self) -> L::MutList<'_> {
         unsafe { L::sub_get_mut(self) }
     }
@@ -1255,6 +815,8 @@ impl<C: 'static, N: OptionalList> OptionalList for Cons<Option<C>, N> {
 pub trait NonEmptyList: TypeList {}
 
 impl<C, N: NonEmptyList> NonEmptyList for Cons<C, N> {}
+
+impl<H> NonEmptyList for Fin<H> {}
 
 // TODO: Technically, Cons<Nil, Nil> would be marked as NonEmptyList
 impl<T, C> NonEmptyList for Cons<C, TypedNil<T>> {}

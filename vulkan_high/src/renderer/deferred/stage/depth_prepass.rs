@@ -1,8 +1,8 @@
 use std::{convert::Infallible, path::Path};
 
 use type_kit::{
-    Cons, Create, Dependency, Destroy, ListMutType, Nil, Task, TypedNil, dependency_list,
-    list_type, unpack_list,
+    Cons, Create, Dependency, Destroy, MutList, Nil, Task, TypedNil, dependency_list, list_type,
+    unpack_list,
 };
 use vulkan_low::{
     Context, index_list,
@@ -78,10 +78,7 @@ unsafe impl Task for DepthPrepass {
     #[inline]
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, command_pool, frame, draw_storage]: ListMutType<
-            'a,
-            Self::ResourceSet,
-        >,
+        unpack_list![context, command_pool, frame, draw_storage]: MutList<'a, Self::ResourceSet>,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let render_pass = context
             .get_unique_resource::<RenderPass<DeferedRenderPass<AttachmentsGBuffer>>, _>()?;

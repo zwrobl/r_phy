@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 
 use type_kit::{
-    Cons, Create, Dependency, Destroy, ListMutType, Nil, Task, TypedNil, dependency_list,
-    list_type, unpack_list,
+    Cons, Create, Dependency, Destroy, MutList, Nil, Task, TypedNil, dependency_list, list_type,
+    unpack_list,
 };
 use vulkan_low::{
     Context, index_list,
@@ -72,7 +72,7 @@ unsafe impl Task for DrawSkybox {
 
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, command_pool, frame]: ListMutType<'a, Self::ResourceSet>,
+        unpack_list![context, command_pool, frame]: MutList<'a, Self::ResourceSet>,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let common_resources = &context.common_resources();
         let render_pass = context

@@ -1,8 +1,8 @@
 use std::{convert::Infallible, path::Path};
 
 use type_kit::{
-    Cons, Create, Dependency, Destroy, ListMutType, Nil, Task, TypedNil, dependency_list,
-    list_type, unpack_list,
+    Cons, Create, Dependency, Destroy, MutList, Nil, Task, TypedNil, dependency_list, list_type,
+    unpack_list,
 };
 use vulkan_low::{
     Context, index_list,
@@ -79,7 +79,7 @@ unsafe impl Task for GBufferCombine {
 
     fn execute<'a>(
         &'a mut self,
-        unpack_list![context, frame, command_pool, shared]: ListMutType<'a, Self::ResourceSet>,
+        unpack_list![context, frame, command_pool, shared]: MutList<'a, Self::ResourceSet>,
     ) -> Result<Self::TaskResult, Self::TaskError> {
         let common_resources = &context.common_resources();
         let render_pass = context

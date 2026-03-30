@@ -1,6 +1,6 @@
 use std::{any::type_name, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 
-use crate::{Cons, Here, ListMutType, Marked, Marker, Nil, Subset, TypeList, TypedNil};
+use crate::{Cons, Here, Marked, Marker, MutList, Nil, Subset, TypeList, TypedNil};
 
 /// # Safety
 /// Task implementator is required to ensure that the ResourceSet associated type
@@ -16,7 +16,7 @@ pub unsafe trait Task: 'static {
 
     fn execute<'a>(
         &'a mut self,
-        resources: ListMutType<'a, Self::ResourceSet>,
+        resources: MutList<'a, Self::ResourceSet>,
     ) -> Result<Self::TaskResult, Self::TaskError>;
 }
 
@@ -297,7 +297,7 @@ mod test_task_list {
     use std::{convert::Infallible, error::Error, fmt::Display};
 
     use crate::{
-        Cons, Dependency, Executor, ListMutType, Nil, SynchronousExecutor, Task, TypeList,
+        Cons, Dependency, Executor, MutList, Nil, SynchronousExecutor, Task, TypeList,
         dependency_list, list_type, list_value, unpack_list,
     };
 
@@ -312,7 +312,7 @@ mod test_task_list {
 
         fn execute<'a>(
             &mut self,
-            unpack_list![a, b]: ListMutType<'a, Self::ResourceSet>,
+            unpack_list![a, b]: MutList<'a, Self::ResourceSet>,
         ) -> Result<(), Self::TaskError> {
             (1..*b).for_each(|i| a.push(i as u16));
             Ok(())
@@ -330,7 +330,7 @@ mod test_task_list {
 
         fn execute<'a>(
             &mut self,
-            unpack_list![vec_u16, sum]: ListMutType<'a, Self::ResourceSet>,
+            unpack_list![vec_u16, sum]: MutList<'a, Self::ResourceSet>,
         ) -> Result<Self::TaskResult, Self::TaskError> {
             *sum = vec_u16.iter().sum();
             Ok(())
@@ -348,7 +348,7 @@ mod test_task_list {
 
         fn execute<'a>(
             &mut self,
-            unpack_list![a, b]: ListMutType<'a, Self::ResourceSet>,
+            unpack_list![a, b]: MutList<'a, Self::ResourceSet>,
         ) -> Result<Self::TaskResult, Self::TaskError> {
             let result = format!("ComputedValue: {}", b);
             a.clear();
@@ -407,7 +407,7 @@ mod test_task_list {
 
         fn execute<'a>(
             &mut self,
-            _resources: ListMutType<'a, Self::ResourceSet>,
+            _resources: MutList<'a, Self::ResourceSet>,
         ) -> Result<Self::TaskResult, Self::TaskError> {
             Ok(())
         }
@@ -423,7 +423,7 @@ mod test_task_list {
 
         fn execute<'a>(
             &mut self,
-            _resources: ListMutType<'a, Self::ResourceSet>,
+            _resources: MutList<'a, Self::ResourceSet>,
         ) -> Result<Self::TaskResult, Self::TaskError> {
             Err(DummyError)
         }
@@ -449,7 +449,7 @@ mod test_task_list {
 
         fn execute<'a>(
             &mut self,
-            _resources: ListMutType<'a, Self::ResourceSet>,
+            _resources: MutList<'a, Self::ResourceSet>,
         ) -> Result<Self::TaskResult, Self::TaskError> {
             Ok(())
         }
