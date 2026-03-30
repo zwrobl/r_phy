@@ -7,7 +7,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{Contains, Create, CreateResult, Destroy, DestroyResult, Here, Marker, There};
+use crate::{Contains, Create, CreateResult, Destroy, DestroyResult, Marker};
 
 /// Type acting as zero sized terminator of a type-level list.
 /// The type parameter `T` is added so that additional properties of tyepe-level list
@@ -23,18 +23,6 @@ impl<T> TypedNil<T> {
     #[inline]
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-impl<T> Contains<TypedNil<T>, Here> for TypedNil<T> {
-    #[inline]
-    fn get(&self) -> &TypedNil<T> {
-        self
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut TypedNil<T> {
-        self
     }
 }
 
@@ -104,18 +92,6 @@ impl<H> Fin<H> {
     #[inline]
     pub fn new(head: H) -> Self {
         Self { head }
-    }
-}
-
-impl<H> Contains<H, Here> for Fin<H> {
-    #[inline]
-    fn get(&self) -> &H {
-        &self.head
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut H {
-        &mut self.head
     }
 }
 
@@ -191,30 +167,6 @@ impl<H, T> Cons<H, T> {
         Self: Contains<S, M>,
     {
         <Self as Contains<S, M>>::get_mut(self)
-    }
-}
-
-impl<S, N> Contains<S, Here> for Cons<S, N> {
-    #[inline]
-    fn get(&self) -> &S {
-        &self.head
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut S {
-        &mut self.head
-    }
-}
-
-impl<O, S, T: Marker, N: Contains<S, T>> Contains<S, There<T>> for Cons<O, N> {
-    #[inline]
-    fn get(&self) -> &S {
-        self.tail.get()
-    }
-
-    #[inline]
-    fn get_mut(&mut self) -> &mut S {
-        self.tail.get_mut()
     }
 }
 
